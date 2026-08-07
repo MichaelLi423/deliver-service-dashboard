@@ -1,0 +1,9 @@
+.DS_Store
+
+# Local customer source materials containing business data and PII
+/docs/合同信息表.xlsx
+/docs/项目执行表.xlsx
+/docs/工作量统计.xlsx
+/docs/供应商表.xlsx
+/docs/物流公司信息费用表.xlsx
+/docs/2026年Q3季度汇报.pptx
