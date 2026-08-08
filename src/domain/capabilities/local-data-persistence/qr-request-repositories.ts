@@ -1,0 +1,75 @@
+import type { DatabaseSync } from 'node:sqlite';
+import type { QrRequest, QrRequestTypeCode } from '../qr-request-tracking';
+import type { QrRequestRepository } from '../qr-request-tracking';
+import { mapConstraintError } from './repositories';
+
+/**
+ * qr-request-tracking SQLite 仓储（tasks 4.9 落库）。
+ * 申请记录与选中类型分表保存（qr_requests / qr_request_types），
+ * 同一条申请内类型唯一（去重），历史申请完整保留、不覆盖不删除。
+ */
+
+export class SqliteQrRequestRepository implements QrRequestRepository {
+  constructor(private readonly db: DatabaseSync) {}
+
+  findById(id: string): QrRequest | undefined {
+    const row = this.db.prepare('SELECT * FROM qr_requests WHERE id = ?').get(id) as
+      | Record<string, unknown>
+      | undefined;
+    return row ? this.assemble(row) : undefined;
+  }
+
+  save(request: QrRequest): void {
+    try {
+      this.db.exec('BEGIN');
+      this.db
+        .prepare(
+          `INSERT INTO qr_requests (
+             id, applicant, requested_at, account_id, username_snapshot, created_at
+           ) VALUES (?,?,?,?,?,?)
+        `,
+        )
+        .run(
+          request.id,
+          request.applicant,
+          request.requestedAt,
+          request.operatorAccountId,
+          request.operatorUsername,
+          request.createdAt,
+        );
+      for (const type of request.types) {
+        this.db
+          .prepare('INSERT INTO qr_request_types (id, qr_request_id, type_code) VALUES (?,?,?)')
+          .run(`${request.id}:${type}`, request.id, type);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // 回滚失败时继续抛出主错误
+      }
+      throw mapConstraintError(err, `二维码申请保存失败`);
+    }
+  }
+
+  listAll(): QrRequest[] {
+    const rows = this.db.prepare('SELECT * FROM qr_requests').all() as Record<string, unknown>[];
+    return rows.map((row) => this.assemble(row));
+  }
+
+  private assemble(row: Record<string, unknown>): QrRequest {
+    const types = this.db
+      .prepare('SELECT type_code FROM qr_request_types WHERE qr_request_id = ? ORDER BY id')
+      .all(String(row.id)) as { type_code: QrRequestTypeCode }[];
+    return {
+      id: String(row.id),
+      applicant: String(row.applicant),
+      requestedAt: String(row.requested_at),
+      types: types.map((t) => t.type_code),
+      operatorAccountId: row.account_id === null ? null : String(row.account_id),
+      operatorUsername: row.username_snapshot === null ? null : String(row.username_snapshot),
+      createdAt: String(row.created_at),
+    };
+  }
+}

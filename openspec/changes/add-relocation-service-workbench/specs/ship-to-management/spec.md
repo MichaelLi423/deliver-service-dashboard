@@ -2,7 +2,7 @@
 
 ## Purpose
 
-本能力定义搬迁目的地址（Ship-to）主数据与 Ship-to 申请的行为规则：Ship-to 是创建后不可修改的地址主数据，唯一编号沿用现有业务字段名 Account ID，并非客户主账号。系统中尚无目的 Ship-to 时，负责人按同一客户、同一新址地址创建一条 Ship-to 申请；申请只记录客户与新址地址，不关联搬迁仪器，也不保存结构化地址快照。申请创建时 Account ID 可空，由系统外完成流程返回后补入并进入已完成。申请独立采用待提交、处理中、已完成、已取消四种状态，每条申请在首次实际提交时计一次工作量，待提交草稿不计、退回重提不重复计数。目的地址变化时重新申请新的 Ship-to 而不修改原记录。搬迁批次与搬迁项目仅汇总展示所涉及的 Ship-to，不维护独立的批次级或项目级唯一地址。申请未完成仅作为独立待办展示，不阻塞搬迁项目的进单、执行、验收、掉票或完成。
+本能力定义搬迁目的地址（Ship-to）主数据与 Ship-to 申请的行为规则：Ship-to 是创建后不可修改的地址主数据，唯一编号沿用现有业务字段名 Account ID，并非客户主账号。系统中尚无目的 Ship-to 时，负责人按同一客户、同一新址地址创建一条 Ship-to 申请；申请只记录客户名称与新址地址，不关联搬迁仪器，也不保存结构化地址快照。申请创建时 Account ID 可空，由系统外完成流程返回后补入并进入已完成，补入的 Account ID 创建/对应不可变的 Ship-to。申请状态**线性流转**：待提交 → 处理中 → 已完成，不支持退回或取消（TBD-04）；每条申请在首次实际提交时计一次工作量，待提交草稿不计。目的地址变化时重新申请新的 Ship-to 而不修改原记录。搬迁批次与搬迁项目仅汇总展示所涉及的 Ship-to，不维护独立的批次级或项目级唯一地址。申请未完成仅作为独立提醒信息展示，不阻塞搬迁项目的进单、执行、验收、掉票或完成；系统不自动生成"Ship-to 申请未完成"提醒。
 
 ## ADDED Requirements
 
@@ -26,7 +26,7 @@
 
 ### Requirement: Ship-to 申请按客户与新址地址创建
 
-系统中不存在目的 Ship-to 时，负责人 SHALL 按同一客户、同一新址地址创建一条 Ship-to 申请；申请 SHALL 只记录客户与新址地址，MUST NOT 关联搬迁仪器，MUST NOT 保存结构化地址快照。客户或新址地址不同 SHALL 分别创建申请。
+系统中不存在目的 Ship-to 时，负责人 SHALL 按同一客户、同一新址地址创建一条 Ship-to 申请；申请 SHALL 只记录客户名称与新址地址，MUST NOT 关联搬迁仪器，MUST NOT 保存结构化地址快照。客户或新址地址不同 SHALL 分别创建申请。
 
 #### Scenario: 同客户同新址只创建一条申请
 
@@ -44,7 +44,7 @@
 
 ### Requirement: Account ID 创建时可空、外部完成后补入并进入已完成
 
-Ship-to 申请创建时 Account ID SHALL 可空；申请由系统外完成流程处理后，负责人 SHALL 将系统外返回的 Account ID 补入申请，补入后申请 SHALL 进入已完成并记录完成时间。申请进入已完成前 Account ID MUST NOT 为空，未补入 Account ID 的申请 SHALL NOT 进入已完成。补入的 Account ID SHALL 全局唯一，MUST NOT 与已有 Ship-to 重复。
+Ship-to 申请创建时 Account ID SHALL 可空；申请由系统外完成流程处理后，负责人 SHALL 将系统外返回的 Account ID 补入申请，补入后申请 SHALL 进入已完成并记录完成时间。申请进入已完成前 Account ID MUST NOT 为空，未补入 Account ID 的申请 SHALL NOT 进入已完成。补入的 Account ID SHALL 全局唯一，MUST NOT 与已有 Ship-to 重复；补入的 Account ID SHALL 创建/对应不可变的 Ship-to。
 
 #### Scenario: 创建申请时 Account ID 可空
 
@@ -58,7 +58,7 @@ Ship-to 申请创建时 Account ID SHALL 可空；申请由系统外完成流程
 - **GIVEN** 一条 Ship-to 申请处于处理中且系统外已完成
 - **WHEN** 负责人补入系统外返回的 Account ID
 - **THEN** 申请进入已完成并记录完成时间
-- **AND** 补入的 Account ID 与该申请产生的不可变 Ship-to 对应
+- **AND** 补入的 Account ID 创建/对应该申请产生的不可变 Ship-to
 
 #### Scenario: 补入重复 Account ID 被拒
 
@@ -67,9 +67,9 @@ Ship-to 申请创建时 Account ID SHALL 可空；申请由系统外完成流程
 - **THEN** 系统拒绝补入并提示 Account ID 已存在
 - **AND** 申请保持原状态，不进入已完成
 
-### Requirement: 申请状态与首次提交工作量
+### Requirement: 申请线性状态与首次提交工作量
 
-Ship-to 申请 SHALL 独立采用待提交、处理中、已完成、已取消四种状态；每条申请 SHALL 在首次实际提交时计一次工作量；待提交草稿 MUST NOT 计工作量，后续状态更新或退回重提 MUST NOT 重复计数。
+Ship-to 申请 SHALL 独立采用待提交、处理中、已完成三种状态，状态 SHALL 线性流转：待提交 → 处理中 → 已完成，MUST NOT 支持退回或取消（TBD-04）；每条申请 SHALL 在首次实际提交时计一次工作量；待提交草稿 MUST NOT 计工作量，后续状态更新 MUST NOT 重复计数。
 
 #### Scenario: 首次实际提交计一次工作量
 
@@ -78,12 +78,19 @@ Ship-to 申请 SHALL 独立采用待提交、处理中、已完成、已取消�
 - **THEN** 该申请计一次申请工作量
 - **AND** 从未实际提交的待提交草稿不计工作量
 
-#### Scenario: 退回重提不重复计数
+#### Scenario: 状态线性流转不支持退回或取消
 
-- **GIVEN** 一条申请已计入一次工作量且随后被退回至待提交
-- **WHEN** 负责人再次提交该申请并进入处理中
+- **GIVEN** 一条 Ship-to 申请已进入处理中
+- **WHEN** 负责人尝试将该申请退回至待提交或取消
+- **THEN** 系统不提供退回或取消操作
+- **AND** 申请只能继续流转至已完成
+
+#### Scenario: 后续状态更新不重复计数
+
+- **GIVEN** 一条申请已计入一次工作量并进入处理中
+- **WHEN** 该申请随后进入已完成
 - **THEN** 该申请的工作量不重复增加
-- **AND** 后续处理中、已完成等状态更新也不增加工作量
+- **AND** 后续状态更新也不增加工作量
 
 ### Requirement: 目的地址变化重新申请
 
@@ -116,11 +123,11 @@ Ship-to 创建后不可修改；目的地址发生变化时，负责人 SHALL �
 
 ### Requirement: 申请未完成不阻塞项目
 
-Ship-to 申请未完成时 SHALL 只显示为独立待办，且 MUST NOT 阻塞搬迁项目的进单、执行、验收、掉票或完成。
+Ship-to 申请未完成时 SHALL 只作为独立提醒信息展示，且 MUST NOT 阻塞搬迁项目的进单、执行、验收、掉票或完成；系统 SHALL NOT 自动生成"Ship-to 申请未完成"提醒。
 
 #### Scenario: 未完成申请不影响项目流转
 
 - **GIVEN** 某搬迁项目存在一条未完成的 Ship-to 申请
 - **WHEN** 该项目进行进单、执行、验收、掉票或完成流转
 - **THEN** 未完成的申请不阻塞任何项目状态流转
-- **AND** 系统仅将未完成申请显示为独立待办提醒负责人跟进
+- **AND** 系统仅将未完成申请作为独立提醒信息展示，不自动创建项目提醒

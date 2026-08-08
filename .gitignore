@@ -1,3 +1,4 @@
+# macOS
 .DS_Store
 
 # Local customer source materials containing business data and PII
@@ -7,3 +8,24 @@
 /docs/供应商表.xlsx
 /docs/物流公司信息费用表.xlsx
 /docs/2026年Q3季度汇报.pptx
+
+# Dependencies — 由后续 npm install 生成
+node_modules/
+
+# Electron Forge / electron-builder output
+out/
+dist/
+.webpack/
+
+# Test artifacts
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local user data created at runtime (never committed)
+.userData/

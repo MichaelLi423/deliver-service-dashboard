@@ -1,0 +1,60 @@
+{
+  "name": "relocation-service-workbench",
+  "productName": "搬迁服务工作台",
+  "version": "0.1.0",
+  "description": "搬迁服务工作台 - 个人使用的 Windows 桌面应用（Electron + React + TypeScript + 本地 SQLite）",
+  "main": ".webpack/main",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "publish": "electron-forge publish",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "e2e:build": "electron-forge package",
+    "verify:matrix": "node scripts/build-verification-matrix.mjs"
+  },
+  "overrides": {
+    "@electron/rebuild": "^4.1.0"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/maker-squirrel": "7.11.2",
+    "@electron-forge/maker-zip": "7.11.2",
+    "@electron-forge/plugin-auto-unpack-natives": "7.11.2",
+    "@electron-forge/plugin-webpack": "7.11.2",
+    "@playwright/test": "^1.49.0",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.4.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/node": "^24.0.0",
+    "@types/pngjs": "^6.0.5",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@types/yauzl": "^3.4.0",
+    "@vercel/webpack-asset-relocator-loader": "^1.7.3",
+    "@vitest/coverage-v8": "^3.0.0",
+    "css-loader": "^7.1.2",
+    "electron": "43.3.0",
+    "html-webpack-plugin": "^5.6.0",
+    "jsdom": "^25.0.0",
+    "node-loader": "^2.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.5.4",
+    "vitest": "^3.0.0",
+    "webpack": "^5.94.0"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "pdf-lib": "^1.17.1",
+    "pngjs": "^7.0.0",
+    "yauzl": "^3.4.0"
+  }
+}
