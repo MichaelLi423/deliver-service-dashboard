@@ -8,13 +8,12 @@
  * 渲染层语义化最小占位见 src/renderer。
  */
 
-/** 项目快速记录的十类业务动作（TBD-24 / 9.6）。 */
+/** 项目快速记录的九类业务动作（TBD-24 / 9.6）。 */
 export const QUICK_RECORD_ACTIONS = [
-  'batch', // 搬迁批次
+  'batch', // 搬迁批次（同一事务原子创建批次与唯一一笔物流费用：计划运输日期、运输公司、申请时间、合同预算价、物流成交价）
   'instrument', // 搬迁仪器
   'activity', // 上门活动
   'service_order', // 开单记录
-  'logistics_fee', // 实际物流费用
   'acceptance', // 验收报告
   'invoice', // 掉票
   'ship_to_request', // Ship-to 申请

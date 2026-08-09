@@ -87,7 +87,8 @@ export class ExecutionService {
   }
 
   /**
-   * 记录/更新批次报价：计划运输日期、运输公司与人民币原价/折后价。
+   * 记录/更新批次报价：计划运输日期、运输公司与合同预算价/物流成交价
+   * （物理字段仍为 originalPriceCents/discountedPriceCents，业务术语见 execution-types）。
    * 报价有值必须大于 0；报价阶段不作为客户侧物流收入（仅记录）。
    */
   updateBatchQuote(batchId: string, input: BatchQuoteInput, actor: ActorSnapshot): Batch {
@@ -104,13 +105,13 @@ export class ExecutionService {
     }
     if (input.originalPriceCents !== undefined) {
       if (input.originalPriceCents !== null) {
-        assertPositiveAmount(input.originalPriceCents, '人民币原价');
+        assertPositiveAmount(input.originalPriceCents, '合同预算价');
       }
       batch.originalPriceCents = input.originalPriceCents;
     }
     if (input.discountedPriceCents !== undefined) {
       if (input.discountedPriceCents !== null) {
-        assertPositiveAmount(input.discountedPriceCents, '人民币折后价');
+        assertPositiveAmount(input.discountedPriceCents, '物流成交价');
       }
       batch.discountedPriceCents = input.discountedPriceCents;
     }
@@ -394,19 +395,21 @@ export class ExecutionService {
   // ---- 3.7 实际物流费用记录 ----
 
   /**
-   * 登记实际物流费用：每批次仅一笔；申请（登记）时间必填默认当天、首次登记决定
-   * 归属月份；预算/成交/实际三项均必填、人民币且 > 0；成交 > 预算仅警告。
+   * 登记物流费用：每批次仅一笔；申请（登记）时间必填默认当天、首次登记决定
+   * 归属月份；合同预算价与物流成交价必填、人民币且 > 0（物流成交价即最终实际费用，
+   * logisticsCostCents 旧列现行业务与物流成交价同值，仅历史兼容）；
+   * 物流成交价 > 合同预算价仅警告。
    */
   recordLogisticsFee(batchId: string, input: LogisticsFeeInput, actor: ActorSnapshot): LogisticsFeeResult {
     this.requireBatch(batchId);
     if (this.fees.findByBatchId(batchId)) {
-      throw new ValidationError('FEE_ALREADY_EXISTS', '该批次已登记一笔实际物流费用，每批次仅允许一笔');
+      throw new ValidationError('FEE_ALREADY_EXISTS', '该批次已登记一笔物流费用，每批次仅允许一笔');
     }
     const appliedAt = input.appliedAt === undefined ? this.now() : input.appliedAt;
     assertValidIso(appliedAt, '物流费用申请（登记）时间');
-    assertPositiveAmount(input.budgetPriceCents, '预算价格');
-    assertPositiveAmount(input.dealPriceCents, '成交价格');
-    assertPositiveAmount(input.logisticsCostCents, '实际物流费用');
+    assertPositiveAmount(input.budgetPriceCents, '合同预算价');
+    assertPositiveAmount(input.dealPriceCents, '物流成交价');
+    assertPositiveAmount(input.logisticsCostCents, '实际物流费用（历史兼容，现行业务与物流成交价同值）');
     const now = this.now();
     const fee: LogisticsFee = {
       id: newInternalId(),
@@ -426,12 +429,13 @@ export class ExecutionService {
 
   /**
    * 修改物流费用金额：不改变申请（登记）时间与归属月份（TBD-14）。
+   * logisticsCostCents 旧列为历史兼容，现行业务与 dealPriceCents 同值。
    */
   updateLogisticsFee(feeId: string, input: LogisticsFeeInput, actor: ActorSnapshot): LogisticsFeeResult {
     const fee = this.requireFee(feeId);
-    assertPositiveAmount(input.budgetPriceCents, '预算价格');
-    assertPositiveAmount(input.dealPriceCents, '成交价格');
-    assertPositiveAmount(input.logisticsCostCents, '实际物流费用');
+    assertPositiveAmount(input.budgetPriceCents, '合同预算价');
+    assertPositiveAmount(input.dealPriceCents, '物流成交价');
+    assertPositiveAmount(input.logisticsCostCents, '实际物流费用（历史兼容，现行业务与物流成交价同值）');
     // 申请（登记）时间保持不变：appliedAt 不在此更新
     fee.budgetPriceCents = input.budgetPriceCents;
     fee.dealPriceCents = input.dealPriceCents;
@@ -443,7 +447,10 @@ export class ExecutionService {
     return { fee, warning: this.dealOverBudgetWarning(fee) };
   }
 
-  /** 展示成交价格与实际物流费用的差异（可为负，分整数）。 */
+  /**
+   * @deprecated 历史兼容：现行业务「物流成交价即最终实际费用」，logisticsCostCents 与
+   * dealPriceCents 恒同值，本差异恒为 0；仅对历史三口径数据保留计算，不破坏调用方。
+   */
   getLogisticsFeeDifference(fee: LogisticsFee): bigint {
     return fee.dealPriceCents - fee.logisticsCostCents;
   }
@@ -500,7 +507,7 @@ export class ExecutionService {
 
   private dealOverBudgetWarning(fee: LogisticsFee): string | null {
     if (fee.dealPriceCents > fee.budgetPriceCents) {
-      return '成交价格大于预算价格，已允许保存（不自动创建项目提醒）';
+      return '物流成交价大于合同预算价，已允许保存（不自动创建项目提醒）';
     }
     return null;
   }
@@ -508,6 +515,7 @@ export class ExecutionService {
   private now(): string {
     return this.clock.nowIso();
   }
+
 }
 
 function assertPositiveAmount(cents: bigint | null | undefined, fieldName: string): asserts cents is bigint {
