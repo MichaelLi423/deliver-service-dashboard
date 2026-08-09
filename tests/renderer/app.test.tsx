@@ -187,6 +187,22 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('新建搬迁项目分步向导：第一步输入不得残留到第二步同位置字段', async () => {
+    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
+    const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
+    fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '残留演示客户' } });
+    fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: '华东' } });
+    fireEvent.change(within(dialog).getByLabelText(/合同 USD 含税金额/), { target: { value: '12345' } });
+    fireEvent.change(within(dialog).getByLabelText(/合同开始日期/), { target: { value: '2026-08-01' } });
+    fireEvent.change(within(dialog).getByLabelText(/合同截止日期/), { target: { value: '2027-08-01' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '下一步' }));
+    expect(within(dialog).getByLabelText(/旧址地址/)).toHaveValue('');
+    expect(within(dialog).getByLabelText(/新址地址/)).toHaveValue('');
+    expect(within(dialog).getByLabelText(/仪器名称/)).toHaveValue('');
+    expect(within(dialog).getByLabelText(/型号/)).toHaveValue('');
+  });
+
   it('快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单', async () => {
     render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
     const labels = ['搬迁批次', '搬迁仪器', '上门活动', '开单记录', '实际物流费用', '验收报告', '掉票', 'Ship-to 申请', '损坏/维修事项', '补齐进单核心资料'];

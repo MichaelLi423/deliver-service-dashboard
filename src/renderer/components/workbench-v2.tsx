@@ -2571,7 +2571,7 @@ function ProjectCreateForm({
           ),
         )}
       </div>
-      <div className="form-grid">
+      <div className="form-grid" key={step}>
         {step === 1 ? (
           <>
             <Field
