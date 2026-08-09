@@ -15,6 +15,7 @@ import {
   type IpcHandlerDeps,
 } from '../../src/main/ipc-handlers';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
+import { establishLocalSession } from '../helpers/establish-session';
 import type { ImportWizardFacade } from '../../src/main/import-wizard-facade';
 
 /** 未配置的导入向导 facade 桩（本测试只验证非导入通道；导入通道在独立测试覆盖）。 */
@@ -104,6 +105,11 @@ function makeContext(dir: string) {
   };
 }
 
+/** 无密码模式：经账号服务确保本地账号并写入会话（主进程启动/恢复同款接线）。 */
+async function establishSession(ctx: ReturnType<typeof makeContext>): Promise<AccountSessionInfo> {
+  return establishLocalSession(ctx.deps.accountService, ctx.deps.setSession);
+}
+
 /** 需登录的 v2/业务通道清单：未登录时全部应拒绝（除账号初始化/登录/恢复/状态查询）。 */
 const SESSION_REQUIRED_CHANNELS: IpcChannel[] = [
   IPC_CHANNELS.workbenchV2Overview,
@@ -159,16 +165,12 @@ describe('IPC handler 安全边界（未登录/非受信主窗口一律拒绝）
     await expect(ctx.bus.invoke(IPC_CHANNELS.workbenchV2Overview, 999)).rejects.toThrow(/受信主窗口/);
   });
 
-  it('登录后仍拒绝非受信主窗口调用', async () => {
+  it('建立会话后仍拒绝非受信主窗口调用', async () => {
     const dir = makeTempDir('ipc-guard-');
     dirs.push(dir);
     const ctx = makeContext(dir);
     registerIpcHandlers(ctx.bus, ctx.deps);
-    await new LocalAccountService(new SqliteAccountRepository(ctx.deps.db())).initialize({
-      username: '负责人',
-      password: 'password1',
-    });
-    await ctx.bus.invoke(IPC_CHANNELS.accountLogin, 100, '负责人', 'password1');
+    await establishSession(ctx);
 
     // 受信 sender id=100 正常
     await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Overview, 100);
@@ -179,7 +181,7 @@ describe('IPC handler 安全边界（未登录/非受信主窗口一律拒绝）
     await expect(ctx.bus.invoke(IPC_CHANNELS.workbenchV2Overview, 100)).rejects.toThrow(/受信主窗口/);
   });
 
-  it('账号初始化/登录/状态查询不要求会话，且自动备份失败状态传到访问门', async () => {
+  it('账号状态/会话查询不要求会话；会话由主进程自动建立，且自动备份失败状态传到工作台', async () => {
     const dir = makeTempDir('ipc-guard-');
     dirs.push(dir);
     const ctx = makeContext(dir);
@@ -189,10 +191,15 @@ describe('IPC handler 安全边界（未登录/非受信主窗口一律拒绝）
       initialized: false,
       autoBackupError: '磁盘空间不足，自动备份失败',
     });
-    const initialized = await ctx.bus.invoke(IPC_CHANNELS.accountInitialize, 100, '负责人', 'password1');
-    expect(initialized).toMatchObject({ username: '负责人', recoveryCode: expect.any(String) });
-    expect(ctx.session()).toMatchObject({ username: '负责人' });
+    // 无密码模式：主进程启动/恢复时经 ensureLocalSession 自动建号并写入会话。
+    const session = await establishSession(ctx);
+    expect(session.username).toBe('本地用户');
+    expect(ctx.session()).toMatchObject({ username: '本地用户' });
     expect(await ctx.bus.invoke(IPC_CHANNELS.accountGetSession, 100)).toEqual(ctx.session());
+    expect(await ctx.bus.invoke(IPC_CHANNELS.accountGetStatus, 100)).toEqual({
+      initialized: true,
+      autoBackupError: '磁盘空间不足，自动备份失败',
+    });
   });
 });
 
@@ -207,7 +214,7 @@ describe('金额 IPC 边界（十进制字符串 → 主进程 Money 精确解�
     dirs.push(dir);
     const ctx = makeContext(dir);
     registerIpcHandlers(ctx.bus, ctx.deps);
-    await ctx.bus.invoke(IPC_CHANNELS.accountInitialize, 100, '负责人', 'password1');
+    await establishSession(ctx);
     return ctx.bus;
   }
 
@@ -308,7 +315,7 @@ describe('取消项目命令（v2 adjust_status 拒绝 cancelled；cancel_projec
     dirs.push(dir);
     const ctx = makeContext(dir);
     registerIpcHandlers(ctx.bus, ctx.deps);
-    await ctx.bus.invoke(IPC_CHANNELS.accountInitialize, 100, '负责人', 'password1');
+    await establishSession(ctx);
     const created = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'create_project',
       payload: PROJECT_PAYLOAD({ customerName: '取消客户', ecc: 'ECC-CANCEL-IPC', region: '西南' }),
@@ -375,7 +382,7 @@ describe('Ship-to 申请命令（按 requestId 线性推进、去重、工作量
     dirs.push(dir);
     const ctx = makeContext(dir);
     registerIpcHandlers(ctx.bus, ctx.deps);
-    await ctx.bus.invoke(IPC_CHANNELS.accountInitialize, 100, '负责人', 'password1');
+    await establishSession(ctx);
     return ctx.bus;
   }
 
@@ -439,7 +446,7 @@ describe('掉票编辑/撤销（v2 invoice_edit / invoice_revoke）', () => {
     dirs.push(dir);
     const ctx = makeContext(dir);
     registerIpcHandlers(ctx.bus, ctx.deps);
-    await ctx.bus.invoke(IPC_CHANNELS.accountInitialize, 100, '负责人', 'password1');
+    await establishSession(ctx);
     // 正式进单 + 实际装机完成 + 验收 → 待掉票
     const created = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'create_project',
@@ -528,18 +535,45 @@ describe('掉票编辑/撤销（v2 invoice_edit / invoice_revoke）', () => {
   });
 });
 
-describe('手动备份/恢复（主进程 file dialog；恢复成功清空会话强制重登）', () => {
+describe('手动备份/恢复（主进程 file dialog；恢复成功后自动恢复本地会话）', () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const dir of dirs.splice(0)) cleanupTempDir(dir);
   });
 
-  it('恢复成功后 session 被清空（强制重新登录）；取消对话框不触碰会话', async () => {
+  async function restoreFromPath(ctx: ReturnType<typeof makeContext>, backupPath: string): Promise<{
+    canceled: boolean;
+    restored: boolean;
+  }> {
+    (ctx.deps.showOpenDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      canceled: false,
+      filePaths: [backupPath],
+    });
+    return (await ctx.bus.invoke(IPC_CHANNELS.restoreFromBackup, 100)) as {
+      canceled: boolean;
+      restored: boolean;
+    };
+  }
+
+  async function makeBackup(
+    dataDir: string,
+    seed: (db: import('node:sqlite').DatabaseSync) => Promise<void> = async () => undefined,
+  ): Promise<string> {
+    const backupSrc = bootstrapDatabase({ dataDir });
+    await seed(backupSrc.db);
+    const path = await createManualBackup(backupSrc.db, join(dataDir, 'backups'), {
+      clock: new SystemClock(),
+    });
+    closeDatabase(backupSrc.db);
+    return path;
+  }
+
+  it('恢复成功后自动取得/确保本地账号并恢复会话（空账号库自动建「本地用户」）；取消对话框不触碰会话', async () => {
     const dir = makeTempDir('ipc-restore-');
     dirs.push(dir);
     const ctx = makeContext(dir);
     registerIpcHandlers(ctx.bus, ctx.deps);
-    await ctx.bus.invoke(IPC_CHANNELS.accountInitialize, 100, '负责人', 'password1');
+    await establishSession(ctx);
     expect(ctx.session()).not.toBeNull();
 
     // 取消文件选择 → 会话保留
@@ -547,23 +581,35 @@ describe('手动备份/恢复（主进程 file dialog；恢复成功清空会话
     expect(await ctx.bus.invoke(IPC_CHANNELS.restoreFromBackup, 100)).toEqual({ canceled: true });
     expect(ctx.session()).not.toBeNull();
 
-    // 准备一份真实备份文件
-    const backupSrcDir = makeTempDir('ipc-restore-src-');
-    dirs.push(backupSrcDir);
-    const backupSrc = bootstrapDatabase({ dataDir: backupSrcDir });
-    const backupPath = await createManualBackup(backupSrc.db, join(backupSrcDir, 'backups'), {
-      clock: new SystemClock(),
-    });
-    closeDatabase(backupSrc.db);
-
-    // 选中备份 → 真实恢复成功 → 会话清空
-    (ctx.deps.showOpenDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      canceled: false,
-      filePaths: [backupPath],
-    });
-    const result = (await ctx.bus.invoke(IPC_CHANNELS.restoreFromBackup, 100)) as { canceled: boolean; restored: boolean };
+    // 备份源为全新数据库（无账号行）→ 恢复后自动建「本地用户」并恢复会话
+    const backupPath = await makeBackup(makeTempDir('ipc-restore-src-'));
+    const result = await restoreFromPath(ctx, backupPath);
     expect(result).toEqual({ canceled: false, restored: true });
-    expect(ctx.session()).toBeNull();
+    // 无密码模式：不再踢到登录页，恢复后会话自动建立
+    expect(ctx.session()).not.toBeNull();
+    expect(ctx.session()!.username).toBe('本地用户');
+  });
+
+  it('恢复含已有账号的备份：会话沿用原 username（既有账号不删除不迁移）', async () => {
+    const dir = makeTempDir('ipc-restore-account-');
+    dirs.push(dir);
+    const ctx = makeContext(dir);
+    registerIpcHandlers(ctx.bus, ctx.deps);
+    await establishSession(ctx);
+    expect(ctx.session()!.username).toBe('本地用户');
+
+    const backupSrcDir = makeTempDir('ipc-restore-account-src-');
+    const backupPath = await makeBackup(backupSrcDir, async (db) => {
+      await new LocalAccountService(new SqliteAccountRepository(db)).initialize({
+        username: '负责人',
+        password: 'password1',
+      });
+    });
+
+    const result = await restoreFromPath(ctx, backupPath);
+    expect(result).toEqual({ canceled: false, restored: true });
+    // 恢复后的账号为「负责人」，会话自动沿用该 username
+    expect(ctx.session()!.username).toBe('负责人');
   });
 
   it('手动备份成功返回文件路径；未登录时 backup/restore 均被拒绝', async () => {
@@ -576,7 +622,7 @@ describe('手动备份/恢复（主进程 file dialog；恢复成功清空会话
     await expect(ctx.bus.invoke(IPC_CHANNELS.backupManual, 100)).rejects.toThrow(/登录状态已失效/);
     await expect(ctx.bus.invoke(IPC_CHANNELS.restoreFromBackup, 100)).rejects.toThrow(/登录状态已失效/);
 
-    await ctx.bus.invoke(IPC_CHANNELS.accountInitialize, 100, '负责人', 'password1');
+    await establishSession(ctx);
     const targetDir = join(dir, 'manual-backups');
     (ctx.deps.showOpenDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       canceled: false,

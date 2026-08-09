@@ -185,11 +185,12 @@ type LayerState =
 export function WorkbenchV2({
   session,
   autoBackupError,
-  onSessionExpired,
+  onSessionRestored,
 }: {
   session: AccountSessionInfo;
   autoBackupError?: string;
-  onSessionExpired: () => void;
+  /** 恢复备份后主进程可能改用不同账号（如备份中的既有账号），回调同步会话展示。 */
+  onSessionRestored?: (session: AccountSessionInfo) => void;
 }): JSX.Element {
   const [overview, setOverview] = useState<WorkbenchV2OverviewDto | null>(null);
   const [projectPage, setProjectPage] =
@@ -526,13 +527,27 @@ export function WorkbenchV2({
     }
   }
   async function runRestore(): Promise<void> {
-    if (!window.confirm("恢复备份会替换当前本地数据并要求重新登录。是否继续？"))
+    if (!window.confirm("恢复备份会用备份文件替换当前本地数据。是否继续？"))
       return;
     try {
       const api = bridge();
       if (!api) throw new Error("当前环境未连接主进程");
       const result = await api.restoreFromBackup();
-      if (result.restored) onSessionExpired();
+      if (result.restored) {
+        // 无密码模式：主进程恢复后已重新取得/确保本地账号并恢复会话。
+        const refreshed = await api.getSession();
+        if (refreshed) onSessionRestored?.(refreshed);
+        // 直接重读工作台数据（恢复的库 revision 可能更低，先重置修订水位）。
+        revision.current = 0;
+        setCursorStack([null]);
+        setDetail(null);
+        setSectionPage(null);
+        setSectionCursors([null]);
+        setTab("项目总览");
+        setToast("备份已恢复，数据已重新加载");
+        window.setTimeout(() => setToast(""), 2800);
+        void Promise.all([loadOverview(), loadProjects(null, 0)]);
+      }
     } catch (cause) {
       setError(messageOf(cause));
     }

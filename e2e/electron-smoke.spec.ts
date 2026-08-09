@@ -19,8 +19,8 @@ import {
  *
  * 说明（诚实边界）：
  * - 本组测试在 macOS 开发机、以临时 userData 目录运行真实打包后的 Electron 应用，
- *   全程操作真实 UI（初始化/登录/恢复码/四步向导/快速记录/提醒/主状态/报表），
- *   不通过 IPC 或领域服务绕过界面。
+ *   全程操作真实 UI（无密码个人模式：启动直接进入工作台，无初始化/登录/恢复码；
+ *   随后四步向导/快速记录/提醒/主状态/报表），不通过 IPC 或领域服务绕过界面。
  * - 它验证的是 macOS 开发机上的可运行性；不冒充 Windows 验证。
  *   Windows 打包安装、Windows 操作系统账户保护等仍为待验证状态（见
  *   docs/verification/scenario-test-matrix.md 与 tasks.md 10.4/10.5 备注）。
@@ -55,29 +55,25 @@ async function mainWindow(app: ElectronApplication): Promise<Page> {
   return window;
 }
 
+async function expectWorkbench(window: Page): Promise<void> {
+  await expect(window.getByRole('heading', { name: '先处理提醒，再连续推进项目' })).toBeVisible();
+  // 无密码个人模式：不得出现任何初始化/登录/恢复码界面
+  await expect(window.getByRole('heading', { name: '首次使用初始化' })).toHaveCount(0);
+  await expect(window.getByRole('heading', { name: '登录本地工作台' })).toHaveCount(0);
+}
+
 // 打包产物缺失时跳过（macOS 开发机验收产物未构建），并提示构建命令。
 test.skip(!existsSync(APP_EXECUTABLE), '未找到 electron-forge 打包产物，请先执行 npm run e2e:build');
 
-test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData）', () => {
-  test('初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻', async () => {
+test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData · 无密码个人模式）', () => {
+  test('空数据库启动直接进入工作台 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻', async () => {
     const userDataDir = makeUserDataDir();
-    let recoveryCode = '';
     const app = await launchApp(userDataDir);
     try {
       const window = await mainWindow(app);
 
-      // —— 访问门：首次启动初始化 ——
-      await expect(window.getByRole('heading', { name: '首次使用初始化' })).toBeVisible();
-      await window.getByLabel('用户名').fill('E2E负责人');
-      await window.getByLabel('密码', { exact: false }).fill('e2e-password-1');
-      await window.getByRole('button', { name: '创建账号并继续' }).click();
-
-      // —— 恢复码仅展示一次 ——
-      await expect(window.getByRole('heading', { name: '离线保存恢复码' })).toBeVisible();
-      recoveryCode = (await window.getByLabel('一次性恢复码').innerText()).trim();
-      expect(recoveryCode).toMatch(/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/);
-      await window.getByRole('button', { name: '我已离线保存' }).click();
-      await expect(window.getByRole('heading', { name: '先处理提醒，再连续推进项目' })).toBeVisible();
+      // —— 无密码个人模式：空数据库自动建「本地用户」并直接进入工作台 ——
+      await expectWorkbench(window);
 
       // —— 四步新建搬迁项目向导：正式进单 ——
       await window.getByRole('button', { name: '新建搬迁项目' }).click();
@@ -190,62 +186,23 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData）'
     } finally {
       await app.close();
       previousUserDataDir = userDataDir;
-      previousRecoveryCode = recoveryCode;
     }
   });
 
-  test('关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录', async () => {
+  test('关闭并重开应用：无密码模式直接进入工作台，已有账号与数据保留', async () => {
     // 上一用例产物目录（顺序执行，fullyParallel=false）
     test.skip(previousUserDataDir === null, '需要先运行初始化用例以得到临时 userData 目录');
     const userDataDir = previousUserDataDir!;
 
-    // —— 第 1 次重开：登录保留数据 ——
-    {
-      const app = await launchApp(userDataDir);
-      try {
-        const window = await mainWindow(app);
-        // 后续启动展示登录界面（访问门）
-        await expect(window.getByRole('heading', { name: '登录本地工作台' })).toBeVisible();
-        await window.getByLabel('用户名').fill('E2E负责人');
-        await window.getByLabel('密码', { exact: false }).fill('e2e-password-1');
-        await window.getByRole('button', { name: '登录工作台' }).click();
-        await expect(window.getByRole('heading', { name: '先处理提醒，再连续推进项目' })).toBeVisible();
-        await expect(window.getByText('E2E-2026-0001').first()).toBeVisible();
-      } finally {
-        await app.close();
-      }
-    }
-
-    // —— 第 2 次重开：忘记密码 → 恢复码重置 → 新密码登录 ——
-    {
-      const app = await launchApp(userDataDir);
-      try {
-        const window = await mainWindow(app);
-        await expect(window.getByRole('heading', { name: '登录本地工作台' })).toBeVisible();
-
-        // 忘记密码：凭一次性恢复码重置
-        await window.getByRole('button', { name: '忘记密码？使用恢复码' }).click();
-        await expect(window.getByRole('heading', { name: '使用恢复码重置密码' })).toBeVisible();
-        await window.locator('input#recoveryCode').fill(previousRecoveryCode!);
-        await window.getByLabel('新密码').fill('e2e-password-2');
-        await window.getByRole('button', { name: '重置密码' }).click();
-
-        // 重置后再次展示新恢复码（仅一次），随后回到登录
-        await expect(window.getByRole('heading', { name: '离线保存恢复码' })).toBeVisible();
-        const newRecoveryCode = (await window.getByLabel('一次性恢复码').innerText()).trim();
-        expect(newRecoveryCode).toMatch(/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/);
-        expect(newRecoveryCode).not.toBe(previousRecoveryCode);
-        await window.getByRole('button', { name: '我已离线保存' }).click();
-
-        // 凭新密码登录成功（旧密码失效由领域测试覆盖）
-        await expect(window.getByRole('heading', { name: '登录本地工作台' })).toBeVisible();
-        await window.getByLabel('用户名').fill('E2E负责人');
-        await window.getByLabel('密码', { exact: false }).fill('e2e-password-2');
-        await window.getByRole('button', { name: '登录工作台' }).click();
-        await expect(window.getByRole('heading', { name: '先处理提醒，再连续推进项目' })).toBeVisible();
-      } finally {
-        await app.close();
-      }
+    const app = await launchApp(userDataDir);
+    try {
+      const window = await mainWindow(app);
+      // 重开应用：无密码模式直接进入工作台（无登录界面），数据保留
+      await expectWorkbench(window);
+      await expect(window.getByText('E2E-2026-0001').first()).toBeVisible();
+      await expect(window.getByText('E2E 华东实验室').first()).toBeVisible();
+    } finally {
+      await app.close();
     }
   });
 
@@ -255,14 +212,8 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData）'
     try {
       const window = await mainWindow(app);
 
-      // 访问门初始化
-      await window.getByRole('heading', { name: '首次使用初始化' }).waitFor();
-      await window.getByLabel('用户名').fill('E2E负责人');
-      await window.getByLabel('密码', { exact: false }).fill('e2e-password-1');
-      await window.getByRole('button', { name: '创建账号并继续' }).click();
-      await window.getByRole('heading', { name: '离线保存恢复码' }).waitFor();
-      await window.getByRole('button', { name: '我已离线保存' }).click();
-      await window.getByRole('heading', { name: '先处理提醒，再连续推进项目' }).waitFor();
+      // 无密码个人模式：空数据库自动建号并直接进入工作台
+      await expectWorkbench(window);
 
       // —— 未进单先执行：四步向导第三个保存路径 ——
       await window.getByRole('button', { name: '新建搬迁项目' }).click();
@@ -316,6 +267,5 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData）'
   });
 });
 
-// 跨用例共享：初始化用例产生的临时 userData 与一次性恢复码（同一 worker 顺序执行）。
+// 跨用例共享：初始化用例产生的临时 userData（同一 worker 顺序执行）。
 let previousUserDataDir: string | null = null;
-let previousRecoveryCode: string | null = null;

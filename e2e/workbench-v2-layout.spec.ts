@@ -9,11 +9,7 @@ const executable = join(process.cwd(), 'out', packagedFolder, `${product}.app`, 
 test.skip(!existsSync(executable), '未找到真实打包 Electron，请先运行 npm run e2e:build');
 
 async function initialize(page: Page): Promise<void> {
-  await page.getByRole('heading', { name: '首次使用初始化' }).waitFor();
-  await page.getByLabel('用户名').fill('V2布局负责人');
-  await page.getByLabel('密码', { exact: false }).fill('v2-layout-password');
-  await page.getByRole('button', { name: '创建账号并继续' }).click();
-  await page.getByRole('button', { name: '我已离线保存' }).click();
+  // 无密码个人模式：空数据库自动建号并直接进入工作台（无初始化/登录界面）。
   await page.getByRole('heading', { name: '先处理提醒，再连续推进项目' }).waitFor();
 }
 

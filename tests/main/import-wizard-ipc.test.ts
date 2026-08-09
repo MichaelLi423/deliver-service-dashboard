@@ -88,6 +88,8 @@ interface Ctx {
   facadeDeps: ImportWizardFacadeDeps;
   emitProgress: Array<{ draftId: string; operationId: string }>;
   setSession: (session: AccountSessionInfo | null) => void;
+  /** 无密码模式：经账号服务确保本地账号并写入会话（替代已移除的登录 IPC 通道）。 */
+  establishSession: () => Promise<AccountSessionInfo>;
   setImportWizardDisabled: (error: string | null) => void;
   close: () => void;
 }
@@ -155,6 +157,12 @@ function makeContext(dir: string): Ctx {
       session = next;
       if (wasLoggedIn && next === null) facade.onSessionInvalidated();
     },
+    establishSession: async () => {
+      const next = await accountService().ensureLocalSession();
+      const info: AccountSessionInfo = { accountId: next.accountId, username: next.username };
+      session = info;
+      return info;
+    },
     setImportWizardDisabled: (error) => {
       importWizardDisabled = error;
     },
@@ -165,11 +173,9 @@ function makeContext(dir: string): Ctx {
   };
 }
 
-async function login(bus: FakeBus): Promise<string> {
-  const result = (await bus.invoke(IPC_CHANNELS.accountInitialize, 100, '负责人', 'password1')) as {
-    accountId: string;
-  };
-  return result.accountId;
+async function login(ctx: Ctx): Promise<string> {
+  const session = await ctx.establishSession();
+  return session.accountId;
 }
 
 async function createDraft(bus: FakeBus): Promise<string> {
@@ -206,7 +212,7 @@ describe('8.53 IPC 守卫：未登录 / 非受信 / 工作区不可用', () => {
     for (const channel of channels) {
       await expect(ctx.bus.invoke(channel, 100)).rejects.toThrow(/登录状态已失效/);
     }
-    await login(ctx.bus);
+    await login(ctx);
     // 受信 sender 正常；非受信拒绝
     await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.listDrafts, 100);
     await expect(ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.listDrafts, 999)).rejects.toThrow(/受信主窗口/);
@@ -217,7 +223,7 @@ describe('8.53 IPC 守卫：未登录 / 非受信 / 工作区不可用', () => {
     const dir = makeTempDir('iw-corrupt-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     ctx.setImportWizardDisabled('工作区数据库损坏');
     await expect(ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.listDrafts, 100)).rejects.toThrow(/工作区不可用.*工作区数据库损坏/);
     // 普通工作台通道仍然可用（Oracle #10：v2 有界读取取代 snapshot）
@@ -232,7 +238,7 @@ describe('8.47/8.48 工作区 DTO 与草稿访问', () => {
     const dir = makeTempDir('iw-dto-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const workspace = (await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.createDraft, 100)) as {
       draft: { id: string; name: string; totalRows: number; issueCount: number };
       username: string;
@@ -242,7 +248,8 @@ describe('8.47/8.48 工作区 DTO 与草稿访问', () => {
       steps: unknown[];
     };
     expect(workspace.draft.id).toBeTruthy();
-    expect(workspace.username).toBe('负责人');
+    // 无密码模式：空数据库自动建「本地用户」，工作区 DTO 返回该会话用户名
+    expect(workspace.username).toBe('本地用户');
     expect(workspace.templateVersion).toBe('1');
     expect(workspace.currentStep).toBe('prepare');
     expect(workspace.categories).toHaveLength(7);
@@ -260,7 +267,7 @@ describe('8.47/8.48 工作区 DTO 与草稿访问', () => {
     const dir = makeTempDir('iw-access-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     await expect(ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.openDraft, 100, 'missing-draft')).rejects.toThrow(/不存在/);
     await expect(ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.queryRows, 100, {
       draftId: 'missing-draft',
@@ -280,7 +287,7 @@ describe('8.49 校验 / 封存 / 提交 端到端', () => {
     const dir = makeTempDir('iw-e2e-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    const accountId = await login(ctx.bus);
+    const accountId = await login(ctx);
     const draftId = await createDraft(ctx.bus);
     await seedProjectRow(ctx.bus, draftId, 'E-IPC-1', '甲');
     // 金额以十进制字符串精确写入（>MAX_SAFE 分值）
@@ -330,7 +337,7 @@ describe('8.49 校验 / 封存 / 提交 端到端', () => {
     const dir = makeTempDir('iw-double-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     await seedProjectRow(ctx.bus, draftId, 'E-DBL', '甲');
     const sealed = (await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.validate, 100, draftId)) as { summary: { seal: string } };
@@ -348,7 +355,7 @@ describe('8.51 duplicate operation / cancel', () => {
     const dir = makeTempDir('iw-revision-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     (ctx.facadeDeps.runFileTask as ReturnType<typeof vi.fn>).mockImplementation(
       async (
@@ -385,7 +392,7 @@ describe('8.51 duplicate operation / cancel', () => {
     const dir = makeTempDir('iw-dup-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     let resolveTask: ((value: ImportFileTaskResult) => void) | undefined;
     (ctx.facadeDeps.runFileTask as ReturnType<typeof vi.fn>).mockImplementation(
@@ -422,7 +429,7 @@ describe('8.51 duplicate operation / cancel', () => {
     const dir = makeTempDir('iw-cancel-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     // 文件任务：先写入一块，随后挂起等待中止。
     (ctx.facadeDeps.runFileTask as ReturnType<typeof vi.fn>).mockImplementation(
@@ -469,7 +476,7 @@ describe('8.52 会话失效：取消活动读取、保留修订、invalidate sea
     const dir = makeTempDir('iw-session-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     await seedProjectRow(ctx.bus, draftId, 'E-SESS', '甲');
     const sealed = (await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.validate, 100, draftId)) as {
@@ -480,7 +487,7 @@ describe('8.52 会话失效：取消活动读取、保留修订、invalidate sea
     // 会话失效（登出/恢复后 setSession(null) 触发 onSessionInvalidated）
     ctx.setSession(null);
     // 重新登录（账号已存在，走登录而非初始化）
-    await ctx.bus.invoke(IPC_CHANNELS.accountLogin, 100, '负责人', 'password1');
+    await ctx.establishSession();
     const reopened = (await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.openDraft, 100, draftId)) as {
       summary: { sealValid: boolean; validationComplete: boolean } | null;
       steps: Array<{ id: string; state: string }>;
@@ -504,7 +511,7 @@ describe('8.50 dialog 不泄露路径 / 金额 DTO 精确', () => {
     const dir = makeTempDir('iw-dialog-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     const secretPath = join(dir, '绝对路径', '机密来源.xlsx');
     (ctx.facadeDeps.showOpenDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -536,7 +543,7 @@ describe('8.50 dialog 不泄露路径 / 金额 DTO 精确', () => {
     const dir = makeTempDir('iw-bigmoney-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     const huge = '90071992547409.93';
     await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.addRow, 100, draftId, 'projects');
@@ -561,7 +568,7 @@ describe('8.59/8.66 后端 undo/redo checkpoint（IPC）', () => {
     const dir = makeTempDir('iw-undo-paste-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     // 粘贴 5000 行：粘贴前建 pre、成功后建 post checkpoint。
     (ctx.facadeDeps.clipboardText as () => string) = () => Array.from({ length: 200 }, () => 'a\tb\tc').join('\n');
@@ -610,7 +617,7 @@ describe('8.59/8.66 后端 undo/redo checkpoint（IPC）', () => {
     const dir = makeTempDir('iw-undo-delete-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     // 建立两行（含来源定位与业务键）。
     await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.addRow, 100, draftId, 'projects');
@@ -657,7 +664,7 @@ describe('8.59/8.66 后端 undo/redo checkpoint（IPC）', () => {
     const dir = makeTempDir('iw-undo-session-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.addRow, 100, draftId, 'projects');
     await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.deleteRows, 100, draftId, 'projects', []);
@@ -665,7 +672,7 @@ describe('8.59/8.66 后端 undo/redo checkpoint（IPC）', () => {
     ctx.setSession(null);
     await expect(ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.undo, 100, draftId)).rejects.toThrow(/登录状态已失效/);
     // 重新登录后 undo/redo 正常（checkpoint 历史在草稿上持久保留）。
-    await ctx.bus.invoke(IPC_CHANNELS.accountLogin, 100, '负责人', 'password1');
+    await ctx.establishSession();
     await expect(ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.checkpoints, 100, draftId)).resolves.toBeTruthy();
     ctx.close();
   });
@@ -674,7 +681,7 @@ describe('8.59/8.66 后端 undo/redo checkpoint（IPC）', () => {
     const dir = makeTempDir('iw-undo-zerowrite-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const snapshot = (): string => {
       const tables = ['customers', 'projects', 'contracts', 'invoices', 'service_orders', 'import_run'];
       return tables

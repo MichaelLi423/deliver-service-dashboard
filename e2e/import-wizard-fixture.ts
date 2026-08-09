@@ -124,20 +124,12 @@ export async function setClipboardText(app: ElectronApplication, text: string): 
 }
 
 export async function initializeAndEnterWorkbench(page: Page): Promise<void> {
-  await page.getByRole('heading', { name: '首次使用初始化' }).waitFor();
-  await page.getByLabel('用户名').fill('E2E导入负责人');
-  await page.getByLabel('密码', { exact: false }).fill('e2e-import-password');
-  await page.getByRole('button', { name: '创建账号并继续' }).click();
-  await page.getByRole('heading', { name: '离线保存恢复码' }).waitFor();
-  await page.getByRole('button', { name: '我已离线保存' }).click();
+  // 无密码个人模式：空数据库自动建「本地用户」并直接进入工作台，无初始化/登录界面。
   await page.getByRole('heading', { name: '先处理提醒，再连续推进项目' }).waitFor();
 }
 
 export async function loginAndEnterWorkbench(page: Page): Promise<void> {
-  await page.getByRole('heading', { name: '登录本地工作台' }).waitFor();
-  await page.getByLabel('用户名').fill('E2E导入负责人');
-  await page.getByLabel('密码', { exact: false }).fill('e2e-import-password');
-  await page.getByRole('button', { name: '登录工作台' }).click();
+  // 无密码个人模式：重开应用直接进入工作台（会话由主进程自动建立），无登录界面。
   await page.getByRole('heading', { name: '先处理提醒，再连续推进项目' }).waitFor();
 }
 

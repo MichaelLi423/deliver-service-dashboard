@@ -58,8 +58,6 @@ function mockApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
     getCapabilities: vi.fn().mockResolvedValue([]),
     getAccountStatus: vi.fn().mockResolvedValue({ initialized: true, autoBackupError: null }),
     getSession: vi.fn().mockResolvedValue({ accountId: 'a1', username: '负责人' }),
-    initializeAccount: vi.fn().mockResolvedValue({ accountId: 'a1', username: '负责人', recoveryCode: 'RECOVERY' }),
-    login: vi.fn().mockResolvedValue({ accountId: 'a1', username: '负责人' }), resetPassword: vi.fn(),
     v2Overview: vi.fn().mockResolvedValue(overview),
     v2ProjectPage: vi.fn().mockImplementation((request: { cursor?: string | null }) => Promise.resolve(request.cursor ? page(secondProjects, null) : page())),
     v2ProjectDetail: vi.fn().mockImplementation((projectId: string) => Promise.resolve({ businessRevision: 1, project: [...firstProjects, ...secondProjects].find((row) => row.id === projectId) ?? null, detail: { managerApprovalReason: null, managerApprovalMissing: null, oldSiteContact: null, newSiteContact: null, oldSiteAddress: null, newSiteAddress: null, contractStartDate: null, contractEndDate: null, planVisitAt: null, planTransportAt: null, siteConfirmed: false, actualInstallDoneAt: null, acceptanceReport: false, acceptanceReportDate: null, cancelledAt: null, cancelReason: null, temporaryInstrumentCount: null, createdAt: '2026-08-01T00:00:00Z', customerId: 'c1', contractId: 'ct1' } })),
@@ -87,6 +85,19 @@ async function openQuickAction(label: string): Promise<HTMLElement> {
 }
 
 describe('Oracle #10 bounded workbench renderer', () => {
+  it('无密码模式渲染启动直接进入工作台：不出现初始化/登录界面，会话来自主进程', async () => {
+    const api = mockApi();
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+    render(<App />);
+    expect(
+      await screen.findByRole('heading', { name: '先处理提醒，再连续推进项目' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '首次使用初始化' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '登录本地工作台' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '使用恢复码重置密码' })).not.toBeInTheDocument();
+    expect(api.getSession).toHaveBeenCalled();
+  });
+
   it('100k total 只渲染当前 50 项', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     expect(await screen.findByRole('heading', { name: '高密项目队列 100000' })).toBeInTheDocument();

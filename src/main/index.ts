@@ -58,7 +58,7 @@ let importWizardErrorState: string | null = null;
 /** 历史数据导入向导 facade（启动/恢复时初始化或重连）。 */
 let importWizardFacade: ImportWizardFacade | null = null;
 
-/** 当前访问会话（仅主进程内存持有；关闭应用重开后需重新登录）。 */
+/** 当前访问会话（仅主进程内存持有；无密码个人模式下启动/恢复时自动建立）。 */
 let currentSession: AccountSessionInfo | null = null;
 
 /** 启动时每日自动备份失败信息（失败不阻止窗口打开，传给访问门/工作台展示）。 */
@@ -66,6 +66,19 @@ let autoBackupError: string | null = null;
 
 function accountService(): LocalAccountService {
   return new LocalAccountService(new SqliteAccountRepository(requireDb()));
+}
+
+/**
+ * 无密码个人模式：确保唯一本地账号并建立访问会话。
+ * - 已有账号：沿用其 username 建立会话；
+ * - 空数据库：自动创建固定内部账号「本地用户」（随机秘密仅落 scrypt 派生值）。
+ * 应用启动后直接进入工作台，无需登录。
+ */
+async function ensureLocalSession(): Promise<AccountSessionInfo> {
+  const session = await accountService().ensureLocalSession();
+  const info: AccountSessionInfo = { accountId: session.accountId, username: session.username };
+  currentSession = info;
+  return info;
 }
 
 function requireDb(): DatabaseSync {
@@ -241,6 +254,10 @@ function registerIpcHandlersWithDeps(): void {
 app.whenReady().then(async () => {
   db = bootstrapDatabase({ dataDir: dataDir() }).db;
   dbPath = path.join(dataDir(), 'workbench.db');
+
+  // 无密码个人模式：启动时确保唯一本地账号并建立访问会话
+  // （已有账号自动会话；空数据库自动建「本地用户」并直接进入工作台）。
+  await ensureLocalSession();
 
   // 导入工作区初始化（损坏/不兼容仅禁用导入，普通工作台不受影响）。
   initializeImportWizard();

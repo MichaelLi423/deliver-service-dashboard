@@ -164,7 +164,8 @@ test('真实历史导入全流程：失败零部分、原子提交与重启持�
     await page.getByRole('button', { name: /重新完整校验|开始完整校验/ }).click();
     await expect(page.getByText('计划已封存')).toBeVisible({ timeout: 60_000 });
     const review = page.getByRole('region', { name: '校验摘要与确认' });
-    await expect(review.getByText('E2E导入负责人')).toBeVisible();
+    // 无密码个人模式：空数据库自动建「本地用户」并建立会话，确认账号即当前本地账号
+    await expect(review.getByText('本地用户')).toBeVisible();
     await expect(review.getByText('100000.00')).toBeVisible();
     await expect(review).toContainText('项目与合同');
     await expect(review).toContainText('二维码申请');

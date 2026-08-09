@@ -5,15 +5,9 @@
  */
 
 export const IPC_CHANNELS = {
-  /** workbench-access：账号状态查询（首次初始化/登录判定）。 */
+  /** workbench-access：账号状态查询（无密码个人模式：仅供工作台展示自动备份错误等状态）。 */
   accountGetStatus: 'account:get-status',
-  /** workbench-access：首次初始化单一本地账号（返回一次性恢复码，仅展示一次）。 */
-  accountInitialize: 'account:initialize',
-  /** workbench-access：登录（成功后主进程建立访问会话）。 */
-  accountLogin: 'account:login',
-  /** workbench-access：凭一次性恢复码重置密码（原恢复码失效并生成新恢复码）。 */
-  accountResetPassword: 'account:reset-password',
-  /** workbench-access：当前访问会话查询（关闭重开后需重新登录）。 */
+  /** workbench-access：当前访问会话查询（主进程启动/恢复时已自动建立，无需登录）。 */
   accountGetSession: 'account:get-session',
   /** local-data-persistence：手动备份/恢复（主进程负责文件选择对话框）。 */
   backupManual: 'backup:manual',
@@ -338,7 +332,10 @@ export interface BackupManualResult {
 
 export interface RestoreResultDto {
   canceled: boolean;
-  /** 恢复成功（此时主进程已重建数据库并清空访问会话，须重新登录）。 */
+  /**
+   * 恢复成功（此时主进程已重建数据库，并重新取得/确保本地账号、恢复访问会话；
+   * 无密码个人模式下不要求重新登录）。
+   */
   restored?: boolean;
 }
 
@@ -796,15 +793,6 @@ export interface ReportDto {
 export interface WorkbenchApi {
   getCapabilities(): Promise<string[]>;
   getAccountStatus(): Promise<{ initialized: boolean; autoBackupError: string | null }>;
-  initializeAccount(
-    username: string,
-    password: string,
-  ): Promise<{ accountId: string; username: string; recoveryCode: string }>;
-  login(username: string, password: string): Promise<AccountSessionInfo>;
-  resetPassword(
-    recoveryCode: string,
-    newPassword: string,
-  ): Promise<{ accountId: string; username: string; recoveryCode: string }>;
   getSession(): Promise<AccountSessionInfo | null>;
   // ---- Oracle #10：工作台 v2 有界读取 / mutation（旧 snapshot API 已删除，仅此入口） ----
   v2Overview(): Promise<WorkbenchV2OverviewDto>;
@@ -827,7 +815,7 @@ export interface WorkbenchApi {
   exportReport(format: 'xlsx' | 'png' | 'pdf', filter: ReportFilterDto): Promise<{ saved: boolean; path?: string }>;
   /** 手动备份：主进程弹出目录选择框并生成 manual-*.db。 */
   backupManual(): Promise<BackupManualResult>;
-  /** 恢复备份：主进程弹出文件选择框；成功时重建数据库并清空会话（须重新登录）。 */
+  /** 恢复备份：主进程弹出文件选择框；成功时重建数据库并重新取得/确保本地账号、恢复会话。 */
   restoreFromBackup(): Promise<RestoreResultDto>;
   /** 历史数据导入向导：最小化 IPC 语义 API（主进程编排工作区/worker/校验/封存/提交）。 */
   importWizard: ImportWizardApi;

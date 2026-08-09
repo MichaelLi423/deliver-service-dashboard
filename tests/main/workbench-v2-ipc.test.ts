@@ -19,6 +19,7 @@ import {
   type IpcHandlerDeps,
 } from '../../src/main/ipc-handlers';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
+import { establishLocalSession } from '../helpers/establish-session';
 import type { ImportWizardFacade } from '../../src/main/import-wizard-facade';
 
 /**
@@ -87,6 +88,11 @@ function makeContext(dir: string) {
   };
 }
 
+/** 无密码模式：经账号服务确保本地账号并写入会话（主进程启动/恢复同款接线）。 */
+async function establishSession(ctx: ReturnType<typeof makeContext>): Promise<AccountSessionInfo> {
+  return establishLocalSession(ctx.deps.accountService, ctx.deps.setSession);
+}
+
 const V2_CHANNELS: IpcChannel[] = [
   IPC_CHANNELS.workbenchV2Overview,
   IPC_CHANNELS.workbenchV2ProjectPage,
@@ -115,7 +121,7 @@ describe('Oracle #10 v2 IPC：会话 + 受信主窗口守卫', () => {
     // 非受信 sender 拒绝
     await expect(ctx.bus.invoke(IPC_CHANNELS.workbenchV2Overview, 999)).rejects.toThrow(/受信主窗口/);
 
-    await ctx.bus.invoke(IPC_CHANNELS.accountInitialize, 100, '负责人', 'password1');
+    await establishSession(ctx);
     const overview = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Overview, 100)) as WorkbenchV2OverviewDto;
     expect(overview.businessRevision).toBe(0);
     expect(overview.metrics.totalProjects).toBe(0);
@@ -129,7 +135,7 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     dirs.push(dir);
     const ctx = makeContext(dir);
     registerIpcHandlers(ctx.bus, ctx.deps);
-    await ctx.bus.invoke(IPC_CHANNELS.accountInitialize, 100, '负责人', 'password1');
+    await establishSession(ctx);
     return ctx;
   }
 

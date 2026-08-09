@@ -15,11 +15,6 @@ import {
 const api: WorkbenchApi = {
   getCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.capabilitiesList),
   getAccountStatus: () => ipcRenderer.invoke(IPC_CHANNELS.accountGetStatus),
-  initializeAccount: (username, password) =>
-    ipcRenderer.invoke(IPC_CHANNELS.accountInitialize, username, password),
-  login: (username, password) => ipcRenderer.invoke(IPC_CHANNELS.accountLogin, username, password),
-  resetPassword: (recoveryCode, newPassword) =>
-    ipcRenderer.invoke(IPC_CHANNELS.accountResetPassword, recoveryCode, newPassword),
   getSession: () => ipcRenderer.invoke(IPC_CHANNELS.accountGetSession),
   // Oracle #10：工作台 v2 有界读取 / mutation（旧 snapshot 通道已删除，仅此入口）。
   v2Overview: () => ipcRenderer.invoke(IPC_CHANNELS.workbenchV2Overview),

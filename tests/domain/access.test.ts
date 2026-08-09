@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AccessDeniedError,
+  LOCAL_ACCOUNT_USERNAME,
   LocalAccountService,
   SecondAccountForbiddenError,
   deriveSecret,
@@ -101,7 +102,14 @@ describe('首次启动初始化单一本地账号（tasks 2.8 / spec）', () => 
   it('不提供注册/自助新增用户/角色与权限管理 API', () => {
     const { service } = makeService();
     const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(service)).sort();
-    expect(methods).toEqual(['constructor', 'getStatus', 'initialize', 'login', 'resetPassword']);
+    expect(methods).toEqual([
+      'constructor',
+      'ensureLocalSession',
+      'getStatus',
+      'initialize',
+      'login',
+      'resetPassword',
+    ]);
   });
 });
 
@@ -289,5 +297,60 @@ describe('手工录入事实归属当前登录账号（tasks 2.8 / spec，联动
   it('系统自动记录的事实不归属账号', () => {
     const systemMeta = createFactMeta({ source: 'system' });
     expect(systemMeta.actor).toBeNull();
+  });
+});
+
+describe('无密码个人模式：ensureLocalSession 自动会话/自动建号（不生成可用密码与恢复码）', () => {
+  it('空数据库自动创建固定内部账号「本地用户」并建立会话', async () => {
+    const { repo, service } = makeService();
+    expect(service.getStatus()).toEqual({ initialized: false });
+
+    const session = await service.ensureLocalSession();
+
+    expect(service.getStatus()).toEqual({ initialized: true });
+    expect(session.username).toBe(LOCAL_ACCOUNT_USERNAME);
+    const stored = repo.findFirst()!;
+    expect(stored.username).toBe(LOCAL_ACCOUNT_USERNAME);
+    expect(repo.count()).toBe(1);
+  });
+
+  it('已有账号启动自动会话：沿用原 username 与 accountId，不删除不迁移', async () => {
+    const { repo, service } = makeService();
+    const { account } = await service.initialize({ username: USERNAME, password: PASSWORD });
+
+    const session = await service.ensureLocalSession();
+
+    expect(session.accountId).toBe(account.id);
+    expect(session.username).toBe(USERNAME);
+    expect(repo.count()).toBe(1);
+    expect(repo.findFirst()!.username).toBe(USERNAME);
+  });
+
+  it('重复调用幂等：不重复建号，返回同一账号会话', async () => {
+    const { repo, service } = makeService();
+    const first = await service.ensureLocalSession();
+    const second = await service.ensureLocalSession();
+    expect(first.accountId).toBe(second.accountId);
+    expect(repo.count()).toBe(1);
+  });
+
+  it('自动建号不生成可用的密码/恢复码：恢复码字段为空，口令为随机秘密的派生值', async () => {
+    const { repo, service } = makeService();
+    await service.ensureLocalSession();
+    const stored = repo.findFirst()!;
+
+    // 不生成恢复码（字段为空）
+    expect(stored.recoveryCodeHash).toBeNull();
+    expect(stored.recoveryCodeSalt).toBeNull();
+    // 口令为 scrypt 派生值（非明文、非已知口令），长度为 keyLength*2 与 32 hex 盐
+    expect(stored.passwordHash).toHaveLength(SCRYPT_DEFAULTS.keyLength * 2);
+    expect(stored.passwordSalt).toHaveLength(32);
+    expect(stored.passwordHash).not.toBe('本地用户');
+    // 随机秘密不落明文：session/返回值不包含秘密，且该口令不可用已知值校验通过
+    const session = await service.ensureLocalSession();
+    expect(JSON.stringify(session)).not.toContain(stored.passwordHash);
+    expect(await verifySecret('', stored.passwordHash, stored.passwordSalt)).toBe(false);
+    expect(await verifySecret('password', stored.passwordHash, stored.passwordSalt)).toBe(false);
+    expect(await verifySecret('本地用户', stored.passwordHash, stored.passwordSalt)).toBe(false);
   });
 });

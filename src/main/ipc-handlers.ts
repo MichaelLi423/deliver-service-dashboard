@@ -17,14 +17,15 @@ import type { ImportWizardFacade } from './import-wizard-facade';
  * IPC 通道注册（tasks 1.1 工程骨架；本模块为 main/index.ts 的可测试抽取）。
  *
  * 安全边界（Oracle 修复）：
- * - 除「账号初始化/登录/恢复/状态查询」外，所有业务通道在主进程进入 facade 之前
+ * - 除「账号状态/会话查询」外，所有业务通道在主进程进入 facade 之前
  *   统一校验：有效访问会话 + sender 为受信主窗口；snapshot/report/export/
  *   status mutation/业务命令/backup/restore 未登录一律拒绝，不依赖各方法的
  *   偶然 actor 调用。
  * - 金额 IPC 边界为十进制字符串，主进程用 Money 精确解析（renderer 禁止
  *   Number(value)*100 与浮点金额计算）。
- * - 手动备份/恢复由主进程负责 file dialog；恢复成功后重建数据库并清空会话
- *   （强制重新登录）；恢复失败保留当前数据库。
+ * - 手动备份/恢复由主进程负责 file dialog；无密码个人模式下主进程在启动/恢复时
+ *   自动确保本地账号并建立访问会话（不提供初始化/登录/密码重置/恢复码通道）；
+ *   恢复成功后重建数据库并重新取得/确保本地账号、恢复会话。
  */
 
 /** IPC invoke 事件的最小形状（Electron IpcMainInvokeEvent 的 sender 子集）。 */
@@ -160,7 +161,9 @@ export function registerIpcHandlers(bus: IpcBus, deps: IpcHandlerDeps): void {
     'local-data-persistence',
   ]);
 
-  // ---- 账号初始化/登录/恢复/状态查询：无需会话，但必须是受信主窗口（Oracle 复审 #5） ----
+  // ---- 账号状态/会话查询：无需会话，但必须是受信主窗口（Oracle 复审 #5） ----
+  // 无密码个人模式：主进程在启动/恢复时已自动建立访问会话，不再提供初始化/登录/
+  // 密码重置/恢复码通道（界面、preload 与共享 IPC 公共接口均不暴露）。
 
   bus.handle(IPC_CHANNELS.accountGetStatus, (event) => {
     requireTrustedSender(event, deps);
@@ -169,38 +172,6 @@ export function registerIpcHandlers(bus: IpcBus, deps: IpcHandlerDeps): void {
       autoBackupError: deps.autoBackupError(),
     };
   });
-
-  bus.handle(
-    IPC_CHANNELS.accountInitialize,
-    async (event, username: string, password: string) => {
-      requireTrustedSender(event, deps);
-      const { account, recoveryCode } = await deps.accountService().initialize({ username, password });
-      deps.setSession({ accountId: account.id, username: account.username });
-      return { accountId: account.id, username: account.username, recoveryCode };
-    },
-  );
-
-  bus.handle(IPC_CHANNELS.accountLogin, async (event, username: string, password: string) => {
-    requireTrustedSender(event, deps);
-    const { session } = await deps.accountService().login({ username, password });
-    const info: AccountSessionInfo = { accountId: session.accountId, username: session.username };
-    deps.setSession(info);
-    return info;
-  });
-
-  bus.handle(
-    IPC_CHANNELS.accountResetPassword,
-    async (event, recoveryCode: string, newPassword: string) => {
-      requireTrustedSender(event, deps);
-      const { account, newRecoveryCode } = await deps.accountService().resetPassword({
-        recoveryCode,
-        newPassword,
-      });
-      // 密码已重置：现有会话失效，需重新登录。
-      deps.setSession(null);
-      return { accountId: account.id, username: account.username, recoveryCode: newRecoveryCode };
-    },
-  );
 
   bus.handle(IPC_CHANNELS.accountGetSession, (event) => {
     requireTrustedSender(event, deps);
@@ -296,8 +267,10 @@ export function registerIpcHandlers(bus: IpcBus, deps: IpcHandlerDeps): void {
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
     const outcome = deps.restoreFromBackup(result.filePaths[0]);
     if (outcome.restored) {
-      // 恢复成功：数据库已重建，会话清空强制重新登录。
-      deps.setSession(null);
+      // 恢复成功：数据库已重建。无密码个人模式下重新取得/确保本地账号并恢复会话
+      // （空账号库自动建「本地用户」；已有账号沿用其 username），而不是踢到登录页。
+      const session = await deps.accountService().ensureLocalSession();
+      deps.setSession({ accountId: session.accountId, username: session.username });
     }
     return { canceled: false, restored: outcome.restored };
   });

@@ -57,6 +57,8 @@ interface Ctx {
   facadeDeps: ImportWizardFacadeDeps;
   emitProgress: Array<{ draftId: string; operationId: string }>;
   setSession: (session: AccountSessionInfo | null) => void;
+  /** 无密码模式：经账号服务确保本地账号并写入会话（替代已移除的登录 IPC 通道）。 */
+  establishSession: () => Promise<AccountSessionInfo>;
   setImportWizardDisabled: (error: string | null) => void;
   setTrustedOrigin: (origin: string | null) => void;
   close: () => void;
@@ -126,6 +128,12 @@ function makeContext(dir: string): Ctx {
       session = next;
       if (wasLoggedIn && next === null) facade.onSessionInvalidated();
     },
+    establishSession: async () => {
+      const next = await accountService().ensureLocalSession();
+      const info: AccountSessionInfo = { accountId: next.accountId, username: next.username };
+      session = info;
+      return info;
+    },
     setImportWizardDisabled: (error) => {
       importWizardDisabled = error;
     },
@@ -144,9 +152,9 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) cleanupTempDir(dir);
 });
 
-async function login(bus: FakeBus): Promise<string> {
-  const result = (await bus.invoke(IPC_CHANNELS.accountInitialize, 100, "负责人", "password1")) as { accountId: string };
-  return result.accountId;
+async function login(ctx: Ctx): Promise<string> {
+  const session = await ctx.establishSession();
+  return session.accountId;
 }
 
 async function createDraft(bus: FakeBus): Promise<string> {
@@ -169,16 +177,18 @@ async function seedProjectRow(bus: FakeBus, draftId: string, ecc: string, custom
 }
 
 describe('Oracle #5 trusted sender：senderFrame URL/origin + 账号通道守卫', () => {
-  it('senderFrame 来源不匹配时即使 sender.id 匹配也被拒绝（含账号初始化/登录）', async () => {
+  it('senderFrame 来源不匹配时即使 sender.id 匹配也被拒绝（含账号状态/会话查询通道）', async () => {
     const dir = makeTempDir('oracle-sender-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    // 受信 id=100 但 frame URL 来自恶意 origin → 拒绝（含账号初始化通道）。
-    await expect(ctx.bus.invokeWithFrame(IPC_CHANNELS.accountInitialize, 100, 'http://evil.example/', '负责人', 'p1')).rejects.toThrow(/来源不匹配/);
+    // 受信 id=100 但 frame URL 来自恶意 origin → 拒绝（无需会话但需受信窗口的通道）。
+    await expect(ctx.bus.invokeWithFrame(IPC_CHANNELS.accountGetStatus, 100, 'http://evil.example/')).rejects.toThrow(/来源不匹配/);
     await expect(ctx.bus.invokeWithFrame(IMPORT_WIZARD_CHANNELS.listDrafts, 100, "http://evil.example/")).rejects.toThrow(/来源不匹配/);
-    // 受信 id=100 + 正确 frame URL → 账号通道可初始化（无需会话但需受信窗口）。
-    const init = (await ctx.bus.invoke(IPC_CHANNELS.accountInitialize, 100, "负责人", "password1")) as { accountId: string };
-    expect(init.accountId).toBeTruthy();
+    // 受信 id=100 + 正确 frame URL → 账号状态通道可用（无需会话但需受信窗口）。
+    expect(await ctx.bus.invoke(IPC_CHANNELS.accountGetStatus, 100)).toEqual({
+      initialized: false,
+      autoBackupError: null,
+    });
     ctx.close();
   });
 
@@ -186,14 +196,14 @@ describe('Oracle #5 trusted sender：senderFrame URL/origin + 账号通道守卫
     const dir = makeTempDir('oracle-session-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     await seedProjectRow(ctx.bus, draftId, 'E-SESS-TOKEN', '甲');
     const sealed = (await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.validate, 100, draftId)) as { summary: { seal: string } };
     expect(sealed.summary?.seal).toBeTruthy();
     // 会话失效（token 置空 + seal 失效）。
     ctx.setSession(null);
-    await ctx.bus.invoke(IPC_CHANNELS.accountLogin, 100, '负责人', 'password1');
+    await ctx.establishSession();
     // 重新登录后旧 seal 已失效：直接提交被拒（严格 seal 匹配 / 状态守卫），零写。
     await expect(ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.commit, 100, draftId, sealed.summary.seal)).rejects.toThrow(/仅已封存草稿可提交|重新完整校验/);
     const projects = (ctx.facadeDeps.businessDb().prepare('SELECT COUNT(*) AS n FROM projects').get() as { n: number }).n;
@@ -207,7 +217,7 @@ describe('Oracle #2 modes 迁入 schema / mode=none 阻断 / commit 严格 seal 
     const dir = makeTempDir('oracle-mode-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.addRow, 100, draftId, 'projects');
     await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.setCategoryMode, 100, draftId, 'projects', 'data');
@@ -219,7 +229,7 @@ describe('Oracle #2 modes 迁入 schema / mode=none 阻断 / commit 严格 seal 
     const dir = makeTempDir('oracle-mode-then-paste-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     // 先声明 none（无行可通过），再补行（粘贴/文件等效）。
     await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.setCategoryMode, 100, draftId, 'projects', 'none');
@@ -252,7 +262,7 @@ describe('Oracle #2 modes 迁入 schema / mode=none 阻断 / commit 严格 seal 
     const dir = makeTempDir('oracle-seal-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     await seedProjectRow(ctx.bus, draftId, 'E-SEAL-STRICT', '甲');
     const sealed = (await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.validate, 100, draftId)) as { summary: { seal: string } };
@@ -270,7 +280,7 @@ describe('Oracle #2 modes 迁入 schema / mode=none 阻断 / commit 严格 seal 
     const dir = makeTempDir('oracle-mode-digest-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     await seedProjectRow(ctx.bus, draftId, 'E-MODE-DIGEST', '甲', false);
     // 完整声明七类（本项目 data，其余 none）后可校验封存。
@@ -293,7 +303,7 @@ describe('Oracle #3 仅 invoice/logistics 引用主库既有 ECC', () => {
     const dir = makeTempDir('oracle-only-invoice-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     // 主库已有 ECC 项目（CLI 迁移路径）。
     runImport(ctx.facadeDeps.businessDb(), {
       rows: [srow(CONTRACT, '合同信息', 2, { 'ECC#': 'E-EXIST', 'Account name': '甲', 合同USD含税金额: '100' })],
@@ -329,7 +339,7 @@ describe('Oracle #3 仅 invoice/logistics 引用主库既有 ECC', () => {
     const dir = makeTempDir('oracle-only-logistics-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     runImport(ctx.facadeDeps.businessDb(), {
       rows: [srow(CONTRACT, '合同信息', 2, { 'ECC#': 'E-LOG-EXIST', 'Account name': '甲', 合同USD含税金额: '100' })],
       mapping: MAPPING_V1,
@@ -374,7 +384,7 @@ describe('Oracle #6 selectFiles 跨文件 preflightBatch（失败草稿零 merge
     const dir = makeTempDir('oracle-preflight-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     (ctx.facadeDeps.readFile as ReturnType<typeof vi.fn>).mockResolvedValue(Buffer.from('not a zip'));
     (ctx.facadeDeps.showOpenDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ canceled: false, filePaths: [join(dir, '坏.xlsx')] });
@@ -422,7 +432,7 @@ describe('Oracle #1 restore 竞态：旧 facade 取消 worker 后不写新连接
     const dir = makeTempDir('oracle-restore-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     let abortSignal: AbortSignal | null = null;
     (ctx.facadeDeps.runFileTask as ReturnType<typeof vi.fn>).mockImplementation(
@@ -443,7 +453,7 @@ describe('Oracle #1 restore 竞态：旧 facade 取消 worker 后不写新连接
     await first;
     expect(abortSignal!.aborted).toBe(true);
     // 解析期间写入的行已回滚（草稿回到稳定态），没有形成部分 merge。
-    await ctx.bus.invoke(IPC_CHANNELS.accountLogin, 100, '负责人', 'password1');
+    await ctx.establishSession();
     const window = (await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.queryRows, 100, { draftId, category: 'projects', offset: 0, limit: 10 })) as { total: number };
     expect(window.total).toBe(0);
     ctx.close();
@@ -455,7 +465,7 @@ describe('Oracle 二次复审 #2：sheet 归类真实影响 rows/计划（exclud
     const dir = makeTempDir('oracle-excluded-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     // 用文件任务注入带 source_file/source_sheet 的源行。
     (ctx.facadeDeps.runFileTask as ReturnType<typeof vi.fn>).mockImplementation(
@@ -495,7 +505,7 @@ describe('Oracle 二次复审 #2：sheet 归类真实影响 rows/计划（exclud
     const dir = makeTempDir('oracle-excluded-block-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     // 直接以带来源的行追加（等价文件源行）。
     await ctx.bus.invoke(IMPORT_WIZARD_CHANNELS.addRow, 100, draftId, 'projects');
@@ -548,7 +558,7 @@ describe('Oracle 二次复审 #5：selectFiles 读取前拒绝 >20 / 增量上�
     const dir = makeTempDir('oracle-maxfiles-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     const files = Array.from({ length: 21 }, (_, i) => join(dir, `f${i}.xlsx`));
     (ctx.facadeDeps.showOpenDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ canceled: false, filePaths: files });
@@ -561,7 +571,7 @@ describe('Oracle 二次复审 #5：selectFiles 读取前拒绝 >20 / 增量上�
     const dir = makeTempDir('oracle-incremental-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     // 第 1 个文件为合法 xlsx（通过预检）；第 2 个文件 300MiB 实际字节 → 累计超 250MiB
     // 立即停止（第 3 个文件不再 readFile、worker 未启动）。
@@ -585,7 +595,7 @@ describe('Oracle 二次复审 #5：selectFiles 读取前拒绝 >20 / 增量上�
     const dir = makeTempDir('oracle-stat-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     (ctx.facadeDeps.statFile as ReturnType<typeof vi.fn>).mockResolvedValue({ size: 2 * 1024 * 1024 * 1024 }); // 2GB 声明
     (ctx.facadeDeps.showOpenDialog as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ canceled: false, filePaths: [join(dir, 'huge.xlsx')] });
@@ -601,7 +611,7 @@ describe('Oracle 最终复核 #1/#2：excluded 约束追加 / 混合 included-ex
     const dir = makeTempDir('oracle-hash-name-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     // 文件任务追加带 '#' 文件名的源行（Sheet1）。
     const fileWithHash = 'we#ird.xlsx';
@@ -652,7 +662,7 @@ describe('Oracle 最终复核 #1/#2：excluded 约束追加 / 混合 included-ex
     const dir = makeTempDir('oracle-mixed-');
     dirs.push(dir);
     const ctx = makeContext(dir);
-    await login(ctx.bus);
+    await login(ctx);
     const draftId = await createDraft(ctx.bus);
     // 文件任务追加两个 sheet：A（保留）、B（排除），各自一条 project 行。
     (ctx.facadeDeps.runFileTask as ReturnType<typeof vi.fn>).mockImplementation(

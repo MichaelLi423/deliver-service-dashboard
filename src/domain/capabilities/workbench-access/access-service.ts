@@ -12,12 +12,19 @@
  * - 会话仅存于调用方（主进程内存），本服务为无状态领域服务。
  */
 
+import { randomBytes } from 'node:crypto';
 import { DomainError } from '../../core/errors';
 import { assertRequiredText, newInternalId } from '../../core/ids';
 import { SystemClock, type Clock } from '../../core/time';
 import type { AccessSession, Account, AccountRepository } from './account';
 import { deriveSecret, verifySecret } from './password';
 import { generateRecoveryCode, normalizeRecoveryCode } from './recovery-code';
+
+/**
+ * 无密码个人模式的固定内部账号用户名（全新数据库自动建号使用）。
+ * 既有数据库沿用已有唯一账号及其 username，不重命名、不删除。
+ */
+export const LOCAL_ACCOUNT_USERNAME = '本地用户';
 
 /** 初始化后尝试新增第二个账号。 */
 export class SecondAccountForbiddenError extends DomainError {
@@ -97,6 +104,43 @@ export class LocalAccountService {
   /** 账号初始化状态：本地账号是否存在（决定首次初始化界面或登录界面）。 */
   getStatus(): { initialized: boolean } {
     return { initialized: this.repo.findFirst() !== undefined };
+  }
+
+  /**
+   * 无密码个人模式：确保存在唯一本地账号并返回访问会话（应用启动/恢复后调用）。
+   * - 已有账号：直接沿用其用户名建立会话（历史数据保留，不删除不迁移）；
+   * - 空数据库：自动创建固定内部账号（用户名 LOCAL_ACCOUNT_USERNAME）。口令为
+   *   一次性内部随机秘密，仅以 scrypt 派生值落库、明文不落库也不输出；不生成
+   *   恢复码（恢复码字段为空）。不可用该随机秘密登录，也不存在可用的密码/恢复码。
+   */
+  async ensureLocalSession(): Promise<AccessSession> {
+    const existing = this.repo.findFirst();
+    if (existing !== undefined) {
+      return {
+        accountId: existing.id,
+        username: existing.username,
+        loggedInAt: this.clock.nowIso(),
+      };
+    }
+    const randomSecret = randomBytes(32).toString('hex');
+    const passwordSecret = await deriveSecret(randomSecret);
+    const now = this.clock.nowIso();
+    const account: Account = {
+      id: newInternalId(),
+      username: LOCAL_ACCOUNT_USERNAME,
+      passwordHash: passwordSecret.hashHex,
+      passwordSalt: passwordSecret.saltHex,
+      recoveryCodeHash: null,
+      recoveryCodeSalt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.repo.save(account);
+    return {
+      accountId: account.id,
+      username: account.username,
+      loggedInAt: now,
+    };
   }
 
   /**
