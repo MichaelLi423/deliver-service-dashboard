@@ -148,6 +148,17 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.click(screen.getByRole('tab', { name: '搬迁仪器' })); await waitFor(() => expect(api.v2SectionPage).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p-1', kind: 'instruments', limit: 50 })));
   });
 
+  it('项目队列移除详情列，点击行直接切换下方项目详情', async () => {
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    const grid = await screen.findByRole('grid', { name: '项目队列' });
+    const row = await within(grid).findByRole('row', { name: /^客户 2 / });
+    expect(within(grid).queryByRole('columnheader', { name: '详情' })).not.toBeInTheDocument();
+    expect(within(grid).queryByRole('button', { name: /查看.*详情/ })).not.toBeInTheDocument();
+    fireEvent.click(within(row).getByText('客户 2'));
+    await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledWith('p-2'));
+    expect(screen.getByRole('region', { name: '客户 2' })).toHaveTextContent('ECC-000002');
+  });
+
   it('mutation 仅走 v2Mutate，并按 tags 局部刷新', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); const beforeOverview = vi.mocked(api.v2Overview!).mock.calls.length; const beforeProjects = vi.mocked(api.v2ProjectPage!).mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '维护提醒' })); fireEvent.change(screen.getByLabelText('备注内容'), { target: { value: '局部刷新' } }); fireEvent.click(screen.getByRole('button', { name: '保存当前提醒' }));
@@ -167,8 +178,8 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2SectionPage).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p-1', kind: 'instruments', limit: 25 }))); expect(within(screen.getByRole('dialog')).getAllByRole('option').length).toBeLessThanOrEqual(30);
   });
 
-  it('项目队列支持 roving focus 与方向/Home/End/Enter/PageDown', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); const rows = screen.getAllByRole('row').slice(1); rows[0]!.focus(); fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' }); expect(rows[1]).toHaveFocus(); fireEvent.keyDown(rows[1]!, { key: 'End' }); expect(rows.at(-1)).toHaveFocus(); fireEvent.keyDown(rows.at(-1)!, { key: 'Home' }); expect(rows[0]).toHaveFocus(); fireEvent.keyDown(rows[0]!, { key: ' ' }); expect(rows[0]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[0]!, { key: 'PageDown' }); expect(await screen.findByText('客户 51')).toBeInTheDocument();
+  it('项目队列支持 roving focus 与方向/Home/End/Enter/Space/PageDown', async () => {
+    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); const rows = screen.getAllByRole('row').slice(1); rows[0]!.focus(); fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' }); expect(rows[1]).toHaveFocus(); fireEvent.keyDown(rows[1]!, { key: 'Enter' }); expect(rows[1]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[1]!, { key: 'End' }); expect(rows.at(-1)).toHaveFocus(); fireEvent.keyDown(rows.at(-1)!, { key: 'Home' }); expect(rows[0]).toHaveFocus(); fireEvent.keyDown(rows[0]!, { key: ' ' }); expect(rows[0]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[0]!, { key: 'PageDown' }); expect(await screen.findByText('客户 51')).toBeInTheDocument();
   });
 
   it('历史导入返回后刷新 overview 与项目首页并恢复入口焦点', async () => {

@@ -547,6 +547,7 @@ export function WorkbenchV2({
     event: KeyboardEvent<HTMLTableRowElement>,
     index: number,
   ): void {
+    if (event.target !== event.currentTarget) return;
     selectionPin.current = "";
     const rows = projectPage?.projects ?? [];
     if (!rows.length) return;
@@ -995,7 +996,6 @@ export function WorkbenchV2({
                   <th>累计掉票</th>
                   <th>更新时间</th>
                   <th>就近录入</th>
-                  <th>详情</th>
                 </tr>
               </thead>
               <tbody>
@@ -1009,11 +1009,18 @@ export function WorkbenchV2({
                     className={`project-status-${project.status.replaceAll("_", "-")}`}
                     tabIndex={project.id === selectedId ? 0 : -1}
                     aria-selected={project.id === selectedId}
-                    onFocus={() => {
+                    onFocus={(event) => {
+                      if (event.target !== event.currentTarget) return;
                       selectionPin.current = "";
                       setSelectedId(project.id);
                     }}
-                    onClick={() => {
+                    onClick={(event) => {
+                      if (
+                        (event.target as HTMLElement).closest(
+                          "button, a, input, select, textarea",
+                        )
+                      )
+                        return;
                       selectionPin.current = "";
                       setSelectedId(project.id);
                     }}
@@ -1049,24 +1056,12 @@ export function WorkbenchV2({
                         aria-label={`为${project.customerName}快速记录`}
                         onClick={(event) => {
                           event.stopPropagation();
+                          selectionPin.current = "";
                           setSelectedId(project.id);
                           setLayer({ kind: "quick" });
                         }}
                       >
                         记录
-                      </button>
-                    </td>
-                    <td>
-                      <button
-                        className="text-action row-quick-action"
-                        aria-label={`查看${project.customerName}详情`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          selectionPin.current = "";
-                          setSelectedId(project.id);
-                        }}
-                      >
-                        查看详情
                       </button>
                     </td>
                   </tr>
