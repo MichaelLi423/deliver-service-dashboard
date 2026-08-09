@@ -111,6 +111,7 @@ export interface ImportWizardDraftDto {
   totalRows: number;
   issueCount: number;
   saveState: ImportWizardSaveState;
+  /** 审计/技术更新时间（精确 ISO）。 */
   updatedAt: string;
 }
 
@@ -296,6 +297,7 @@ export interface ImportWizardCheckpointDto {
   label: string | null;
   baseRevision: number;
   state: 'active' | 'undone';
+  /** 审计/技术创建时间（精确 ISO）。 */
   createdAt: string;
 }
 
@@ -350,8 +352,9 @@ export interface ShipToRequestDto {
   /** 创建时可空；进入已完成前必填，补入后全局唯一。 */
   accountId: string | null;
   status: ShipToRequestStatus;
-  /** 首次实际提交时间（计一次工作量的归属月份）。 */
+  /** 首次实际提交日期（业务日期 yyyy-mm-dd，计一次工作量的归属月份）。 */
   submittedAt: string | null;
+  /** 完成日期（业务日期 yyyy-mm-dd）。 */
   completedAt: string | null;
 }
 
@@ -375,7 +378,9 @@ export interface WorkbenchProjectRow {
   formallyEntered: boolean;
   preEntryExecution: boolean;
   region: string | null;
+  /** 进单日期（业务日期 yyyy-mm-dd）。 */
   entryAt: string | null;
+  /** 项目提醒日期（业务日期 yyyy-mm-dd）。 */
   reminderAt: string | null;
   reminderNote: string | null;
   reminderDueClass: 'upcoming' | 'today' | 'overdue' | null;
@@ -388,6 +393,7 @@ export interface WorkbenchProjectRow {
   contractAmount: string | null;
   counts: { batches: number; instruments: number; activities: number; orders: number; repairs: number };
   nonBlocking: { pendingShipTo: number; qrUnmarked: number; repairs: number };
+  /** 审计/技术更新时间（精确 ISO）。 */
   updatedAt: string;
 }
 
@@ -430,6 +436,7 @@ export interface WorkbenchV2ProjectPageDto {
 /** 首页/概览 DTO（bounded：提醒预览最多 6 条，其余为聚合指标）。 */
 export interface WorkbenchV2OverviewDto {
   businessRevision: number;
+  /** 审计/技术生成时间（精确 ISO）。 */
   generatedAt: string;
   metrics: {
     totalProjects: number;
@@ -450,6 +457,7 @@ export interface WorkbenchV2OverviewDto {
     customerName: string;
     ecc: string | null;
     tempNo: string;
+    /** 项目提醒日期（业务日期 yyyy-mm-dd）。 */
     reminderAt: string | null;
     reminderNote: string | null;
     reminderDueClass: WorkbenchReminderDueClass | null;
@@ -468,17 +476,25 @@ export interface WorkbenchV2ProjectDetailDto {
     newSiteContact: string | null;
     oldSiteAddress: string | null;
     newSiteAddress: string | null;
+    /** 合同开始日期（业务日期 yyyy-mm-dd）。 */
     contractStartDate: string | null;
+    /** 合同截止日期（业务日期 yyyy-mm-dd）。 */
     contractEndDate: string | null;
+    /** 计划上门日期（业务日期 yyyy-mm-dd）。 */
     planVisitAt: string | null;
+    /** 计划运输日期（业务日期 yyyy-mm-dd）。 */
     planTransportAt: string | null;
     siteConfirmed: boolean;
+    /** 实际装机完成日期（业务日期 yyyy-mm-dd）。 */
     actualInstallDoneAt: string | null;
     acceptanceReport: boolean;
+    /** 验收报告形成日期（业务日期 yyyy-mm-dd）。 */
     acceptanceReportDate: string | null;
+    /** 取消日期（业务日期 yyyy-mm-dd）。 */
     cancelledAt: string | null;
     cancelReason: string | null;
     temporaryInstrumentCount: number | null;
+    /** 审计/技术创建时间（精确 ISO）。 */
     createdAt: string;
     customerId: string | null;
     contractId: string | null;
@@ -504,11 +520,14 @@ export type WorkbenchV2SectionRow =
       kind: 'batches';
       id: string;
       projectId: string;
+      /** 计划运输日期（业务日期 yyyy-mm-dd）。 */
       planTransportDate: string | null;
       transportCompany: string | null;
       originalPrice: string | null;
       discountedPrice: string | null;
+      /** 开始运输日期（业务日期 yyyy-mm-dd；null = 未开始）。 */
       startedAt: string | null;
+      /** 审计/技术创建时间（精确 ISO）。 */
       createdAt: string;
     }
   | {
@@ -522,14 +541,17 @@ export type WorkbenchV2SectionRow =
       ups: boolean;
       qrRequested: boolean;
       destinationShipToId: string | null;
+      /** 审计/技术创建时间（精确 ISO）。 */
       createdAt: string;
     }
   | {
       kind: 'activities';
       id: string;
       projectId: string;
+      /** 到访日期（业务日期 yyyy-mm-dd）。 */
       visitAt: string | null;
       engineers: string;
+      /** 审计/技术创建时间（精确 ISO）。 */
       createdAt: string;
     }
   | {
@@ -538,10 +560,12 @@ export type WorkbenchV2SectionRow =
       projectId: string | null;
       orderType: 'relocation' | 'certification' | 'parts_by_mail' | 'pm';
       serviceOrderNo: string | null;
+      /** 开单日期（业务日期 yyyy-mm-dd）。 */
       orderedAt: string;
       engineer: string;
       customerName: string;
       note: string | null;
+      /** 审计/技术创建时间（精确 ISO）。 */
       createdAt: string;
     }
   | {
@@ -549,11 +573,15 @@ export type WorkbenchV2SectionRow =
       id: string;
       projectId: string;
       amount: string;
+      /** 掉票日期（业务日期 yyyy-mm-dd）。 */
       invoicedAt: string;
       active: boolean;
+      /** 撤销日期（业务日期 yyyy-mm-dd）。 */
       revokedAt: string | null;
       revokeReason: string | null;
+      /** 审计/技术最后修改时间（精确 ISO）。 */
       lastModifiedAt: string;
+      /** 审计/技术创建时间（精确 ISO）。 */
       createdAt: string;
     }
   | {
@@ -570,8 +598,10 @@ export type WorkbenchV2SectionRow =
       partAmount: string;
       partCurrency: string | null;
       partStatus: string | null;
+      /** 事项登记日期（业务日期 yyyy-mm-dd）。 */
       registeredAt: string;
       repairNote: string | null;
+      /** 审计/技术创建时间（精确 ISO）。 */
       createdAt: string;
     };
 
@@ -603,16 +633,20 @@ export type WorkbenchV2IndependentRow =
       customerName: string;
       newSiteAddress: string;
       accountId: string;
+      /** 业务更新日期（yyyy-mm-dd；序列号地址更新为业务事实，非审计时间）。 */
       updatedAt: string;
+      /** 审计/技术创建时间（精确 ISO）。 */
       createdAt: string;
     }
   | {
       kind: 'qr_request';
       id: string;
       applicant: string;
+      /** 申请日期（业务日期 yyyy-mm-dd）。 */
       requestedAt: string;
       types: readonly string[];
       workload: number;
+      /** 审计/技术创建时间（精确 ISO）。 */
       createdAt: string;
     };
 
@@ -641,14 +675,18 @@ export type WorkbenchV2LookupRow =
       newSiteAddress: string;
       accountId: string | null;
       status: ShipToRequestStatus;
+      /** 首次实际提交日期（业务日期 yyyy-mm-dd）。 */
       submittedAt: string | null;
+      /** 完成日期（业务日期 yyyy-mm-dd）。 */
       completedAt: string | null;
+      /** 审计/技术创建时间（精确 ISO）。 */
       createdAt: string;
     }
   | {
       kind: 'customers';
       id: string;
       name: string;
+      /** 审计/技术创建时间（精确 ISO）。 */
       createdAt: string;
     };
 
@@ -663,7 +701,8 @@ export interface WorkbenchV2LookupPageDto {
 
 /**
  * v2 普通写动作（复用现有写逻辑，绝不调用 snapshot；返回有界 mutation 结果）。
- * 覆盖：新建项目 / 资料更新 / submitAction / 提醒 / 状态 / 取消 / Ship-to complete / 掉票编辑与撤销。
+ * 覆盖：新建项目 / 资料更新 / submitAction / 提醒 / 状态 / 取消 / Ship-to complete /
+ * 掉票编辑与撤销 / 搬迁批次编辑（batch_edit）。
  */
 export type WorkbenchV2MutationOp =
   | 'create_project'
@@ -675,7 +714,8 @@ export type WorkbenchV2MutationOp =
   | 'cancel_project'
   | 'ship_to_complete'
   | 'invoice_edit'
-  | 'invoice_revoke';
+  | 'invoice_revoke'
+  | 'batch_edit';
 
 /** 写后失效标签：告知新 UI 哪些有界缓存需重读。 */
 export type WorkbenchV2InvalidateTag =
@@ -692,16 +732,16 @@ export interface WorkbenchV2MutationRequest {
   op: WorkbenchV2MutationOp;
   /** submit_action / adjust_status / cancel_project / set_reminder 等需要。 */
   projectId?: string;
-  /** create_project（ProjectWizardPayload）/ update_project（ProjectUpdatePayload）。 */
-  payload?: ProjectWizardPayload | ProjectUpdatePayload;
+  /** create_project（ProjectWizardPayload）/ update_project（ProjectUpdatePayload）/ batch_edit（BatchEditPayload）。 */
+  payload?: ProjectWizardPayload | ProjectUpdatePayload | BatchEditPayload;
   /** submit_action。 */
   action?: WorkbenchActionPayload;
-  /** set_reminder。 */
+  /** set_reminder：提醒日期（业务日期 yyyy-mm-dd）。 */
   reminderAt?: string | null;
   reminderNote?: string | null;
   /** adjust_status（拒绝 cancelled，取消走 cancel_project）。 */
   status?: AdjustableProjectStatus;
-  /** cancel_project。 */
+  /** cancel_project：取消日期（业务日期 yyyy-mm-dd）。 */
   time?: string;
   reason?: string;
   /** ship_to_complete。 */
@@ -709,6 +749,7 @@ export interface WorkbenchV2MutationRequest {
   accountId?: string;
   /** invoice_edit / invoice_revoke。 */
   invoiceId?: string;
+  /** invoice_edit：掉票日期（业务日期 yyyy-mm-dd）。 */
   invoicedAt?: string;
   amount?: string;
 }
@@ -720,6 +761,7 @@ export interface WorkbenchV2MutationResult {
     projectId?: string;
     requestId?: string;
     invoiceId?: string;
+    batchId?: string;
     status?: string;
     accountId?: string | null;
     created?: boolean;
@@ -730,11 +772,14 @@ export interface ProjectWizardPayload {
   intent: 'draft' | 'formal' | 'pre_entry_execution';
   customerName: string;
   ecc?: string;
+  /** 进单日期（业务日期 yyyy-mm-dd；正式进单必填，缺省当前日期）。 */
   entryAt?: string;
   region: string;
   oldSiteContact?: string;
   newSiteContact?: string;
+  /** 合同开始日期（业务日期 yyyy-mm-dd）。 */
   contractStartDate: string;
+  /** 合同截止日期（业务日期 yyyy-mm-dd）。 */
   contractEndDate: string;
   oldSiteAddress: string;
   newSiteAddress: string;
@@ -748,9 +793,12 @@ export interface ProjectWizardPayload {
   contractAmount?: string;
   /** 最终可确认金额（USD）：十进制字符串。 */
   finalAmount?: string;
+  /** 计划上门日期（业务日期 yyyy-mm-dd）。 */
   planVisitAt?: string;
+  /** 计划运输日期（业务日期 yyyy-mm-dd）。 */
   planTransportAt?: string;
   siteConfirmed: boolean;
+  /** 实际装机完成日期（业务日期 yyyy-mm-dd）。 */
   actualInstallDoneAt?: string;
   serviceOrderNo?: string;
   engineers?: string;
@@ -780,9 +828,9 @@ export interface ProjectUpdatePayload {
   /** 区域：去除首尾空白后精确分组；空串 = 清空区域。 */
   region?: string;
   /** 合同开始日期（yyyy-mm-dd；截止不得早于开始，由主进程校验）；null = 保留现值。 */
-  contractStartAt?: string | null;
+  contractStartDate?: string | null;
   /** 合同截止日期（yyyy-mm-dd）。 */
-  contractEndAt?: string | null;
+  contractEndDate?: string | null;
   /** 旧址联系人；null = 清空。 */
   oldSiteContact?: string | null;
   /** 新址联系人；null = 清空。 */
@@ -791,16 +839,16 @@ export interface ProjectUpdatePayload {
   oldSiteAddress?: string | null;
   /** 项目默认新址地址；null = 清空。 */
   newSiteAddress?: string | null;
-  /** 计划上门时间（ISO 字符串）；null = 清空。 */
+  /** 计划上门日期（yyyy-mm-dd）；null = 清空。 */
   plannedVisitAt?: string | null;
-  /** 计划运输时间（ISO 字符串）；null = 清空。 */
+  /** 计划运输日期（yyyy-mm-dd）；null = 清空。 */
   plannedTransportAt?: string | null;
   /** 场地确认状态；显式 false = 清除确认。 */
   siteConfirmed?: boolean;
   /** 已正式进单项目更正：ECC（去除首尾空白后全局唯一，必填非空；null 视为未提交）。 */
   ecc?: string | null;
-  /** 已正式进单项目更正：进单时间（业务时间，允许补录修正；null 视为未提交）。 */
-  enteredAt?: string | null;
+  /** 已正式进单项目更正：进单日期（业务日期 yyyy-mm-dd，允许补录修正；null 视为未提交）。 */
+  entryAt?: string | null;
   /**
    * 已正式进单项目更正：合同 USD 含税金额（十进制字符串，允许 0、拒绝负数，
    * 由主进程按 Money 精确解析为分；渲染层禁止 Number 参与金额计算）。
@@ -812,6 +860,34 @@ export interface ProjectUpdatePayload {
   finalConfirmableAmount?: string | null;
 }
 
+/**
+ * 搬迁批次编辑输入（v2 batch_edit，随请求 payload 提交）。
+ *
+ * 仅两个价格口径（与快速记录搬迁批次一致）：
+ * - `budgetPrice`=合同预算价 → 双写 batch.originalPriceCents 与 fee.budgetPriceCents；
+ * - `dealPrice`=物流成交价 → 双写 batch.discountedPriceCents、fee.dealPriceCents 与
+ *   fee.logisticsCostCents（物流成交价即最终实际费用）。
+ *
+ * 三态语义：`undefined` = 未提交保持现值；`null` = 显式清空（仅计划运输日期/运输公司）；
+ * 价格字段 `undefined` = 保持现值，有值 = 覆盖（必须 > 0，由主进程/领域校验）。
+ *
+ * 不允许修改 `appliedAt`（物流费用申请/登记时间）：契约不含该字段，
+ * 底层 updateLogisticsFee 亦不更新申请时间，编辑前后归属月份不变。
+ * 历史批次无 fee 时编辑价格会明确报错（不虚构申请时间创建费用），仅批次字段仍可编辑。
+ */
+export interface BatchEditPayload {
+  /** 目标批次 id。 */
+  batchId: string;
+  /** 计划运输日期（业务日期 yyyy-mm-dd）；null 或空串 = 清空。 */
+  planTransportDate?: string | null;
+  /** 运输公司；null = 清空。 */
+  transportCompany?: string | null;
+  /** 合同预算价（十进制字符串）→ batch.originalPriceCents + fee.budgetPriceCents。 */
+  budgetPrice?: string;
+  /** 物流成交价（十进制字符串）→ batch.discountedPriceCents + fee.dealPriceCents + fee.logisticsCostCents。 */
+  dealPrice?: string;
+}
+
 export type WorkbenchActionType =
   | 'batch' | 'instrument' | 'visit' | 'order' | 'logistics'
   | 'acceptance' | 'invoice' | 'ship_to' | 'damage' | 'core'
@@ -821,9 +897,17 @@ export interface WorkbenchActionPayload {
   type: WorkbenchActionType;
   projectId?: string;
   /**
-   * 业务动作字段值。金额字段（originalPrice/discountedPrice/budgetPrice/dealPrice/
-   * logisticsCost/amount/contractAmount/finalAmount/partAmount）为十进制字符串，
-   * 由主进程按 Money 精确解析；渲染层禁止 Number(value)*100 与浮点金额计算。
+   * 业务动作字段值。金额字段（budgetPrice/dealPrice/logisticsCost/amount/contractAmount/
+   * finalAmount/partAmount）为十进制字符串，由主进程按 Money 精确解析；渲染层禁止
+   * Number(value)*100 与浮点金额计算。
+   * 业务日期字段（planTransportDate/visitAt/orderedAt/appliedAt/invoicedAt/requestedAt/
+   * registeredAt/partRequestedAt/entryAt/updatedAt/reportDate 等）一律为 yyyy-mm-dd，
+   * 由主进程校验后透传，绝不转换为 ISO；审计/技术时间不在此提交。
+   * 快速记录搬迁批次（type='batch'）提交 planTransportDate/transportCompany/appliedAt/
+   * budgetPrice/dealPrice，主进程在同一事务内原子创建批次与其唯一一笔物流费用：
+   * budgetPrice=合同预算价 → batch.originalPriceCents + fee.budgetPriceCents；
+   * dealPrice=物流成交价 → batch.discountedPriceCents + fee.dealPriceCents +
+   * fee.logisticsCostCents（物流成交价即最终实际费用）。
    */
   values: Record<string, string | number | boolean | string[] | null>;
 }
@@ -840,6 +924,7 @@ export interface ReportFilterDto {
 export interface ReportDto {
   range: { from: string; to: string };
   filters: Record<string, string | null>;
+  /** 审计/技术生成时间（精确 ISO）。 */
   generatedAt: string;
   sections: Array<{ key: string; label: string; rows: Array<Record<string, string | number | boolean | null>> }>;
 }

@@ -94,7 +94,7 @@ const ACTIONS: Array<{
   {
     type: "batch",
     label: "搬迁批次",
-    help: "运输日期、运输公司与两档人民币报价",
+    help: "一次登记运输安排、费用日期和两项价格",
   },
   {
     type: "instrument",
@@ -108,16 +108,11 @@ const ACTIONS: Array<{
   },
   { type: "order", label: "开单记录", help: "搬迁、认证、单寄备件或 PM 开单" },
   {
-    type: "logistics",
-    label: "实际物流费用",
-    help: "登记时间、预算价格、成交价格与物流费用",
-  },
-  {
     type: "acceptance",
     label: "验收报告",
     help: "记录报告形成日期并进入待掉票",
   },
-  { type: "invoice", label: "掉票", help: "按 ECC 登记发生时间与金额" },
+  { type: "invoice", label: "掉票", help: "按 ECC 登记发生日期与金额" },
   {
     type: "ship_to",
     label: "Ship-to 申请",
@@ -131,7 +126,7 @@ const ACTIONS: Array<{
   {
     type: "core",
     label: "补齐进单核心资料",
-    help: "在原项目补齐合同、ECC 与进单时间",
+    help: "在原项目补齐合同、ECC 与进单日期",
   },
 ];
 
@@ -158,11 +153,12 @@ function requireV2<K extends V2Method>(
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-function localDateTime(value?: string | null): string {
-  if (!value) return "";
-  const date = new Date(value);
-  const offset = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+function businessDate(value?: string | null): string {
+  return value?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? "";
+}
+function todayDate(): string {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 function money(value: string | null, currency = "USD"): string {
   if (value === null || value === "") return "待补";
@@ -197,14 +193,18 @@ type LayerState =
   | {
       kind: "invoice-edit" | "invoice-revoke";
       invoice: Extract<WorkbenchV2SectionRow, { kind: "invoices" }>;
+    }
+  | {
+      kind: "batch-edit";
+      batch: Extract<WorkbenchV2SectionRow, { kind: "batches" }>;
     };
 
 type ProjectUpdatePayload = {
   projectId: string;
   customerName?: string;
   region?: string;
-  contractStartAt?: string | null;
-  contractEndAt?: string | null;
+  contractStartDate?: string | null;
+  contractEndDate?: string | null;
   oldSiteContact?: string | null;
   newSiteContact?: string | null;
   oldSiteAddress?: string | null;
@@ -213,7 +213,7 @@ type ProjectUpdatePayload = {
   plannedTransportAt?: string | null;
   siteConfirmed?: boolean;
   ecc?: string | null;
-  enteredAt?: string | null;
+  entryAt?: string | null;
   contractUsdTaxAmount?: string | null;
   finalConfirmableAmount?: string | null;
 };
@@ -221,6 +221,20 @@ type ProjectUpdatePayload = {
 function updateProjectRequest(payload: ProjectUpdatePayload): WorkbenchV2MutationRequest {
   // update_project 的共享类型由后端 lane 补齐；renderer 先按已约定 IPC 契约发出请求。
   return { op: "update_project", payload } as unknown as WorkbenchV2MutationRequest;
+}
+
+type BatchEditValues = {
+  planTransportDate: string;
+  transportCompany: string;
+  budgetPrice: string;
+  dealPrice: string;
+};
+
+function batchEditRequest(
+  batchId: string,
+  batchEdit: BatchEditValues,
+): WorkbenchV2MutationRequest {
+  return { op: "batch_edit", payload: { batchId, ...batchEdit } };
 }
 
 export function WorkbenchV2({
@@ -865,7 +879,7 @@ export function WorkbenchV2({
                   </span>
                   <strong>{item.customerName}</strong>
                   <small>{item.ecc ?? item.tempNo}</small>
-                  <p>{item.reminderNote || "查看提醒时间"}</p>
+                  <p>{item.reminderNote || "查看提醒日期"}</p>
                 </button>
               ))}
             </div>
@@ -1019,7 +1033,7 @@ export function WorkbenchV2({
                     <td>{project.region || "待补"}</td>
                     <td>
                       {project.reminderAt
-                        ? new Date(project.reminderAt).toLocaleString("zh-CN")
+                        ? businessDate(project.reminderAt)
                         : project.reminderNote || "—"}
                     </td>
                     <td>
@@ -1137,6 +1151,7 @@ export function WorkbenchV2({
           onInvoiceRevoke={(invoice) =>
             setLayer({ kind: "invoice-revoke", invoice })
           }
+          onBatchEdit={(batch) => setLayer({ kind: "batch-edit", batch })}
         />
       </main>
       {toast && <div className="toast success" role="status">{toast}</div>}
@@ -1272,6 +1287,16 @@ export function WorkbenchV2({
                 )
               }
             />
+          ) : layer.kind === "batch-edit" ? (
+            <BatchEditForm
+              batch={layer.batch}
+              onSave={(batchEdit) =>
+                mutate(
+                  batchEditRequest(layer.batch.id, batchEdit),
+                  "搬迁批次已更新",
+                )
+              }
+            />
           ) : layer.kind === "report" ? (
             <ReportPanelV2 />
           ) : null}
@@ -1381,8 +1406,8 @@ function ProjectContext({
         <h3>当前项目提醒</h3>
         <strong>
           {project.reminderAt
-            ? new Date(project.reminderAt).toLocaleString("zh-CN")
-            : "未设置提醒时间"}
+            ? businessDate(project.reminderAt)
+            : "未设置提醒日期"}
         </strong>
         <p>{project.reminderNote || "暂无提醒备注"}</p>
       </div>
@@ -1423,6 +1448,7 @@ function ProjectDetails({
   onPrevious,
   onInvoiceEdit,
   onInvoiceRevoke,
+  onBatchEdit,
 }: {
   project: WorkbenchProjectRow | null;
   detail: WorkbenchV2ProjectDetailDto | null;
@@ -1444,6 +1470,9 @@ function ProjectDetails({
   ) => void;
   onInvoiceRevoke: (
     invoice: Extract<WorkbenchV2SectionRow, { kind: "invoices" }>,
+  ) => void;
+  onBatchEdit: (
+    batch: Extract<WorkbenchV2SectionRow, { kind: "batches" }>,
   ) => void;
 }): JSX.Element {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -1572,9 +1601,9 @@ function ProjectDetails({
               {[
               ["主状态", STATUS_LABEL[project.status]],
               [
-                "进单时间",
+                "进单日期",
                 project.entryAt
-                  ? new Date(project.entryAt).toLocaleString("zh-CN")
+                  ? businessDate(project.entryAt)
                   : "待进单",
               ],
               ["所属区域", project.region || "待补"],
@@ -1596,6 +1625,7 @@ function ProjectDetails({
             page={section}
             onInvoiceEdit={onInvoiceEdit}
             onInvoiceRevoke={onInvoiceRevoke}
+            onBatchEdit={onBatchEdit}
           />
         )}
       </div>
@@ -1630,6 +1660,7 @@ function SectionTable({
   page,
   onInvoiceEdit,
   onInvoiceRevoke,
+  onBatchEdit,
 }: {
   page: WorkbenchV2SectionPageDto | null;
   onInvoiceEdit: (
@@ -1637,6 +1668,9 @@ function SectionTable({
   ) => void;
   onInvoiceRevoke: (
     invoice: Extract<WorkbenchV2SectionRow, { kind: "invoices" }>,
+  ) => void;
+  onBatchEdit: (
+    batch: Extract<WorkbenchV2SectionRow, { kind: "batches" }>,
   ) => void;
 }): JSX.Element {
   if (!page?.rows.length)
@@ -1649,7 +1683,9 @@ function SectionTable({
             {sectionColumns(page.kind).map((column) => (
               <th key={column}>{columnLabel(column)}</th>
             ))}
-            {page.kind === "invoices" && <th>操作</th>}
+            {(page.kind === "invoices" || page.kind === "batches") && (
+              <th>操作</th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -1659,7 +1695,7 @@ function SectionTable({
                 <td key={column}>
                   {formatCell(
                     column,
-                    (row as unknown as Record<string, unknown>)[column],
+                    sectionCellValue(row, column),
                   )}
                 </td>
               ))}
@@ -1685,6 +1721,16 @@ function SectionTable({
                   )}
                 </td>
               )}
+              {row.kind === "batches" && (
+                <td>
+                  <button
+                    className="button small"
+                    onClick={() => onBatchEdit(row)}
+                  >
+                    编辑
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -1700,8 +1746,8 @@ function sectionColumns(kind: WorkbenchV2SectionKind): string[] {
       ? [
           "planTransportDate",
           "transportCompany",
-          "originalPrice",
-          "discountedPrice",
+          "budgetPrice",
+          "dealPrice",
           "startedAt",
         ]
       : kind === "activities"
@@ -1732,15 +1778,15 @@ function columnLabel(key: string): string {
         qrRequested: "二维码是否申请",
         planTransportDate: "计划运输日期",
         transportCompany: "运输公司",
-        originalPrice: "预算价格",
-        discountedPrice: "成交价格",
-        startedAt: "运输开始时间",
-        visitAt: "到访时间",
+        budgetPrice: "合同预算价",
+        dealPrice: "物流成交价",
+        startedAt: "运输开始日期",
+        visitAt: "到访日期",
         engineers: "参与工程师",
-        invoicedAt: "掉票时间",
+        invoicedAt: "掉票日期",
         amount: "金额",
         active: "状态",
-        revokedAt: "撤销时间",
+        revokedAt: "撤销日期",
         instrumentName: "仪器名称",
         damageReason: "损坏原因",
         issueStatus: "事项状态",
@@ -1749,16 +1795,29 @@ function columnLabel(key: string): string {
         partStatus: "备件状态",
         serviceOrderNo: "服务单号",
         orderType: "开单类型",
-        orderedAt: "开单时间",
+        orderedAt: "开单日期",
         engineer: "工程师",
       } as Record<string, string>
     )[key] || key
   );
 }
+function sectionCellValue(
+  row: WorkbenchV2SectionRow,
+  column: string,
+): unknown {
+  const values = row as unknown as Record<string, unknown>;
+  if (row.kind === "batches" && column === "budgetPrice")
+    return values.budgetPrice ?? values.originalPrice;
+  if (row.kind === "batches" && column === "dealPrice")
+    return values.dealPrice ?? values.discountedPrice;
+  return values[column];
+}
 function formatCell(column: string, value: unknown): string {
   if (value === null || value === "") return "—";
   if (typeof value === "boolean") return value ? "是" : "否";
   if (column === "amount") return money(String(value));
+  if (["planTransportDate", "startedAt", "visitAt", "invoicedAt", "revokedAt", "orderedAt"].includes(column))
+    return businessDate(String(value)) || String(value);
   return String(value);
 }
 
@@ -1770,7 +1829,7 @@ function QuickMenu({
   return (
     <div>
       <p className="notice">
-        十类项目动作均写入当前项目。序列号地址更新与二维码申请位于独立导航。
+        九类项目动作均写入当前项目。序列号地址更新与二维码申请位于独立导航。
       </p>
       <div className="quick-grid">
         {ACTIONS.map((action) => (
@@ -1805,9 +1864,7 @@ function ActionFormV2({
     "damage",
   ].includes(type)
     ? "instruments"
-    : type === "logistics"
-      ? "batches"
-      : null;
+    : null;
   const [optionId, setOptionId] = useState("");
   const [shipTo, setShipTo] = useState<Extract<
     WorkbenchV2LookupRow,
@@ -1835,8 +1892,10 @@ function ActionFormV2({
       values.instrumentIds = [optionId];
     }
     if (optionKind === "batches" && optionId) values.batchId = optionId;
-    for (const key of ["ups", "qrRequested"])
-      values[key] = data.get(key) === "true";
+    if (type === "instrument") {
+      for (const key of ["ups", "qrRequested"])
+        values[key] = data.get(key) === "true";
+    }
     try {
       if (type === "ship_to" && shipTo)
         await onCompleteShipTo(shipTo.id, String(values.accountId || ""));
@@ -1852,12 +1911,12 @@ function ActionFormV2({
     <form
       onSubmit={(event) => void submit(event)}
       onChange={(event) => {
-        if (type !== "logistics") return;
+        if (type !== "batch") return;
         const data = new FormData(event.currentTarget);
         try {
           const budget = String(data.get("budgetPrice") || "");
           const deal = String(data.get("dealPrice") || "");
-          setWarning(budget && deal && centsOf(deal) > centsOf(budget) ? "成交价格高于预算价格，可以保存，请确认差额。" : "");
+          setWarning(budget && deal && centsOf(deal) > centsOf(budget) ? "物流成交价高于合同预算价，可以保存，请确认差额。" : "");
         } catch {
           setWarning("");
         }
@@ -1898,6 +1957,102 @@ function ActionFormV2({
   );
 }
 
+function BatchEditForm({
+  batch,
+  onSave,
+}: {
+  batch: Extract<WorkbenchV2SectionRow, { kind: "batches" }>;
+  onSave: (values: BatchEditValues) => Promise<void>;
+}): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submitLock = useRef(false);
+  const values = batch as unknown as Record<string, unknown>;
+  const budgetPrice = String(values.budgetPrice ?? values.originalPrice ?? "");
+  const dealPrice = String(values.dealPrice ?? values.discountedPrice ?? "");
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (submitLock.current) return;
+    submitLock.current = true;
+    setBusy(true);
+    setError("");
+    const data = new FormData(event.currentTarget);
+    try {
+      await onSave({
+        planTransportDate: String(data.get("planTransportDate") ?? ""),
+        transportCompany: String(data.get("transportCompany") ?? "").trim(),
+        budgetPrice: String(data.get("budgetPrice") ?? ""),
+        dealPrice: String(data.get("dealPrice") ?? ""),
+      });
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      submitLock.current = false;
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="project-edit-form" onSubmit={(event) => void submit(event)}>
+      <p className="notice">
+        修改本批次的运输安排和价格。费用登记日期保持首次登记月份，不在这里修改。
+      </p>
+      <div className="edit-form-sections">
+        <fieldset className="edit-form-section">
+          <legend>运输安排</legend>
+          <div className="form-grid">
+            <Field
+              name="planTransportDate"
+              label="计划运输日期"
+              type="date"
+              defaultValue={batch.planTransportDate ?? ""}
+              required
+              autoFocus
+            />
+            <Field
+              name="transportCompany"
+              label="运输公司"
+              defaultValue={batch.transportCompany ?? ""}
+              optional
+            />
+          </div>
+        </fieldset>
+        <fieldset className="edit-form-section">
+          <legend>价格</legend>
+          <div className="form-grid">
+            <Field
+              name="budgetPrice"
+              label="合同预算价"
+              type="number"
+              step="0.01"
+              min="0.01"
+              defaultValue={budgetPrice}
+              required
+            />
+            <Field
+              name="dealPrice"
+              label="物流成交价"
+              type="number"
+              step="0.01"
+              min="0.01"
+              defaultValue={dealPrice}
+              required
+            />
+          </div>
+        </fieldset>
+      </div>
+      {error && <div className="inline-error" role="alert">{error}</div>}
+      <div className="form-footer">
+        <span>保存后刷新当前项目的搬迁批次。</span>
+        <button className="button primary" disabled={busy}>
+          {busy ? "正在保存…" : "保存批次修改"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function actionFields(
   type: WorkbenchActionType,
   project: WorkbenchProjectRow,
@@ -1918,19 +2073,27 @@ function actionFields(
         />
         <Field name="transportCompany" label="运输公司" optional />
         <Field
-          name="originalPrice"
-          label="人民币原价"
-          type="number"
-          step="0.01"
-          optional
+          name="appliedAt"
+          label="费用登记日期"
+          type="date"
+          required
         />
         <Field
-          name="discountedPrice"
-          label="人民币折后价"
+          name="budgetPrice"
+          label="合同预算价"
           type="number"
           step="0.01"
-          optional
-          help="成交价格高于预算价格时会提示确认，但仍允许记录。"
+          min="0.01"
+          required
+        />
+        <Field
+          name="dealPrice"
+          label="物流成交价"
+          type="number"
+          step="0.01"
+          min="0.01"
+          required
+          help="物流成交价高于合同预算价时会提示确认，但仍允许记录。"
         />
       </>
     );
@@ -1966,8 +2129,8 @@ function actionFields(
       <>
         <Field
           name="visitAt"
-          label="到访时间"
-          type="datetime-local"
+          label="到访日期"
+          type="date"
           autoFocus
           optional
         />
@@ -2017,8 +2180,8 @@ function actionFields(
         <Field name="serviceOrderNo" label="服务单号" required help="保存时会同次创建开单记录，并关联下方工程师。" />
         <Field
           name="orderedAt"
-          label="开单时间"
-          type="datetime-local"
+          label="开单日期"
+          type="date"
           required
         />
         <Field name="engineer" label="工程师" required help="填写服务单号时必须在同一次保存中填写执行工程师。" />
@@ -2026,42 +2189,6 @@ function actionFields(
           name="customerName"
           label="客户单位"
           defaultValue={project.customerName}
-          required
-        />
-      </>
-    );
-  if (type === "logistics")
-    return (
-      <>
-        <Field
-          name="appliedAt"
-          label="物流费用申请时间"
-          type="datetime-local"
-          required
-        />
-        <Field
-          name="budgetPrice"
-          label="预算价格（RMB）"
-          type="number"
-          step="0.01"
-          min="0.01"
-          required
-          help="三项价格均按人民币记录，必须大于 0。"
-        />
-        <Field
-          name="dealPrice"
-          label="成交价格（RMB）"
-          type="number"
-          step="0.01"
-          min="0.01"
-          required
-        />
-        <Field
-          name="logisticsCost"
-          label="物流费用（RMB）"
-          type="number"
-          step="0.01"
-          min="0.01"
           required
         />
       </>
@@ -2081,8 +2208,8 @@ function actionFields(
       <>
         <Field
           name="invoicedAt"
-          label="掉票时间"
-          type="datetime-local"
+          label="掉票日期"
+          type="date"
           required
           autoFocus
         />
@@ -2185,8 +2312,8 @@ function actionFields(
         />
         <Field
           name="registeredAt"
-          label="登记时间"
-          type="datetime-local"
+          label="登记日期"
+          type="date"
           required
         />
       </>
@@ -2200,7 +2327,7 @@ function actionFields(
         required
         autoFocus
       />
-      <Field name="entryAt" label="进单时间" type="datetime-local" required />
+      <Field name="entryAt" label="进单日期" type="date" required />
       <Field
         name="contractAmount"
         label="合同 USD 含税金额"
@@ -2524,9 +2651,9 @@ function IndependentModuleV2({
               <Field name="accountId" label="Account ID" required />
               <Field
                 name="updatedAt"
-                label="更新时间"
-                type="datetime-local"
-                defaultValue={localDateTime(new Date().toISOString())}
+                label="更新日期"
+                type="date"
+                defaultValue={todayDate()}
                 required
               />
             </>
@@ -2541,9 +2668,9 @@ function IndependentModuleV2({
               />
               <Field
                 name="requestedAt"
-                label="申请时间"
-                type="datetime-local"
-                defaultValue={localDateTime(new Date().toISOString())}
+                label="申请日期"
+                type="date"
+                defaultValue={todayDate()}
                 required
               />
               <div className="field full" role="group" aria-labelledby="v2-qr-types-label">
@@ -2692,7 +2819,7 @@ function DataRows({
           <thead>
             <tr>
               <th>申请人</th>
-              <th>申请时间</th>
+              <th>申请日期</th>
               <th>申请类型</th>
               <th className="numeric">工作量</th>
             </tr>
@@ -2703,7 +2830,7 @@ function DataRows({
             row.kind === "qr_request" ? (
               <tr key={row.id}>
                 <td><strong>{row.applicant}</strong></td>
-                <td>{new Date(row.requestedAt).toLocaleString("zh-CN")}</td>
+                <td>{businessDate(row.requestedAt)}</td>
                 <td className="qr-type-list">
                   {row.types.map(
                     (type) => QR_REQUEST_TYPE_LABEL.get(type) ?? type,
@@ -2717,7 +2844,7 @@ function DataRows({
                   <strong>{row.customerName}</strong>
                   <small>{`${row.serialNo} · ${row.accountId}`}</small>
                 </td>
-                <td>{new Date(row.updatedAt).toLocaleString("zh-CN")}</td>
+                <td>{businessDate(row.updatedAt)}</td>
               </tr>
             ),
           )}
@@ -2756,8 +2883,8 @@ function ProjectEditForm({
           projectId: project.id,
           customerName: String(data.get("customerName") ?? "").trim(),
           region: String(data.get("region") ?? "").trim(),
-          contractStartAt: nullable(data, "contractStartAt"),
-          contractEndAt: nullable(data, "contractEndAt"),
+          contractStartDate: nullable(data, "contractStartDate"),
+          contractEndDate: nullable(data, "contractEndDate"),
           oldSiteContact: nullable(data, "oldSiteContact"),
           newSiteContact: nullable(data, "newSiteContact"),
           oldSiteAddress: nullable(data, "oldSiteAddress"),
@@ -2770,7 +2897,7 @@ function ProjectEditForm({
         await onSave({
           projectId: project.id,
           ecc: nullable(data, "ecc"),
-          enteredAt: nullable(data, "enteredAt"),
+          entryAt: nullable(data, "entryAt"),
           contractUsdTaxAmount: nullable(data, "contractUsdTaxAmount"),
           finalConfirmableAmount: nullable(data, "finalConfirmableAmount"),
         });
@@ -2792,7 +2919,7 @@ function ProjectEditForm({
             <legend>进单识别</legend>
             <div className="form-grid">
               <Field name="ecc" label="ECC" defaultValue={project.ecc ?? ""} required autoFocus />
-              <Field name="enteredAt" label="进单时间" type="datetime-local" defaultValue={localDateTime(project.entryAt)} required />
+              <Field name="entryAt" label="进单日期" type="date" defaultValue={businessDate(project.entryAt)} required />
             </div>
           </fieldset>
           <fieldset className="edit-form-section">
@@ -2820,8 +2947,8 @@ function ProjectEditForm({
           <div className="form-grid">
             <Field name="customerName" label="客户名称" defaultValue={project.customerName} required autoFocus />
             <Field name="region" label="区域" defaultValue={project.region ?? ""} required />
-            <Field name="contractStartAt" label="合同开始日期" type="date" defaultValue={detail?.contractStartDate ?? ""} optional />
-            <Field name="contractEndAt" label="合同截止日期" type="date" defaultValue={detail?.contractEndDate ?? ""} optional />
+            <Field name="contractStartDate" label="合同开始日期" type="date" defaultValue={detail?.contractStartDate ?? ""} optional />
+            <Field name="contractEndDate" label="合同截止日期" type="date" defaultValue={detail?.contractEndDate ?? ""} optional />
           </div>
         </fieldset>
         <fieldset className="edit-form-section">
@@ -2836,8 +2963,8 @@ function ProjectEditForm({
         <fieldset className="edit-form-section">
           <legend>执行准备</legend>
           <div className="form-grid">
-            <Field name="plannedVisitAt" label="计划上门时间" type="datetime-local" defaultValue={localDateTime(detail?.planVisitAt)} optional />
-            <Field name="plannedTransportAt" label="计划运输时间" type="datetime-local" defaultValue={localDateTime(detail?.planTransportAt)} optional />
+            <Field name="plannedVisitAt" label="计划上门日期" type="date" defaultValue={businessDate(detail?.planVisitAt)} optional />
+            <Field name="plannedTransportAt" label="计划运输日期" type="date" defaultValue={businessDate(detail?.planTransportAt)} optional />
             <label className="confirm-check full">
               <input name="siteConfirmed" type="checkbox" defaultChecked={detail?.siteConfirmed ?? false} />
               现场条件已确认
@@ -2861,10 +2988,12 @@ function ProjectCreateForm({
 }): JSX.Element {
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState<Record<string, string>>(() => ({
-    entryAt: localDateTime(new Date().toISOString()),
+    entryAt: todayDate(),
   }));
+  const [eccValue, setEccValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const hasEcc = Boolean(eccValue.trim());
   function collect(form: HTMLFormElement): Record<string, string> {
     const next = { ...draft };
     new FormData(form).forEach((value, key) => {
@@ -2882,6 +3011,18 @@ function ProjectCreateForm({
     }
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const intent = (submitter?.value || "formal") as ProjectWizardPayload["intent"];
+    if (intent === "formal" && !values.ecc?.trim()) {
+      setError("正式进单必须填写 ECC；如暂未取得 ECC，请选择“未进单先执行”。");
+      return;
+    }
+    if (intent === "pre_entry_execution" && values.ecc?.trim()) {
+      setError("已填写 ECC，请直接选择“正式进单”，不能标记为未进单先执行。");
+      return;
+    }
+    if (intent === "pre_entry_execution" && !values.approvalReason?.trim()) {
+      setError("未进单先执行必须填写经理批复原因。");
+      return;
+    }
     if (values.serviceOrderNo?.trim() && !values.engineers?.trim()) {
       setError("已填写服务单号，请先补齐参与工程师；项目与开单均未保存。");
       return;
@@ -2958,11 +3099,11 @@ function ProjectCreateForm({
             />
             <Field
               name="entryAt"
-              label="进单时间"
-              type="datetime-local"
+              label="进单日期"
+              type="date"
               defaultValue={draft.entryAt}
               optional
-              help="正式进单统计口径；默认当前时间，可补录或修正，待进单时可留空。"
+              help="正式进单统计口径；默认今天，可补录或修正，待进单时可留空。"
             />
             <Field name="oldSiteContact" label="旧址联系人" defaultValue={draft.oldSiteContact} optional />
             <Field name="newSiteContact" label="新址联系人" defaultValue={draft.newSiteContact} optional />
@@ -3025,22 +3166,22 @@ function ProjectCreateForm({
           <>
             <Field
               name="planVisitAt"
-              label="计划上门时间"
-              type="datetime-local"
+              label="计划上门日期"
+              type="date"
               defaultValue={draft.planVisitAt}
               optional
             />
             <Field
               name="planTransportAt"
-              label="计划运输时间"
-              type="datetime-local"
+              label="计划运输日期"
+              type="date"
               defaultValue={draft.planTransportAt}
               optional
             />
             <Field
               name="actualInstallDoneAt"
-              label="实际装机完成时间"
-              type="datetime-local"
+              label="实际装机完成日期"
+              type="date"
               defaultValue={draft.actualInstallDoneAt}
               optional
             />
@@ -3071,7 +3212,7 @@ function ProjectCreateForm({
               label="开单备注"
               defaultValue={draft.serviceOrderNote}
               optional
-              help="可后补；开单时间默认当前时间。"
+              help="可后补；开单日期默认今天。"
             />
           </>
         ) : (
@@ -3086,7 +3227,7 @@ function ProjectCreateForm({
             <dl className="summary-grid" aria-labelledby="wizard-summary-title">
               {[
                 ["客户 / 区域", `${draft.customerName || "待补"} / ${draft.region || "待补"}`],
-                ["进单时间", draft.entryAt || "待进单时可留空"],
+                ["进单日期", draft.entryAt || "待进单时可留空"],
                 ["旧址 / 新址联系人", `${draft.oldSiteContact || "待补"} / ${draft.newSiteContact || "待补"}`],
                 ["合同日期", `${draft.contractStartDate || "待补"} 至 ${draft.contractEndDate || "待补"}`],
                 ["搬迁地址", `${draft.oldSiteAddress || "待补"} → ${draft.newSiteAddress || "待补"}`],
@@ -3103,23 +3244,43 @@ function ProjectCreateForm({
               ))}
             </dl>
             <div className="confirm-fields form-grid" aria-label="确认方式补充资料">
-              <Field name="ecc" label="ECC" defaultValue={draft.ecc} optional help="正式进单前必须补齐 ECC。" />
+              <Field
+                name="ecc"
+                label="ECC"
+                defaultValue={draft.ecc}
+                optional
+                help={hasEcc ? "已填写 ECC，本次只能正式进单。" : "无 ECC 时仅可选择未进单先执行。"}
+                onChange={(event) => {
+                  const ecc = event.currentTarget.value;
+                  setEccValue(ecc);
+                  setDraft((current) => ({ ...current, ecc }));
+                  setError("");
+                }}
+              />
               <Field name="finalAmount" label="最终可确认金额（USD）" type="number" step="0.01" defaultValue={draft.finalAmount} optional />
-              <Field name="approvalReason" label="经理批复原因" defaultValue={draft.approvalReason} optional />
+              <Field
+                name="approvalReason"
+                label="经理批复原因"
+                defaultValue={draft.approvalReason}
+                required={!hasEcc}
+                optional={hasEcc}
+                help={hasEcc ? "正式进单无需填写。" : "未进单先执行必须记录经理批复原因。"}
+              />
               <Field name="missingItems" label="缺失资料" defaultValue={draft.missingItems} optional />
             </div>
+            <p className="notice" role="status">
+              {hasEcc
+                ? "已取得 ECC：请正式进单，未进单先执行不可选。"
+                : "暂未取得 ECC：项目将显示“未进单先执行”特殊标记，作为待补 ECC 提醒；请填写经理批复原因，并及时补齐 ECC 后正式进单。"}
+            </p>
             <div className="save-paths" aria-label="保存路径">
-              <button name="intent" value="draft" disabled={busy}>
-                <strong>保存为待进单</strong>
-                <span>保存当前资料，项目保持待进单。</span>
-              </button>
-              <button name="intent" value="pre_entry_execution" disabled={busy}>
+              <button name="intent" value="pre_entry_execution" disabled={busy || hasEcc}>
                 <strong>未进单先执行</strong>
-                <span>记录经理批复，主状态仍保持待进单。</span>
+                <span>{hasEcc ? "已填写 ECC，请改为正式进单。" : "记录经理批复并添加特殊标记，主状态保持待进单。"}</span>
               </button>
-              <button className="primary-path" name="intent" value="formal" disabled={busy}>
+              <button className="primary-path" name="intent" value="formal" disabled={busy || !hasEcc}>
                 <strong>正式进单</strong>
-                <span>校验 ECC、进单时间、合同与搬迁范围。</span>
+                <span>{hasEcc ? "校验进单日期、合同与搬迁范围。" : "请先填写 ECC。"}</span>
               </button>
             </div>
           </div>
@@ -3142,7 +3303,7 @@ function ProjectCreateForm({
         {step < 4 ? (
           <button className="button primary" disabled={busy}>下一步</button>
         ) : (
-          <span>选择上方一种保存路径；提交时继续执行现有业务校验。</span>
+          <span>保存路径由 ECC 自动限定；提交时继续执行现有业务校验。</span>
         )}
       </div>
     </form>
@@ -3176,9 +3337,9 @@ function ReminderFormV2({
       <div className="form-grid">
         <Field
           name="at"
-          label="当前提醒时间"
-          type="datetime-local"
-          defaultValue={localDateTime(project.reminderAt)}
+          label="当前提醒日期"
+          type="date"
+          defaultValue={businessDate(project.reminderAt)}
         />
         <Field
           name="note"
@@ -3230,9 +3391,9 @@ function CancelFormV2({
       <div className="form-grid">
         <Field
           name="time"
-          label="取消时间"
-          type="datetime-local"
-          defaultValue={localDateTime(new Date().toISOString())}
+          label="取消日期"
+          type="date"
+          defaultValue={todayDate()}
           required
           autoFocus
         />
@@ -3288,11 +3449,9 @@ function InvoiceMutationForm({
       <div className="form-grid">
         <Field
           name="time"
-          label={mode === "edit" ? "掉票时间" : "撤销时间"}
-          type="datetime-local"
-          defaultValue={localDateTime(
-            mode === "edit" ? invoice.invoicedAt : new Date().toISOString(),
-          )}
+          label={mode === "edit" ? "掉票日期" : "撤销日期"}
+          type="date"
+          defaultValue={mode === "edit" ? businessDate(invoice.invoicedAt) : todayDate()}
           required
           autoFocus
         />
@@ -3634,6 +3793,7 @@ function layerTitle(layer: LayerState): string {
     return layer.module === "serial_address" ? "序列号地址更新" : "二维码申请";
   if (layer.kind === "invoice-edit") return "编辑掉票";
   if (layer.kind === "invoice-revoke") return "撤销掉票";
+  if (layer.kind === "batch-edit") return "编辑搬迁批次";
   if (layer.kind === "action")
     return (
       ACTIONS.find((action) => action.type === layer.action)?.label ||
@@ -3650,7 +3810,7 @@ function layerDescription(
   if (layer.kind === "correct-entry") return project ? `${project.customerName} · 已正式进单项目` : "已正式进单项目";
   if (layer.kind === "report") return "手工月份区间与有界导出";
   if (layer.kind === "independent") return "独立模块 · 记录按页读取";
-  if (layer.kind === "cancel") return "记录取消时间与原因（终态，不可恢复）";
+  if (layer.kind === "cancel") return "记录取消日期与原因（终态，不可恢复）";
   return project
     ? `${project.customerName} · ${project.ecc || project.tempNo}`
     : "选择需要记录的动作";

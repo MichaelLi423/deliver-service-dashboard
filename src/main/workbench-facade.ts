@@ -1,9 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { Money, formatCents } from '../domain/core/money';
 import { ValidationError } from '../domain/core/errors';
-import { SystemClock } from '../domain/core/time';
+import { SystemClock, assertValidBusinessDate } from '../domain/core/time';
 import { CustomerService, ProjectService, isFormallyEntered, type ProjectStatusOrCancelled } from '../domain/capabilities/relocation-project-lifecycle';
-import { ExecutionService, type WorkType } from '../domain/capabilities/relocation-execution';
+import { ExecutionService, type BatchQuoteInput, type WorkType } from '../domain/capabilities/relocation-execution';
 import { ServiceOrderService } from '../domain/capabilities/service-order-recording';
 import { ReminderService } from '../domain/capabilities/workbench-todos';
 import { ShipToService } from '../domain/capabilities/ship-to-management';
@@ -26,7 +26,7 @@ import {
 } from '../domain/capabilities/local-data-persistence';
 import { readBusinessRevision } from '../domain/capabilities/local-data-persistence/identity';
 import type {
-  AccountSessionInfo, ProjectUpdatePayload, ProjectWizardPayload, ReportDto, ReportFilterDto, ShipToRequestDto,
+  AccountSessionInfo, BatchEditPayload, ProjectUpdatePayload, ProjectWizardPayload, ReportDto, ReportFilterDto, ShipToRequestDto,
   ShipToRequestInputDto, ShipToRequestResultDto, ShipToRequestStatus, WorkbenchActionPayload,
   WorkbenchV2IndependentPageDto, WorkbenchV2IndependentPageRequest, WorkbenchV2InvalidateTag,
   WorkbenchV2LookupPageDto, WorkbenchV2LookupPageRequest, WorkbenchV2MutationRequest,
@@ -47,9 +47,16 @@ const parseAmountInput = (value: unknown): bigint => {
 };
 const text = (v: unknown): string => String(v ?? '').trim();
 const optional = (v: unknown): string | undefined => text(v) || undefined;
-const iso = (v: unknown): string | undefined => {
+/**
+ * IPC 业务日期边界：renderer 提交 yyyy-mm-dd（business date），主进程仅校验格式后原样透传，
+ * 绝不转换为 ISO（design D30：业务时间仅记录业务日期；审计/技术时间保留精确 ISO）。
+ * 空/缺失返回 undefined，由调用方决定 null（清空）或 undefined（未提交）语义。
+ */
+const businessDate = (v: unknown, fieldName: string): string | undefined => {
   const raw = optional(v);
-  return raw ? new Date(raw).toISOString() : undefined;
+  if (raw === undefined) return undefined;
+  assertValidBusinessDate(raw, fieldName);
+  return raw;
 };
 
 export class WorkbenchFacade {
@@ -224,6 +231,12 @@ export class WorkbenchFacade {
         changed = { projectId: ref.projectId, invoiceId: ref.invoiceId, status: 'revoked' };
         break;
       }
+      case 'batch_edit': {
+        const edit = request.payload as BatchEditPayload;
+        const ref = this.writeEditBatch(edit);
+        changed = { projectId: ref.projectId, batchId: ref.batchId };
+        break;
+      }
       default:
         throw new ValidationError('V2_MUTATION_UNKNOWN', `未知的 v2 mutation 操作: ${String((request as { op?: unknown }).op)}`);
     }
@@ -256,11 +269,18 @@ export class WorkbenchFacade {
       projectService.linkCustomer(project.id, customer.id);
       projectService.setRegion(project.id, input.region);
       projectService.updateBasicInfo(project.id, { oldSiteContact: input.oldSiteContact, newSiteContact: input.newSiteContact, oldSiteAddress: input.oldSiteAddress, newSiteAddress: input.newSiteAddress, contractStartDate: input.contractStartDate, contractEndDate: input.contractEndDate });
-      projectService.updateExecutionPreparation(project.id, { planVisitAt: input.planVisitAt ? new Date(input.planVisitAt).toISOString() : null, planTransportAt: input.planTransportAt ? new Date(input.planTransportAt).toISOString() : null, siteConfirmed: input.siteConfirmed });
+      projectService.updateExecutionPreparation(project.id, {
+        planVisitAt: input.planVisitAt ? businessDate(input.planVisitAt, '计划上门日期') ?? null : null,
+        planTransportAt: input.planTransportAt ? businessDate(input.planTransportAt, '计划运输日期') ?? null : null,
+        siteConfirmed: input.siteConfirmed,
+      });
       const execution = this.executionService();
       execution.registerInstrument(project.id, { name:input.instrumentName, model:input.model, ups:input.ups, qrRequested:false }, actor);
       projectService.confirmScope(project.id);
-      if ((input.contractAmount ?? '') !== '' || input.intent === 'formal') {
+      // ECC 是是否正式进单的唯一依据：携带非空 ECC 一律按正式进单落库（与 intent 无关），
+      // 此时必须补建合同（正式进单前置校验要求）。
+      const ecc = text(input.ecc);
+      if ((input.contractAmount ?? '') !== '' || input.intent === 'formal' || ecc !== '') {
         projectService.attachContract(project.id);
         this.financialService().setContractUsdTaxAmount(project.id, parseAmountInput(input.contractAmount));
       }
@@ -268,9 +288,25 @@ export class WorkbenchFacade {
         if (!input.engineers?.trim()) throw new Error('填写服务单号时参与工程师必填；项目与开单均未保存');
         new ServiceOrderService(this.orders, this.projects).recordOrder({ orderType:'relocation', serviceOrderNo:input.serviceOrderNo, engineer:input.engineers, customerName:input.customerName, projectId:project.id, note:input.serviceOrderNote }, actor);
       }
-      if (input.intent === 'pre_entry_execution') projectService.setPreEntryExecution(project.id, { reason:input.approvalReason ?? '', missingItems:input.missingItems ?? '' });
-      if (input.intent === 'formal') projectService.formalEntry(project.id, { ecc:input.ecc ?? '', entryAt:input.entryAt ? new Date(input.entryAt).toISOString() : undefined, finalConfirmableAmountCents: (input.finalAmount ?? '') === '' ? undefined : parseAmountInput(input.finalAmount) });
-      if (input.actualInstallDoneAt) projectService.recordActualInstallDone(project.id, new Date(input.actualInstallDoneAt).toISOString());
+      // 保存路径（intent 仅约束无 ECC 场景）：
+      // - 有非空 ECC：必须正式进单（entryAt 有值、formallyEntered=true），并把主状态推进为
+      //   待执行（不得仍为待进单）；即使 intent=pre_entry_execution 也不保留未进单先执行标签；
+      // - 无 ECC：只允许 intent=pre_entry_execution（经理批复原因必填，沿用既有校验），结果
+      //   status=pending_entry、preEntryExecution=true、formallyEntered=false；
+      // - intent=formal 无 ECC：继续报 ECC_REQUIRED；
+      // - intent=draft（或缺失）无 ECC：安全明确错误，不静默创建待进单项目。
+      if (ecc !== '') {
+        projectService.formalEntry(project.id, { ecc, entryAt: businessDate(input.entryAt, '进单日期'), finalConfirmableAmountCents: (input.finalAmount ?? '') === '' ? undefined : parseAmountInput(input.finalAmount) });
+        const advanced = projectService.adjustStatus(project.id, 'pending_execution');
+        if (!advanced.ok) throw new Error(advanced.errors.join('；'));
+      } else if (input.intent === 'formal') {
+        projectService.formalEntry(project.id, { ecc: '', entryAt: businessDate(input.entryAt, '进单日期'), finalConfirmableAmountCents: (input.finalAmount ?? '') === '' ? undefined : parseAmountInput(input.finalAmount) });
+      } else if (input.intent === 'pre_entry_execution') {
+        projectService.setPreEntryExecution(project.id, { reason: input.approvalReason ?? '', missingItems: input.missingItems ?? '' });
+      } else {
+        throw new ValidationError('DRAFT_NOT_ALLOWED', '普通草稿创建已停用：无 ECC 的项目请选择「未进单先执行」并填写经理批复原因');
+      }
+      if (input.actualInstallDoneAt) projectService.recordActualInstallDone(project.id, businessDate(input.actualInstallDoneAt, '实际装机完成日期') ?? '');
     });
     return { projectId };
   }
@@ -308,10 +344,18 @@ export class WorkbenchFacade {
       }
 
       // 基础字段与合同起止日期（缺省取现值合并；截止不得早于开始由领域校验）。
+      // 字段名兼容：renderer 新契约使用 contractStartDate/contractEndDate，旧名 contractStartAt/
+      // contractEndAt 继续接受（保留既有调用方）。
+      const contractStartDate = update.contractStartDate !== undefined
+        ? update.contractStartDate
+        : (update as ProjectUpdatePayload & { contractStartAt?: string | null }).contractStartAt;
+      const contractEndDate = update.contractEndDate !== undefined
+        ? update.contractEndDate
+        : (update as ProjectUpdatePayload & { contractEndAt?: string | null }).contractEndAt;
       if (
         update.oldSiteContact !== undefined || update.newSiteContact !== undefined ||
         update.oldSiteAddress !== undefined || update.newSiteAddress !== undefined ||
-        update.contractStartAt !== undefined || update.contractEndAt !== undefined
+        contractStartDate !== undefined || contractEndDate !== undefined
       ) {
         const current = this.projects.findById(projectId)!;
         projectService.updateBasicInfo(projectId, {
@@ -319,36 +363,40 @@ export class WorkbenchFacade {
           newSiteContact: update.newSiteContact !== undefined ? update.newSiteContact : current.newSiteContact,
           oldSiteAddress: update.oldSiteAddress !== undefined ? update.oldSiteAddress : current.oldSiteAddress,
           newSiteAddress: update.newSiteAddress !== undefined ? update.newSiteAddress : current.newSiteAddress,
-          contractStartDate: update.contractStartAt ?? current.contractStartDate ?? '',
-          contractEndDate: update.contractEndAt ?? current.contractEndDate ?? '',
+          contractStartDate: contractStartDate ?? current.contractStartDate ?? '',
+          contractEndDate: contractEndDate ?? current.contractEndDate ?? '',
         });
       }
 
       if (update.region !== undefined) projectService.setRegion(projectId, update.region);
 
-      // 执行准备：计划上门/运输时间（null=清空）与现场确认（显式 false=清除）。
+      // 执行准备：计划上门/运输日期（null=清空，业务日期 yyyy-mm-dd）与现场确认（显式 false=清除）。
       if (update.plannedVisitAt !== undefined || update.plannedTransportAt !== undefined || update.siteConfirmed !== undefined) {
         projectService.updateExecutionPreparation(projectId, {
-          planVisitAt: update.plannedVisitAt === undefined ? undefined : update.plannedVisitAt === null ? null : new Date(update.plannedVisitAt).toISOString(),
-          planTransportAt: update.plannedTransportAt === undefined ? undefined : update.plannedTransportAt === null ? null : new Date(update.plannedTransportAt).toISOString(),
+          planVisitAt: update.plannedVisitAt === undefined ? undefined : update.plannedVisitAt === null ? null : businessDate(update.plannedVisitAt, '计划上门日期'),
+          planTransportAt: update.plannedTransportAt === undefined ? undefined : update.plannedTransportAt === null ? null : businessDate(update.plannedTransportAt, '计划运输日期'),
           siteConfirmed: update.siteConfirmed,
         });
       }
 
       // 以下更正仅允许已正式进单项目；待进单项目必须走 core/formalEntry 语义。
+      // 进单日期字段名兼容：新契约 entryAt，旧名 enteredAt 继续接受。
+      const entryAt = update.entryAt !== undefined
+        ? update.entryAt
+        : (update as ProjectUpdatePayload & { enteredAt?: string | null }).enteredAt;
       if (
         !formallyEntered &&
-        (update.ecc !== undefined || update.enteredAt !== undefined || update.contractUsdTaxAmount !== undefined || update.finalConfirmableAmount !== undefined)
+        (update.ecc !== undefined || entryAt !== undefined || update.contractUsdTaxAmount !== undefined || update.finalConfirmableAmount !== undefined)
       ) {
         throw new ValidationError(
           'UPDATE_REQUIRES_FORMAL_ENTRY',
-          'ECC、进单时间、合同金额与最终可确认金额更正仅允许已正式进单项目；待进单项目请使用正式进单/补齐核心资料',
+          'ECC、进单日期、合同金额与最终可确认金额更正仅允许已正式进单项目；待进单项目请使用正式进单/补齐核心资料',
         );
       }
 
-      // ECC/进单时间为必填业务字段，null 视为未提交（不可清空）。
+      // ECC/进单日期为必填业务字段，null 视为未提交（不可清空）。
       if (update.ecc != null) projectService.updateEcc(projectId, update.ecc);
-      if (update.enteredAt != null) projectService.setEntryAt(projectId, new Date(update.enteredAt).toISOString());
+      if (entryAt != null && entryAt !== '') projectService.setEntryAt(projectId, businessDate(entryAt, '进单日期') ?? '');
       // 合同金额允许 0、拒绝负数（领域 5.1）；最终可确认金额必须 > 0 且不低于累计有效掉票（领域 5.4），
       // 空串/null 解析为 0，由领域校验拒绝非法清空。
       if (update.contractUsdTaxAmount !== undefined) this.financialService().setContractUsdTaxAmount(projectId, parseAmountInput(update.contractUsdTaxAmount));
@@ -363,20 +411,57 @@ export class WorkbenchFacade {
     if (payload.type === 'qr_request') {
       new QrRequestService(this.qrRequests).createRequest({
         applicant: text(v.applicant),
-        requestedAt: iso(v.requestedAt),
+        requestedAt: businessDate(v.requestedAt, '申请日期') ?? '',
         types: (Array.isArray(v.types) ? v.types : []) as QrRequestTypeCode[],
       }, actor);
       return {};
     }
     this.transaction(() => {
       switch (payload.type) {
-        case 'batch': { const b=this.executionService().createBatch(projectId,actor); this.executionService().updateBatchQuote(b.id,{planTransportDate:optional(v.planTransportDate)??null,transportCompany:optional(v.transportCompany)??null,originalPriceCents:optional(v.originalPrice)?parseAmountInput(v.originalPrice):null,discountedPriceCents:optional(v.discountedPrice)?parseAmountInput(v.discountedPrice):null},actor); break; }
+        case 'batch': {
+          // 快速记录搬迁批次：同一事务原子创建批次与其唯一一笔物流费用（每批次仅一笔）。
+          // 仅两个价格口径——budgetPrice=合同预算价 → batch.originalPriceCents + fee.budgetPriceCents；
+          // dealPrice=物流成交价 → batch.discountedPriceCents + fee.dealPriceCents +
+          // fee.logisticsCostCents（物流成交价即最终实际费用）。
+          // planTransportDate/appliedAt/budgetPrice/dealPrice 必填，transportCompany 可选。
+          const execution = this.executionService();
+          const planTransportDate = optional(v.planTransportDate) ?? null;
+          if (planTransportDate === null) {
+            throw new ValidationError('BATCH_PLAN_TRANSPORT_DATE_REQUIRED', '快速记录搬迁批次：计划运输日期必填');
+          }
+          const appliedAt = businessDate(v.appliedAt, '物流费用申请（登记）日期');
+          if (appliedAt === undefined) {
+            throw new ValidationError('LOGISTICS_APPLIED_AT_REQUIRED', '快速记录搬迁批次：物流费用申请（登记）日期必填');
+          }
+          const budgetPriceCents = parseAmountInput(v.budgetPrice);
+          const dealPriceCents = parseAmountInput(v.dealPrice);
+          if (budgetPriceCents <= 0n) {
+            throw new ValidationError('LOGISTICS_BUDGET_PRICE_REQUIRED', '快速记录搬迁批次：合同预算价必填且必须大于 0');
+          }
+          if (dealPriceCents <= 0n) {
+            throw new ValidationError('LOGISTICS_DEAL_PRICE_REQUIRED', '快速记录搬迁批次：物流成交价必填且必须大于 0');
+          }
+          const batch = execution.createBatch(projectId, actor);
+          execution.updateBatchQuote(batch.id, {
+            planTransportDate,
+            transportCompany: optional(v.transportCompany) ?? null,
+            originalPriceCents: budgetPriceCents,
+            discountedPriceCents: dealPriceCents,
+          }, actor);
+          execution.recordLogisticsFee(batch.id, {
+            appliedAt,
+            budgetPriceCents,
+            dealPriceCents,
+            logisticsCostCents: dealPriceCents,
+          }, actor);
+          break;
+        }
         case 'instrument': this.executionService().registerInstrument(projectId,{name:text(v.name),model:optional(v.model),serialNo:optional(v.serialNo),batchId:optional(v.batchId),ups:Boolean(v.ups),qrRequested:Boolean(v.qrRequested)},actor); break;
-        case 'visit': { const e=text(v.engineers).split(/[、,，]/).filter(Boolean); const a=this.executionService().createActivity(projectId,iso(v.visitAt)??null,e,actor); const ids=Array.isArray(v.instrumentIds)?v.instrumentIds.map(String):[text(v.instrumentId)].filter(Boolean); const types=Array.isArray(v.workTypes)?v.workTypes as WorkType[]:[text(v.workType) as WorkType]; for(const id of ids) for(const type of types){this.executionService().startWorkFact(a.id,id,type,actor); if(v.status==='done')this.executionService().completeWorkFact(a.id,id,type,actor);} break; }
-        case 'order': new ServiceOrderService(this.orders,this.projects).recordOrder({orderType:text(v.orderType) as 'relocation'|'certification'|'parts_by_mail'|'pm',serviceOrderNo:text(v.serviceOrderNo),orderedAt:iso(v.orderedAt),engineer:text(v.engineer),customerName:text(v.customerName),projectId:text(v.orderType)==='relocation'?projectId:null,note:optional(v.note)},actor); break;
-        case 'logistics': this.executionService().recordLogisticsFee(text(v.batchId),{appliedAt:iso(v.appliedAt),budgetPriceCents:parseAmountInput(v.budgetPrice),dealPriceCents:parseAmountInput(v.dealPrice),logisticsCostCents:parseAmountInput(v.logisticsCost)},actor); break;
+        case 'visit': { const e=text(v.engineers).split(/[、,，]/).filter(Boolean); const a=this.executionService().createActivity(projectId,businessDate(v.visitAt,'到访日期')??null,e,actor); const ids=Array.isArray(v.instrumentIds)?v.instrumentIds.map(String):[text(v.instrumentId)].filter(Boolean); const types=Array.isArray(v.workTypes)?v.workTypes as WorkType[]:[text(v.workType) as WorkType]; for(const id of ids) for(const type of types){this.executionService().startWorkFact(a.id,id,type,actor); if(v.status==='done')this.executionService().completeWorkFact(a.id,id,type,actor);} break; }
+        case 'order': new ServiceOrderService(this.orders,this.projects).recordOrder({orderType:text(v.orderType) as 'relocation'|'certification'|'parts_by_mail'|'pm',serviceOrderNo:text(v.serviceOrderNo),orderedAt:businessDate(v.orderedAt,'开单日期') ?? '',engineer:text(v.engineer),customerName:text(v.customerName),projectId:text(v.orderType)==='relocation'?projectId:null,note:optional(v.note)},actor); break;
+        case 'logistics': this.executionService().recordLogisticsFee(text(v.batchId),{appliedAt:businessDate(v.appliedAt,'物流费用申请（登记）日期') ?? '',budgetPriceCents:parseAmountInput(v.budgetPrice),dealPriceCents:parseAmountInput(v.dealPrice),logisticsCostCents:parseAmountInput(v.logisticsCost)},actor); break;
         case 'acceptance': this.projectService().markAcceptance(projectId,text(v.reportDate)); break;
-        case 'invoice': this.financialService().recordInvoice(projectId,{invoicedAt:iso(v.invoicedAt),amountCents:parseAmountInput(v.amount)},actor); break;
+        case 'invoice': this.financialService().recordInvoice(projectId,{invoicedAt:businessDate(v.invoicedAt,'掉票日期') ?? '',amountCents:parseAmountInput(v.amount)},actor); break;
         case 'ship_to': {
           const service=this.shipToService();
           const request=service.createRequest({customerName:text(v.customerName),newSiteAddress:text(v.newSiteAddress)},actor);
@@ -388,9 +473,9 @@ export class WorkbenchFacade {
           if(request.status==='processing'&&target==='completed') service.complete(request.id,text(v.accountId),actor);
           break;
         }
-        case 'damage': { const service=this.damageService(); const item=service.registerItem(text(v.instrumentId),{damageReason:optional(v.damageReason),partNumber:text(v.partNumber),partQuantity:Number(v.partQuantity),partAmountCents:parseAmountInput(v.partAmount),partCurrency:text(v.partCurrency) as PartCurrency,partRequestedAt:iso(v.partRequestedAt)??null,partStatus:text(v.partStatus) as PartStatus,repairNote:optional(v.repairNote),registeredAt:iso(v.registeredAt)},actor); const status=text(v.issueStatus) as DamageItemStatus; if(status&&status!=='untreated')service.updateIssueStatus(item.id,status,optional(v.closeReason)??null,actor); if(v.partStatus==='used')service.setPartStatus(item.id,'used',actor); break; }
-        case 'core': { const ps=this.projectService(); if(!this.contracts.findByProjectId(projectId)) ps.attachContract(projectId); this.financialService().setContractUsdTaxAmount(projectId,parseAmountInput(v.contractAmount)); ps.formalEntry(projectId,{ecc:text(v.ecc),entryAt:iso(v.entryAt),finalConfirmableAmountCents:optional(v.finalAmount)?parseAmountInput(v.finalAmount):undefined}); break; }
-        case 'serial_address': new SerialAddressUpdateService(this.serialUpdates,new SqliteInstrumentAddressReader(this.db)).register(text(v.instrumentId),{customerName:text(v.customerName),newSiteAddress:text(v.newSiteAddress),serialNo:text(v.serialNo),accountId:text(v.accountId),updatedAt:iso(v.updatedAt)},actor); break;
+        case 'damage': { const service=this.damageService(); const item=service.registerItem(text(v.instrumentId),{damageReason:optional(v.damageReason),partNumber:text(v.partNumber),partQuantity:Number(v.partQuantity),partAmountCents:parseAmountInput(v.partAmount),partCurrency:text(v.partCurrency) as PartCurrency,partRequestedAt:businessDate(v.partRequestedAt,'备件申请日期') ?? null,partStatus:text(v.partStatus) as PartStatus,repairNote:optional(v.repairNote),registeredAt:businessDate(v.registeredAt,'事项登记日期') ?? ''},actor); const status=text(v.issueStatus) as DamageItemStatus; if(status&&status!=='untreated')service.updateIssueStatus(item.id,status,optional(v.closeReason)??null,actor); if(v.partStatus==='used')service.setPartStatus(item.id,'used',actor); break; }
+        case 'core': { const ps=this.projectService(); if(!this.contracts.findByProjectId(projectId)) ps.attachContract(projectId); this.financialService().setContractUsdTaxAmount(projectId,parseAmountInput(v.contractAmount)); ps.formalEntry(projectId,{ecc:text(v.ecc),entryAt:businessDate(v.entryAt,'进单日期') ?? '',finalConfirmableAmountCents:optional(v.finalAmount)?parseAmountInput(v.finalAmount):undefined}); break; }
+        case 'serial_address': new SerialAddressUpdateService(this.serialUpdates,new SqliteInstrumentAddressReader(this.db)).register(text(v.instrumentId),{customerName:text(v.customerName),newSiteAddress:text(v.newSiteAddress),serialNo:text(v.serialNo),accountId:text(v.accountId),updatedAt:businessDate(v.updatedAt,'更新日期') ?? ''},actor); break;
         case 'qr_request': break;
       }
     });
@@ -398,7 +483,7 @@ export class WorkbenchFacade {
   }
 
   private writeSetReminder(projectId: string, at: string | null, note: string | null): void {
-    this.reminderService().setReminder(projectId, { at: at ? new Date(at).toISOString() : null, note }, this.actor());
+    this.reminderService().setReminder(projectId, { at: at ? businessDate(at, '提醒日期') ?? null : null, note }, this.actor());
   }
 
   private writeClearReminder(projectId: string): void {
@@ -415,7 +500,7 @@ export class WorkbenchFacade {
 
   private writeCancelProject(projectId: string, time: string, reason: string): void {
     this.transaction(() => {
-      this.projectService().cancelProject(projectId, { time, reason });
+      this.projectService().cancelProject(projectId, { time: businessDate(time, '取消日期') ?? '', reason });
     });
   }
 
@@ -427,10 +512,61 @@ export class WorkbenchFacade {
     return request!;
   }
 
+  /**
+   * 编辑搬迁批次（v2 batch_edit，同一事务内原子落库）：
+   * - 计划运输日期/运输公司写批次；
+   * - 合同预算价 → batch.originalPriceCents + fee.budgetPriceCents；
+   * - 物流成交价 → batch.discountedPriceCents + fee.dealPriceCents + fee.logisticsCostCents
+   *   （物流成交价即最终实际费用，updateLogisticsFee 时同时覆盖实际费用口径）。
+   * - 不允许修改 appliedAt：契约不含该字段，updateLogisticsFee 亦不更新申请（登记）时间，
+   *   编辑前后归属月份不变。
+   * - 历史批次无 fee 时编辑价格明确报错（不虚构申请时间创建费用）；仅批次字段仍可编辑。
+   */
+  private writeEditBatch(edit: BatchEditPayload): { projectId: string; batchId: string } {
+    let projectId = '';
+    this.transaction(() => {
+      const execution = this.executionService();
+      const actor = this.actor();
+      const batch = this.batches.findById(edit.batchId);
+      if (!batch) {
+        throw new ValidationError('BATCH_NOT_FOUND', `搬迁批次不存在: ${edit.batchId}`);
+      }
+      projectId = batch.projectId;
+      const quote: BatchQuoteInput = {};
+      if (edit.planTransportDate !== undefined) {
+        const raw = text(edit.planTransportDate);
+        quote.planTransportDate = raw === '' ? null : raw;
+      }
+      if (edit.transportCompany !== undefined) {
+        quote.transportCompany = edit.transportCompany === null ? null : text(edit.transportCompany);
+      }
+      if (edit.budgetPrice !== undefined || edit.dealPrice !== undefined) {
+        const fee = this.fees.findByBatchId(batch.id);
+        if (!fee) {
+          throw new ValidationError(
+            'BATCH_EDIT_REQUIRES_FEE',
+            '该批次尚无实际物流费用记录，无法编辑合同预算价/物流成交价；历史批次请先补录物流费用（编辑契约不虚构申请时间）',
+          );
+        }
+        const budgetPriceCents = edit.budgetPrice !== undefined ? parseAmountInput(edit.budgetPrice) : fee.budgetPriceCents;
+        const dealPriceCents = edit.dealPrice !== undefined ? parseAmountInput(edit.dealPrice) : fee.dealPriceCents;
+        quote.originalPriceCents = budgetPriceCents;
+        quote.discountedPriceCents = dealPriceCents;
+        execution.updateLogisticsFee(fee.id, {
+          budgetPriceCents,
+          dealPriceCents,
+          logisticsCostCents: dealPriceCents,
+        }, actor);
+      }
+      execution.updateBatchQuote(batch.id, quote, actor);
+    });
+    return { projectId, batchId: edit.batchId };
+  }
+
   private writeEditInvoice(invoiceId: string, invoicedAt: string, amount: string): { invoiceId: string; projectId: string } {
     let projectId = '';
     this.transaction(() => {
-      const invoice = this.financialService().editInvoice(invoiceId, { invoicedAt, amountCents: parseAmountInput(amount) }, this.actor());
+      const invoice = this.financialService().editInvoice(invoiceId, { invoicedAt: businessDate(invoicedAt, '掉票日期') ?? '', amountCents: parseAmountInput(amount) }, this.actor());
       projectId = invoice.projectId;
     });
     return { invoiceId, projectId };
@@ -439,7 +575,7 @@ export class WorkbenchFacade {
   private writeRevokeInvoice(invoiceId: string, revokedAt: string, reason: string): { invoiceId: string; projectId: string } {
     let projectId = '';
     this.transaction(() => {
-      const invoice = this.financialService().revokeInvoice(invoiceId, { revokedAt, revokeReason: reason }, this.actor());
+      const invoice = this.financialService().revokeInvoice(invoiceId, { revokedAt: businessDate(revokedAt, '撤销日期') ?? '', revokeReason: reason }, this.actor());
       projectId = invoice.projectId;
     });
     return { invoiceId, projectId };
