@@ -13,8 +13,8 @@ async function initialize(page: Page): Promise<void> {
   await page.getByRole('heading', { name: '先处理提醒，再连续推进项目' }).waitFor();
 }
 
-async function assertViewport(page: Page, width: 1024 | 1440, screenshot: string): Promise<void> {
-  await page.setViewportSize({ width, height: width === 1024 ? 768 : 900 });
+async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: string): Promise<void> {
+  await page.setViewportSize({ width, height: width === 1440 ? 900 : 768 });
   const layout = await page.evaluate(() => {
     const queue = document.querySelector<HTMLElement>('.queue-table-wrap');
     const filters = document.querySelector<HTMLElement>('.queue-filters');
@@ -32,7 +32,29 @@ async function assertViewport(page: Page, width: 1024 | 1440, screenshot: string
   await page.screenshot({ path: screenshot, fullPage: true });
 }
 
-test('Oracle #10 任务指挥台在 1024 / 1440 无页面横溢', async ({}, testInfo) => {
+async function assertIndependentDrawer(page: Page, width: 820 | 1024, screenshot: string): Promise<void> {
+  await page.setViewportSize({ width, height: 768 });
+  await page.getByRole('button', { name: '序列号地址更新' }).click();
+  const layout = await page.locator('.v2-independent').evaluate((root) => {
+    const columns = getComputedStyle(root).gridTemplateColumns.split(' ').filter(Boolean);
+    const list = root.querySelector<HTMLElement>('.module-list');
+    const pagination = root.querySelector<HTMLElement>('.queue-pagination');
+    return {
+      columns: columns.length,
+      listWidth: list?.getBoundingClientRect().width ?? 0,
+      paginationOverflow: pagination ? pagination.scrollWidth - pagination.clientWidth : 999,
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    };
+  });
+  expect(layout.columns).toBe(width === 1024 ? 2 : 1);
+  expect(layout.listWidth).toBeGreaterThan(440);
+  expect(layout.paginationOverflow).toBeLessThanOrEqual(1);
+  expect(layout.pageOverflow).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: screenshot, fullPage: true });
+  await page.getByRole('button', { name: '关闭' }).click();
+}
+
+test('Oracle #10 任务指挥台在 820 / 1024 / 1440 无页面横溢且独立模块记录区可读', async ({}, testInfo) => {
   const root = mkdtempSync(join(tmpdir(), 'rw-v2-layout-'));
   const userData = join(root, 'user-data');
   let app: ElectronApplication | null = null;
@@ -42,6 +64,9 @@ test('Oracle #10 任务指挥台在 1024 / 1440 无页面横溢', async ({}, tes
     await initialize(page);
     await assertViewport(page, 1024, testInfo.outputPath('workbench-v2-1024.png'));
     await assertViewport(page, 1440, testInfo.outputPath('workbench-v2-1440.png'));
+    await assertViewport(page, 820, testInfo.outputPath('workbench-v2-820.png'));
+    await assertIndependentDrawer(page, 1024, testInfo.outputPath('serial-address-drawer-1024.png'));
+    await assertIndependentDrawer(page, 820, testInfo.outputPath('serial-address-drawer-820.png'));
   } finally {
     await app?.close().catch(() => undefined);
     rmSync(root, { recursive: true, force: true });

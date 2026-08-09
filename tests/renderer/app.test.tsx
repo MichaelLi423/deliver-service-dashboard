@@ -159,6 +159,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const lifecycle = screen.getByRole('region', { name: '生命周期吞吐' });
     expect(lifecycle).toHaveTextContent('当前瓶颈：执行中');
     expect(lifecycle).toHaveTextContent('平均停留 5 天');
+    expect(within(lifecycle).getByRole('button', { name: /待进单.*20000/ })).toHaveClass('stage', 'not-entered');
     expect(within(lifecycle).queryByText('客户 1')).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: /项目提醒快速处理/ })).toBeInTheDocument();
     expect(screen.getByRole('grid', { name: '项目队列' })).toBeInTheDocument();

@@ -694,7 +694,7 @@ export function WorkbenchV2({
           </div>
         )}
         <section
-          className="metrics"
+          className="metrics panel"
           aria-label="关键运营指标"
           aria-busy={loading.overview}
         >
@@ -723,10 +723,11 @@ export function WorkbenchV2({
               全部项目
             </button>
           </div>
-          <div className="stage-grid">
+          <div className="stages">
             {overview?.stages.map((item) => (
               <button
                 key={item.status}
+                className={`stage ${item.status === "pending_entry" ? "not-entered" : ""} ${filters.status === item.status ? "active" : ""}`}
                 aria-pressed={filters.status === item.status}
                 onClick={() => {
                   setDraftFilters((old) => ({ ...old, status: item.status }));
@@ -3109,7 +3110,7 @@ function Layer({
     >
       <section
         ref={panel}
-        className={side ? "drawer" : "modal"}
+        className={side ? "drawer wide-drawer" : "modal"}
         role="dialog"
         aria-modal="true"
         aria-labelledby="layer-title-v2"
