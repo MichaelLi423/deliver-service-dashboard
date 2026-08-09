@@ -12,7 +12,8 @@ export interface SerialAddressUpdateRepository {
 }
 
 /**
- * 搬迁仪器只读事实源：校验序列号与登记仪器一致。
+ * 搬迁仪器只读事实源：instrumentId 有值时校验序列号与登记仪器一致；
+ * 独立保存（无 instrumentId）时不读取仪器。
  * 实现可复用 relocation-execution 的 SqliteInstrumentRepository。
  */
 export interface InstrumentAddressReader {

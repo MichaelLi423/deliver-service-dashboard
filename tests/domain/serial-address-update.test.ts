@@ -185,6 +185,53 @@ describe('更新事实列表、筛选与按更新时间计数（4.3）', () => {
 });
 
 describe('非空字段与序列号校验（4.3）', () => {
+  it('instrumentId 可空：不传（null/undefined/空串）时独立保存，不关联搬迁仪器', () => {
+    const ctx = setup();
+    // 不传 instrumentId → 独立保存（不校验仪器）
+    const update = ctx.service.register(
+      null,
+      { customerName: '独立客户', newSiteAddress: '独立新址', serialNo: 'SN-IND', accountId: 'ACC-IND', updatedAt: '2026-08-01' },
+      ACTOR,
+    );
+    expect(update.instrumentId).toBeNull();
+    expect(update.serialNo).toBe('SN-IND');
+    expect(ctx.updates.all).toHaveLength(1);
+
+    // undefined / 空串同样独立保存
+    const u2 = ctx.service.register(
+      undefined,
+      { customerName: '独立客户2', newSiteAddress: '新址2', serialNo: 'SN-IND-2', accountId: 'ACC-IND-2' },
+      ACTOR,
+    );
+    expect(u2.instrumentId).toBeNull();
+    const u3 = ctx.service.register(
+      '   ',
+      { customerName: '独立客户3', newSiteAddress: '新址3', serialNo: 'SN-IND-3', accountId: 'ACC-IND-3' },
+      ACTOR,
+    );
+    expect(u3.instrumentId).toBeNull();
+    expect(ctx.updates.all).toHaveLength(3);
+  });
+
+  it('instrumentId 传值：保留「仪器存在 + 序列号一致」校验', () => {
+    const ctx = setup();
+    const instrumentId = addInstrument(ctx, 'SN-100');
+    // 不一致拒绝
+    expect(() =>
+      ctx.service.register(instrumentId, { ...BASE, serialNo: 'SN-999' }, ACTOR),
+    ).toThrow(/不一致/);
+    expect(ctx.updates.all).toHaveLength(0);
+    // 一致允许
+    const ok = ctx.service.register(instrumentId, BASE, ACTOR);
+    expect(ok.instrumentId).toBe(instrumentId);
+    expect(ok.serialNo).toBe('SN-100');
+    // 仪器不存在拒绝
+    expect(() =>
+      ctx.service.register('no-such-instrument', { ...BASE }, ACTOR),
+    ).toThrow(/搬迁仪器不存在/);
+    expect(ctx.updates.all).toHaveLength(1);
+  });
+
   it('非空字段缺失拒绝保存', () => {
     const ctx = setup();
     const instrumentId = addInstrument(ctx);

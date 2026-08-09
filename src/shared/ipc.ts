@@ -22,7 +22,13 @@ export const IPC_CHANNELS = {
   workbenchV2SectionPage: 'workbench:v2:section-page',
   workbenchV2IndependentPage: 'workbench:v2:independent-page',
   workbenchV2LookupPage: 'workbench:v2:lookup-page',
+  workbenchV2HistoryPage: 'workbench:v2:history-page',
   workbenchV2Mutate: 'workbench:v2:mutate',
+  /** 受保护登记记录删除（判别联合 + 预期业务修订防并发）。 */
+  workbenchV2Delete: 'workbench:v2:delete',
+  /** 「清理全部业务数据」两阶段 API：prepare 返回计数/短期 token/过期时间/revision；confirm 必须 token + 固定确认文本。 */
+  dataCleanPrepare: 'data:clean:prepare',
+  dataCleanConfirm: 'data:clean:confirm',
   /** ship-to-management：按 requestId 线性推进的独立命令（不重复新建、不重复计工作量）。 */
   shipToCreateRequest: 'ship-to:create-request',
   shipToSubmitRequest: 'ship-to:submit-request',
@@ -455,7 +461,7 @@ export interface WorkbenchV2OverviewDto {
     pendingInvoice: number;
     /** 存在开放维修事项（事项状态未修复且未关闭未修复）的项目数（EXISTS 口径）。 */
     openRepairProjects: number;
-    /** 待掉票金额（已进单项目 最终可确认金额-累计有效掉票 之和），十进制字符串。 */
+    /** 待掉票金额（已进单且未取消项目 最终可确认金额-累计有效掉票 之和），十进制字符串。 */
     pendingAmount: string;
   };
   stages: Array<{ status: ProjectStatus; count: number; averageDays: number; inflow: number; outflow: number }>;
@@ -522,6 +528,14 @@ export type WorkbenchV2SectionKind =
 export interface WorkbenchV2SectionPageRequest extends WorkbenchV2PageRequest {
   projectId: string;
   kind: WorkbenchV2SectionKind;
+  /**
+   * 往期/时间筛选：起止业务日期（yyyy-mm-dd，含边界）。
+   * 按各 kind 的业务日期过滤：batches→计划运输日期、instruments→登记时间（created_at）、
+   * activities→到访日期、orders→开单日期、invoices→掉票日期、damage_items→事项登记日期。
+   * 缺省（均未提供）时保持当前行为（不限时间）。
+   */
+  from?: string | null;
+  to?: string | null;
 }
 
 export type WorkbenchV2SectionRow =
@@ -632,13 +646,22 @@ export type WorkbenchV2IndependentKind = 'serial_address' | 'qr_request';
 export interface WorkbenchV2IndependentPageRequest extends WorkbenchV2PageRequest {
   kind: WorkbenchV2IndependentKind;
   query?: string | null;
+  /**
+   * 往期/时间筛选：起止业务日期（yyyy-mm-dd，含边界）。
+   * serial_address 按更新日期（updated_at）、qr_request 按申请日期（requested_at）。
+   * 缺省（均未提供）时保持当前行为（不限时间）。
+   */
+  from?: string | null;
+  to?: string | null;
 }
 
 export type WorkbenchV2IndependentRow =
   | {
       kind: 'serial_address';
       id: string;
-      instrumentId: string;
+      /** 关联搬迁仪器；独立保存（无仪器）时 null，绝不输出字符串 "null"。 */
+      instrumentId: string | null;
+      /** 关联仪器名称；独立保存（无仪器）时为空串。 */
       instrumentName: string;
       serialNo: string;
       customerName: string;
@@ -676,6 +699,13 @@ export type WorkbenchV2LookupKind = 'ship_to_requests' | 'customers';
 export interface WorkbenchV2LookupPageRequest extends WorkbenchV2PageRequest {
   kind: WorkbenchV2LookupKind;
   query?: string | null;
+  /**
+   * 往期/时间筛选：起止业务日期（yyyy-mm-dd，含边界）。
+   * ship_to_requests 按首次实际提交日期（submitted_at）、customers 按登记时间（created_at）。
+   * 缺省（均未提供）时保持当前行为（不限时间）。
+   */
+  from?: string | null;
+  to?: string | null;
 }
 
 export type WorkbenchV2LookupRow =
@@ -708,6 +738,316 @@ export interface WorkbenchV2LookupPageDto {
   total: number;
   nextCursor: string | null;
   limit: number;
+}
+
+// ---------------------------------------------------------------------------
+// 跨项目历史有界分页（ora-1：#6 真正的跨项目历史浏览，不做「选项目切换」全量）
+// - 覆盖快速记录当前模块：batch / instrument / activity / service_order / invoice /
+//   damage，以及可行的 acceptance（项目验收）与 ship_to_request（Ship-to 申请）；
+// - 支持 kind / from / to（业务日期 yyyy-mm-dd，含边界；created_at 类按日期部分
+//   比较，保证 to 截止日期包含当天）/ cursor / limit；
+// - 每行返回项目标识/客户名/ECC 等可读上下文，以及可直接用于 v2Delete 的 id。
+// ---------------------------------------------------------------------------
+
+export type WorkbenchV2HistoryKind =
+  | 'batch'
+  | 'instrument'
+  | 'activity'
+  | 'service_order'
+  | 'invoice'
+  | 'damage'
+  | 'acceptance'
+  | 'ship_to_request';
+
+export interface WorkbenchV2HistoryPageRequest extends WorkbenchV2PageRequest {
+  kind: WorkbenchV2HistoryKind;
+  /** 起止业务日期（yyyy-mm-dd，含边界）；缺省不限时间。 */
+  from?: string | null;
+  to?: string | null;
+}
+
+export type WorkbenchV2HistoryRow =
+  | {
+      kind: 'batch';
+      /** 可用于 v2Delete 的记录 id。 */
+      id: string;
+      projectId: string;
+      customerName: string;
+      ecc: string | null;
+      tempNo: string;
+      planTransportDate: string | null;
+      transportCompany: string | null;
+      startedAt: string | null;
+      businessDate: string | null;
+      createdAt: string;
+    }
+  | {
+      kind: 'instrument';
+      id: string;
+      projectId: string;
+      customerName: string;
+      ecc: string | null;
+      tempNo: string;
+      name: string;
+      model: string | null;
+      serialNo: string | null;
+      /** 登记日期（created_at 的日期部分，yyyy-mm-dd）。 */
+      businessDate: string;
+      createdAt: string;
+    }
+  | {
+      kind: 'activity';
+      id: string;
+      projectId: string;
+      customerName: string;
+      ecc: string | null;
+      tempNo: string;
+      visitAt: string | null;
+      engineers: string;
+      businessDate: string | null;
+      createdAt: string;
+    }
+  | {
+      kind: 'service_order';
+      id: string;
+      projectId: string;
+      customerName: string;
+      ecc: string | null;
+      tempNo: string;
+      orderType: 'relocation' | 'certification' | 'parts_by_mail' | 'pm';
+      serviceOrderNo: string | null;
+      orderedAt: string;
+      engineer: string;
+      businessDate: string;
+      createdAt: string;
+    }
+  | {
+      kind: 'invoice';
+      id: string;
+      projectId: string;
+      customerName: string;
+      ecc: string | null;
+      tempNo: string;
+      amount: string;
+      invoicedAt: string;
+      active: boolean;
+      businessDate: string;
+      createdAt: string;
+    }
+  | {
+      kind: 'damage';
+      id: string;
+      projectId: string;
+      customerName: string;
+      ecc: string | null;
+      tempNo: string;
+      instrumentName: string;
+      issueStatus: string;
+      registeredAt: string;
+      businessDate: string;
+      createdAt: string;
+    }
+  | {
+      kind: 'acceptance';
+      /** 项目 id（v2Delete acceptance 使用 projectId）。 */
+      id: string;
+      projectId: string;
+      customerName: string;
+      ecc: string | null;
+      tempNo: string;
+      acceptanceReportDate: string;
+      businessDate: string;
+      createdAt: string;
+    }
+  | {
+      kind: 'ship_to_request';
+      id: string;
+      projectId: string | null;
+      customerName: string;
+      ecc: null;
+      tempNo: string;
+      newSiteAddress: string;
+      status: ShipToRequestStatus;
+      submittedAt: string | null;
+      businessDate: string | null;
+      createdAt: string;
+    };
+
+export interface WorkbenchV2HistoryPageDto {
+  businessRevision: number;
+  kind: WorkbenchV2HistoryKind;
+  rows: readonly WorkbenchV2HistoryRow[];
+  total: number;
+  nextCursor: string | null;
+  limit: number;
+}
+
+// ---------------------------------------------------------------------------
+// 受保护登记记录删除（判别联合 API）
+// - 预期业务修订（expectedRevision）防并发：不等于当前 business_revision 时整体拒绝；
+// - invoice 不可物理删除：删除必须携带撤销日期与原因，映射到现有 revoke；
+// - 数据模型无法可靠重算的类型（acceptance）明确拒绝，返回稳定错误码；
+// - 全部删除在同一事务内原子完成（含导入审计联动）。
+// ---------------------------------------------------------------------------
+
+export type WorkbenchV2DeleteKind =
+  | 'service_order'
+  | 'activity'
+  | 'acceptance'
+  | 'damage_repair_item'
+  | 'serial_address'
+  | 'qr_request'
+  | 'batch'
+  | 'instrument'
+  | 'ship_to_request'
+  | 'invoice';
+
+export type WorkbenchV2DeleteRequest =
+  | { kind: 'service_order'; id: string; expectedRevision: number }
+  | { kind: 'activity'; id: string; expectedRevision: number }
+  | { kind: 'acceptance'; projectId: string; expectedRevision: number }
+  | { kind: 'damage_repair_item'; id: string; expectedRevision: number }
+  | { kind: 'serial_address'; id: string; expectedRevision: number }
+  | { kind: 'qr_request'; id: string; expectedRevision: number }
+  | { kind: 'batch'; id: string; expectedRevision: number }
+  | { kind: 'instrument'; id: string; expectedRevision: number }
+  | { kind: 'ship_to_request'; id: string; expectedRevision: number }
+  | {
+      kind: 'invoice';
+      id: string;
+      expectedRevision: number;
+      /** 撤销日期（业务日期 yyyy-mm-dd，必填）。 */
+      revokedAt: string;
+      /** 撤销原因（必填）。 */
+      revokeReason: string;
+    };
+
+/** 删除失败稳定错误码（renderer 按 code 精确提示，不依赖错误消息文本）。 */
+export const DELETE_REJECTION_CODES = {
+  REVISION_MISMATCH: 'DELETE_REJECTED_REVISION',
+  NOT_FOUND: 'DELETE_REJECTED_NOT_FOUND',
+  DEPENDENCIES: 'DELETE_REJECTED_DEPENDENCIES',
+  STATUS_RECALC_UNRELIABLE: 'DELETE_REJECTED_STATUS_RECALC',
+  INVOICE_REQUIRES_REVOKE: 'DELETE_REJECTED_INVOICE_REQUIRES_REVOKE',
+} as const;
+
+export type DeleteRejectionCode = (typeof DELETE_REJECTION_CODES)[keyof typeof DELETE_REJECTION_CODES];
+
+/**
+ * 新建项目（create_project）拒绝稳定错误码（ora-1）：
+ * - 废弃字段（finalAmount/serviceOrderNo/engineers/serviceOrderNote/missingItems）有值即拒绝，
+ *   绝不静默忽略；
+ * - 仅 intent='formal' 允许携带 ECC/进单日期/合同金额；draft/pre_entry_execution 有值即拒绝。
+ */
+export const WIZARD_REJECTION_CODES = {
+  DEPRECATED_FIELD: 'WIZARD_DEPRECATED_FIELD',
+  ECC_ONLY_FORMAL: 'WIZARD_ECC_ONLY_FORMAL',
+  ENTRY_AT_ONLY_FORMAL: 'WIZARD_ENTRY_AT_ONLY_FORMAL',
+  CONTRACT_AMOUNT_ONLY_FORMAL: 'WIZARD_CONTRACT_AMOUNT_ONLY_FORMAL',
+} as const;
+
+export type WizardRejectionCode = (typeof WIZARD_REJECTION_CODES)[keyof typeof WIZARD_REJECTION_CODES];
+
+export interface WorkbenchV2DeleteResult {
+  businessRevision: number;
+  invalidated: readonly WorkbenchV2InvalidateTag[];
+  changed: { kind: WorkbenchV2DeleteKind; id: string; projectId?: string } | null;
+}
+
+// ---------------------------------------------------------------------------
+// 错误可跨 IPC 序列化的最小信封（ora-1：#7）
+// - v2Delete / cleanPrepare / cleanConfirm 一律返回 {ok:true,data}|{ok:false,error:{code,message}}；
+// - handler 在进程内把 DomainError 转成信封（绝不依赖 Error 自定义属性穿透 Electron）；
+// - error.code 为稳定拒绝码（DELETE_REJECTION_CODES / CLEAN_REJECTION_CODES）。
+// ---------------------------------------------------------------------------
+
+export type IpcEnvelope<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: { code: string; message: string } };
+
+export type WorkbenchV2DeleteEnvelope = IpcEnvelope<WorkbenchV2DeleteResult>;
+export type DataCleanPrepareEnvelope = IpcEnvelope<DataCleanPrepareDto>;
+export type DataCleanConfirmEnvelope = IpcEnvelope<DataCleanConfirmResultDto>;
+
+// ---------------------------------------------------------------------------
+// 「清理全部业务数据」两阶段 API（prepare → confirm）
+// - prepare 返回各业务表计数、短期 token、过期时间与当前业务修订；
+// - confirm 必须携带 token + 固定确认文本「清理全部业务数据」；token 绑定 DB
+//   identity/generation/revision，任何变化（含期间业务写入）整体拒绝；
+// - confirm 执行前创建安全备份，BEGIN IMMEDIATE 原子清理业务表与导入审计，
+//   保留 accounts/app_settings/database_metadata/备份/独立导入工作区，轮换 contentGenerationId。
+// ---------------------------------------------------------------------------
+
+/** 清理确认固定文本（renderer 展示；不匹配即拒绝）。 */
+export const CLEAN_ALL_CONFIRM_TEXT = '清理全部业务数据';
+
+/** 「清理全部业务数据」confirm 拒绝稳定错误码（renderer 按 code 精确提示）。 */
+export const CLEAN_REJECTION_CODES = {
+  CONFIRM_TEXT: 'CLEAN_CONFIRM_TEXT_REQUIRED',
+  NOT_PREPARED: 'CLEAN_NOT_PREPARED',
+  TOKEN_MISMATCH: 'CLEAN_TOKEN_MISMATCH',
+  TOKEN_EXPIRED: 'CLEAN_TOKEN_EXPIRED',
+  REVISION_CHANGED: 'CLEAN_REVISION_CHANGED',
+  BACKUP_FAILED: 'CLEAN_BACKUP_FAILED',
+} as const;
+
+export type CleanRejectionCode = (typeof CLEAN_REJECTION_CODES)[keyof typeof CLEAN_REJECTION_CODES];
+
+/** 业务表（与 schema-v10 BUSINESS_TABLES 同口径，供 prepare 计数）。 */
+export type CleanableTable =
+  | 'customers'
+  | 'projects'
+  | 'contracts'
+  | 'batches'
+  | 'instruments'
+  | 'batch_change_history'
+  | 'activities'
+  | 'activity_engineers'
+  | 'work_facts'
+  | 'service_orders'
+  | 'ship_tos'
+  | 'ship_to_requests'
+  | 'serial_address_updates'
+  | 'damage_repair_items'
+  | 'activity_damage_links'
+  | 'qr_requests'
+  | 'qr_request_types'
+  | 'logistics_fees'
+  | 'invoices';
+
+export interface DataCleanPrepareDto {
+  /** 短期清理 token（一次性；confirm 时校验）。 */
+  token: string;
+  /** token 过期时间（epoch 毫秒）。 */
+  expiresAt: number;
+  /** prepare 时刻的数据库实例 ID（token 绑定）。 */
+  databaseInstanceId: string;
+  /** prepare 时刻的 content generation（token 绑定）。 */
+  contentGenerationId: string;
+  /** prepare 时刻的业务修订（token 绑定；期间业务写入会使 confirm 拒绝）。 */
+  revision: number;
+  /** 当前各业务表计数（准备清理前快照）。 */
+  counts: Record<CleanableTable, number>;
+  /** 计入的独立导入审计记录数（migration_audit / import_record_audit / import_run）。 */
+  auditCounts: { migrationAudit: number; importRecordAudit: number; importRun: number };
+}
+
+export interface DataCleanConfirmRequestDto {
+  token: string;
+  /** 必须等于固定文本「清理全部业务数据」，否则拒绝。 */
+  confirmText: string;
+}
+
+export interface DataCleanConfirmResultDto {
+  /** 已清理的业务表行数合计（不含审计表）。 */
+  clearedBusinessRows: number;
+  /** 已清理的导入审计行数合计。 */
+  clearedAuditRows: number;
+  /** 清理前安全备份文件路径。 */
+  backupPath: string;
+  /** 清理后轮换的新 content generation。 */
+  contentGenerationId: string;
+  businessRevision: number;
 }
 
 /**
@@ -828,10 +1168,25 @@ export interface WorkbenchV2MutationResult {
 }
 
 export interface ProjectWizardPayload {
+  /**
+   * 新建项目意图（intent 决定是否正式进单，不再由 ECC 推断）：
+   * - 'formal'：正式进单（必填合同/客户/ECC/进单日期；旧址/新址/仪器数量可空，
+   *   正式进单不再要求搬迁范围或最终可确认金额，合同金额为空/0 时 final 保持 null，
+   *   进单后基线 pending_execution）；
+   * - 'draft'：创建待进单草稿项目（不补建合同、不设置 ECC、不触发正式进单）；
+   * - 'pre_entry_execution'：待进单 + 未进单先执行（经理批复原因必填）。
+   */
   intent: 'draft' | 'formal' | 'pre_entry_execution';
   customerName: string;
+  /**
+   * 仅 intent='formal' 允许携带；draft/pre_entry_execution 携带非空值 → 稳定拒绝
+   * （WIZARD_ECC_ONLY_FORMAL，绝不静默丢弃）。
+   */
   ecc?: string;
-  /** 进单日期（业务日期 yyyy-mm-dd；正式进单必填，缺省当前日期）。 */
+  /**
+   * 进单日期（业务日期 yyyy-mm-dd；正式进单必填，缺省当前日期）。
+   * 仅 intent='formal' 允许携带；非 formal 有值 → 稳定拒绝（WIZARD_ENTRY_AT_ONLY_FORMAL）。
+   */
   entryAt?: string;
   region: string;
   oldSiteContact?: string;
@@ -840,20 +1195,26 @@ export interface ProjectWizardPayload {
   contractStartDate?: string | null;
   /** 合同截止日期（业务日期 yyyy-mm-dd；可空/可清除，后补字段）。 */
   contractEndDate?: string | null;
-  oldSiteAddress?: string;
-  newSiteAddress?: string;
+  /** 项目默认旧址地址（可空；有值才写入，无值保持空）。 */
+  oldSiteAddress?: string | null;
+  /** 项目默认新址地址（可空；有值才写入，无值保持空）。 */
+  newSiteAddress?: string | null;
   /**
-   * 暂定仪器数量（正整数，必填）：新建项目只记录数量、不生成虚拟仪器
-   * （不再通过 instrumentName/model/ups 创建单台占位仪器，仪器经单条录入或
-   * .xlsx 批量导入登记）。
+   * 暂定仪器数量（正整数，可空）：有值（正整数）才记录数量并确认搬迁范围
+   * （confirmScope），不生成虚拟仪器；未提供/0/空则不确定范围（正式进单已不再要求范围）。
    */
-  instrumentCount?: number;
+  instrumentCount?: number | null;
   /**
    * 合同 USD 含税金额：十进制字符串（如 "100000.50"），由主进程按 Money 精确解析为分。
-   * 渲染层禁止 Number(value)*100 与浮点金额计算；空字符串 = 未录入。
+   * 仅 intent='formal' 允许携带；非 formal 有值 → 稳定拒绝（WIZARD_CONTRACT_AMOUNT_ONLY_FORMAL）。
+   * 空字符串/未提供 = 未录入（合同金额保持 null，绝不虚构 0）。
    */
   contractAmount?: string;
-  /** 最终可确认金额（USD）：十进制字符串。 */
+  /**
+   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD，绝不静默忽略）：
+   * 正式进单的最终可确认金额缺省取合同金额、合同金额为空/0 时保持 null。
+   * 保留字段仅为兼容既有 renderer 编译；新 UI 不应提交。
+   */
   finalAmount?: string;
   /** 计划上门日期（业务日期 yyyy-mm-dd）。 */
   planVisitAt?: string;
@@ -864,10 +1225,27 @@ export interface ProjectWizardPayload {
   siteConfirmed?: boolean;
   /** 实际装机完成日期（业务日期 yyyy-mm-dd）。 */
   actualInstallDoneAt?: string;
+  /**
+   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD）：搬迁开单请使用独立
+   * submit_action（type='order'）或 supplement_project。保留字段仅为兼容既有 renderer 编译。
+   */
   serviceOrderNo?: string;
+  /**
+   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD）：同 serviceOrderNo。
+   * 保留字段仅为兼容既有 renderer 编译。
+   */
   engineers?: string;
+  /**
+   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD）：同 serviceOrderNo。
+   * 保留字段仅为兼容既有 renderer 编译。
+   */
   serviceOrderNote?: string;
+  /** pre_entry_execution 的经理批复原因（必填）。 */
   approvalReason?: string;
+  /**
+   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD）：缺失项请经
+   * supplement_project 补齐。保留字段仅为兼容既有 renderer 编译。
+   */
   missingItems?: string;
 }
 
@@ -1077,8 +1455,20 @@ export interface WorkbenchApi {
   v2SectionPage(request: WorkbenchV2SectionPageRequest): Promise<WorkbenchV2SectionPageDto>;
   v2IndependentPage(request: WorkbenchV2IndependentPageRequest): Promise<WorkbenchV2IndependentPageDto>;
   v2LookupPage(request: WorkbenchV2LookupPageRequest): Promise<WorkbenchV2LookupPageDto>;
+  /** 跨项目历史有界分页：按 kind/from/to/cursor/limit 浏览快速记录模块（含项目上下文与可删除 id）。 */
+  v2HistoryPage(request: WorkbenchV2HistoryPageRequest): Promise<WorkbenchV2HistoryPageDto>;
   /** 有界 mutation：复用现有写逻辑，返回 businessRevision + invalidate tags（不含快照）。 */
   v2Mutate(request: WorkbenchV2MutationRequest): Promise<WorkbenchV2MutationResult>;
+  /**
+   * 受保护登记记录删除：判别联合 + 预期业务修订防并发（invoice 映射为撤销）。
+   * IPC 线上为 IpcEnvelope（{ok,data}|{ok:false,error:{code,message}}，错误可靠序列化）；
+   * preload 适配为「成功返回 data，失败抛出 message 含稳定 code 的 Error」（既有 UI 契约）。
+   */
+  v2Delete(request: WorkbenchV2DeleteRequest): Promise<WorkbenchV2DeleteResult>;
+  /** 「清理全部业务数据」prepare（IPC 线上为 IpcEnvelope；preload 适配同 v2Delete）。 */
+  cleanPrepare(): Promise<DataCleanPrepareDto>;
+  /** 「清理全部业务数据」confirm（IPC 线上为 IpcEnvelope；preload 适配同 v2Delete）。 */
+  cleanConfirm(request: DataCleanConfirmRequestDto): Promise<DataCleanConfirmResultDto>;
   /**
    * 创建 Ship-to 申请：同客户同新址地址已有申请（任一状态）时返回既有记录，不自动 submit、
    * 不重复创建；首次实际提交才计一次工作量。

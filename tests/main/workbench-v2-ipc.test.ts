@@ -72,6 +72,7 @@ function makeContext(dir: string) {
     showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
     writeFile: async () => undefined,
     createManualBackup: () => Promise.resolve(join(dir, 'manual.db')),
+    createCleanupBackup: () => Promise.resolve(join(dir, 'cleanup-backup.db')),
     restoreFromBackup: () => ({ restored: false }),
     importWizardFacade: stubFacade,
     importWizardEnabled: () => true,
@@ -100,7 +101,14 @@ const V2_CHANNELS: IpcChannel[] = [
   IPC_CHANNELS.workbenchV2SectionPage,
   IPC_CHANNELS.workbenchV2IndependentPage,
   IPC_CHANNELS.workbenchV2LookupPage,
+  IPC_CHANNELS.workbenchV2HistoryPage,
   IPC_CHANNELS.workbenchV2Mutate,
+];
+
+const ENVELOPED_CHANNELS: IpcChannel[] = [
+  IPC_CHANNELS.workbenchV2Delete,
+  IPC_CHANNELS.dataCleanPrepare,
+  IPC_CHANNELS.dataCleanConfirm,
 ];
 
 const dirs: string[] = [];
@@ -115,8 +123,16 @@ describe('Oracle #10 v2 IPC：会话 + 受信主窗口守卫', () => {
     const ctx = makeContext(dir);
     registerIpcHandlers(ctx.bus, ctx.deps);
 
+    // 普通通道：未登录直接拒绝（rejects）。
     for (const channel of V2_CHANNELS) {
       await expect(ctx.bus.invoke(channel, 100)).rejects.toThrow(/登录状态已失效/);
+    }
+    // 信封通道（v2Delete/cleanPrepare/cleanConfirm）：未登录返回 {ok:false,error}，不抛错。
+    for (const channel of ENVELOPED_CHANNELS) {
+      const result = (await ctx.bus.invoke(channel, 100)) as { ok: false; error: { code: string; message: string } };
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toMatch(/登录状态已失效/);
+      expect(typeof result.error.code).toBe('string');
     }
     // 非受信 sender 拒绝
     await expect(ctx.bus.invoke(IPC_CHANNELS.workbenchV2Overview, 999)).rejects.toThrow(/受信主窗口/);
@@ -155,7 +171,6 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
         newSiteAddress: '新址',
         instrumentCount: 1,
         contractAmount: '100000',
-        finalAmount: '100000',
         siteConfirmed: false,
       },
     };
@@ -200,7 +215,6 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
         newSiteAddress: '新址',
         instrumentCount: 1,
         contractAmount: '1000',
-        finalAmount: '1000',
         siteConfirmed: false,
       },
     } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
@@ -235,7 +249,6 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
         newSiteAddress: '新址',
         instrumentCount: 1,
         contractAmount: '1000',
-        finalAmount: '1000',
         siteConfirmed: false,
       },
     } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
@@ -278,7 +291,6 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
         newSiteAddress: '新址',
         instrumentCount: 1,
         contractAmount: '1000',
-        finalAmount: '1000',
         siteConfirmed: false,
       },
     } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
@@ -366,5 +378,102 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     expect(String(feeAfter.budget_price_cents)).toBe('1300000');
     expect(String(feeAfter.deal_price_cents)).toBe('1250000');
     expect(String(feeAfter.logistics_cost_cents)).toBe('1250000');
+  });
+});
+
+describe('IPC：受保护删除（v2Delete）与清理全部业务数据（cleanPrepare/cleanConfirm）', () => {
+  async function loggedIn() {
+    const dir = makeTempDir('ipc-delete-clean-');
+    dirs.push(dir);
+    const ctx = makeContext(dir);
+    registerIpcHandlers(ctx.bus, ctx.deps);
+    await establishSession(ctx);
+    return ctx;
+  }
+
+  it('v2Delete 经 IPC：成功返回 {ok:true,data}，删除二维码申请并返回 bounded 结果', async () => {
+    const ctx = await loggedIn();
+    const bus = ctx.bus;
+    await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'submit_action',
+      action: { type: 'qr_request', values: { applicant: '申请人', requestedAt: '2026-08-10', types: ['A'] } },
+    } as WorkbenchV2MutationRequest);
+    const qrPage = (await bus.invoke(IPC_CHANNELS.workbenchV2IndependentPage, 100, { kind: 'qr_request' })) as {
+      rows: Array<{ id: string }>;
+    };
+    const qrId = qrPage.rows[0].id;
+    const revision = readBusinessRevision(ctx.db());
+    const result = (await bus.invoke(IPC_CHANNELS.workbenchV2Delete, 100, {
+      kind: 'qr_request',
+      id: qrId,
+      expectedRevision: revision,
+    })) as { ok: true; data: { invalidated: string[]; changed: { kind: string } } };
+    // 错误信封契约：成功路径为 { ok: true, data }
+    expect(result.ok).toBe(true);
+    expect(result.data.changed.kind).toBe('qr_request');
+    expect(result.data.invalidated).toContain('independent:qr_request');
+    const after = (await bus.invoke(IPC_CHANNELS.workbenchV2IndependentPage, 100, { kind: 'qr_request' })) as {
+      total: number;
+    };
+    expect(after.total).toBe(0);
+  });
+
+  it('v2Delete 经 IPC：拒绝路径返回 {ok:false,error:{code,message}}（不依赖 Error 自定义属性穿透）', async () => {
+    const ctx = await loggedIn();
+    const bus = ctx.bus;
+    const result = (await bus.invoke(IPC_CHANNELS.workbenchV2Delete, 100, {
+      kind: 'qr_request',
+      id: 'whatever',
+      expectedRevision: 12345,
+    })) as { ok: false; error: { code: string; message: string } };
+    expect(result.ok).toBe(false);
+    expect(result.error.code).toBe('DELETE_REJECTED_REVISION');
+    expect(typeof result.error.message).toBe('string');
+    // 信封不含自定义 Error 属性：只有 {ok,error:{code,message}}
+    expect(Object.keys(result.error).sort()).toEqual(['code', 'message']);
+  });
+
+  it('cleanPrepare/cleanConfirm 经 IPC：prepare 返回 {ok:true,data}，confirm 固定文本清理并保留账号', async () => {
+    const ctx = await loggedIn();
+    const bus = ctx.bus;
+    await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'create_project',
+      payload: {
+        intent: 'formal',
+        customerName: '清理 IPC 客户',
+        ecc: 'ECC-CLEAN-IPC',
+        region: '华东',
+        instrumentCount: 1,
+        contractAmount: '1000',
+      },
+    } as WorkbenchV2MutationRequest);
+    const prepared = (await bus.invoke(IPC_CHANNELS.dataCleanPrepare, 100)) as {
+      ok: true;
+      data: { token: string; revision: number; counts: Record<string, number> };
+    };
+    expect(prepared.ok).toBe(true);
+    expect(prepared.data.counts.projects).toBe(1);
+    const result = (await bus.invoke(IPC_CHANNELS.dataCleanConfirm, 100, {
+      token: prepared.data.token,
+      confirmText: '清理全部业务数据',
+    })) as { ok: true; data: { clearedBusinessRows: number; contentGenerationId: string } };
+    expect(result.ok).toBe(true);
+    expect(result.data.clearedBusinessRows).toBeGreaterThan(0);
+    const overview = (await bus.invoke(IPC_CHANNELS.workbenchV2Overview, 100)) as { metrics: { totalProjects: number } };
+    expect(overview.metrics.totalProjects).toBe(0);
+    // 账号保留（可继续会话）
+    expect(ctx.session()).not.toBeNull();
+  });
+
+  it('cleanConfirm 经 IPC：错误 token 返回 {ok:false,error:{code}}（稳定错误码）', async () => {
+    const ctx = await loggedIn();
+    const bus = ctx.bus;
+    await bus.invoke(IPC_CHANNELS.dataCleanPrepare, 100);
+    const result = (await bus.invoke(IPC_CHANNELS.dataCleanConfirm, 100, {
+      token: 'wrong-token',
+      confirmText: '清理全部业务数据',
+    })) as { ok: false; error: { code: string } };
+    expect(result.ok).toBe(false);
+    expect(result.error.code).toBe('CLEAN_TOKEN_MISMATCH');
   });
 });

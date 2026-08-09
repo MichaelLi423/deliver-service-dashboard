@@ -98,7 +98,7 @@ describe('主状态人工调整与系统校验（2.2 / TBD-09）', () => {
     expect(projects.findById(projectId)!.status).toBe('pending_entry');
   });
 
-  it('先执行后进单：正式进单不按已发生事实自动跳转，主状态由负责人人工确定', () => {
+  it('先执行后进单：正式进单基线待执行（无自动触发时），主状态由负责人后续确定', () => {
     const { projects, service } = setup();
     const projectId = prepareEnterableProject(service);
     service.setPreEntryExecution(projectId, {
@@ -111,8 +111,8 @@ describe('主状态人工调整与系统校验（2.2 / TBD-09）', () => {
     const afterEntry = projects.findById(projectId)!;
     expect(afterEntry.entryAt).not.toBeNull();
     expect(afterEntry.preEntryExecution).toBe(false);
-    // 系统不按已发生事实自动跳转：主状态仍为待进单
-    expect(afterEntry.status).toBe('pending_entry');
+    // 进单后基线待执行（无实际装机完成/验收等自动触发事实）
+    expect(afterEntry.status).toBe('pending_execution');
 
     // 由负责人人工确定主状态
     const result = service.adjustStatus(projectId, 'executing');
@@ -244,5 +244,68 @@ describe('项目验收（2.4 / TBD-07）', () => {
     const stable = service.adjustStatus(projectId, 'pending_invoice');
     expectStatus(stable, 'pending_invoice');
     expectReason(stable, 'unchanged');
+  });
+});
+
+describe('删除验收报告（clearAcceptance，2.4 反向操作）：按事实确定性回退状态', () => {
+  it('有掉票历史（含已撤销）拒绝；无掉票历史时清空验收事实并按事实回退', () => {
+    const { projects, service } = setup();
+    const projectId = prepareEnterableProject(service);
+    service.formalEntry(projectId, { ecc: 'ECC-001' });
+    service.markAcceptance(projectId, '2026-08-06');
+    expect(projects.findById(projectId)!.status).toBe('pending_invoice');
+
+    // 有掉票历史 → 拒绝且验收事实保留
+    expect(() =>
+      service.clearAcceptance(projectId, { hasAnyInvoiceHistory: true, executionStarted: false }),
+    ).toThrow(/掉票历史/);
+    expect(projects.findById(projectId)!.acceptanceReport).toBe(true);
+
+    // 无掉票历史 → 清空并回退到正式进单基线（无实际装机/执行事实）
+    service.clearAcceptance(projectId, { hasAnyInvoiceHistory: false, executionStarted: false });
+    const cleared = projects.findById(projectId)!;
+    expect(cleared.acceptanceReport).toBe(false);
+    expect(cleared.acceptanceReportDate).toBeNull();
+    expect(cleared.status).toBe('pending_execution');
+  });
+
+  it('已实际装机完成 → 回退到待验收；已开始执行 → 回退到执行中', () => {
+    const { projects, service } = setup();
+    // 已实际装机完成
+    const p1 = prepareEnterableProject(service);
+    service.recordActualInstallDone(p1, '2026-07-20');
+    service.markAcceptance(p1, '2026-08-06');
+    expect(projects.findById(p1)!.status).toBe('pending_invoice');
+    service.clearAcceptance(p1, { hasAnyInvoiceHistory: false, executionStarted: false });
+    expect(projects.findById(p1)!.status).toBe('pending_acceptance');
+
+    // 已开始执行（但未实际装机完成）
+    const p2 = prepareEnterableProject(service);
+    service.formalEntry(p2, { ecc: 'ECC-002' });
+    service.adjustStatus(p2, 'executing', { executionStarted: true });
+    service.markAcceptance(p2, '2026-08-06');
+    expect(projects.findById(p2)!.status).toBe('pending_invoice');
+    service.clearAcceptance(p2, { hasAnyInvoiceHistory: false, executionStarted: true });
+    expect(projects.findById(p2)!.status).toBe('executing');
+  });
+
+  it('未进单先执行标签存在 → 回退到待进单（标签规则）；已取消项目拒绝', () => {
+    const { projects, service } = setup();
+    // 未进单先执行：验收报告可标记但主状态保持待进单
+    const p1 = service.createPendingProject().id;
+    service.attachContract(p1);
+    service.linkCustomer(p1, 'customer-1');
+    service.setPreEntryExecution(p1, { reason: 'r', missingItems: 'm' });
+    service.markAcceptance(p1, '2026-08-06');
+    expect(projects.findById(p1)!.status).toBe('pending_entry');
+    service.clearAcceptance(p1, { hasAnyInvoiceHistory: false, executionStarted: false });
+    expect(projects.findById(p1)!.status).toBe('pending_entry');
+
+    // 已取消项目拒绝
+    const p2 = prepareEnterableProject(service);
+    service.cancelProject(p2, { time: '2026-08-07', reason: '取消' });
+    expect(() =>
+      service.clearAcceptance(p2, { hasAnyInvoiceHistory: false, executionStarted: false }),
+    ).toThrow(/已取消/);
   });
 });

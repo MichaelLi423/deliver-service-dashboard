@@ -11,4 +11,7 @@ describe('workbench-interface 桌面布局静态约束',()=>{
   it('生命周期阶段使用原型的分层交互样式而不是浏览器默认按钮',()=>{expect(css).toContain('.workbench-v2 .stage[aria-pressed="true"]');expect(css).toContain('.workbench-v2 .stage.not-entered[aria-pressed="true"]');});
   it('独立模块抽屉给记录区稳定宽度，并在较窄桌面改为单列',()=>{expect(css).toContain('.wide-drawer{width:min(1120px,calc(100vw - 24px))');expect(css).toContain('grid-template-columns:minmax(340px,.78fr) minmax(460px,1.22fr)');expect(css).toContain('@media(max-width:900px)');expect(css).toContain('.wide-drawer .module-layout{grid-template-columns:minmax(0,1fr)}');});
   it('数据管理入口与主导航共用高度、选中反馈和下拉层级',()=>{expect(css).toContain('.data-menu{height:100%;display:flex;align-items:stretch}');expect(css).toContain('.data-menu summary:hover,.data-menu[open] summary');expect(css).toContain('min-width:176px');});
+  it('顶部导航锁定且窄屏允许导航自身滚动',()=>{expect(css).toContain('.workbench-v2 .topbar{position:sticky;top:0;z-index:12');expect(css).toContain('.workbench-v2 .topbar nav{min-width:0;overflow-x:auto');});
+  it('历史、报表和危险操作形成独立响应式层级',()=>{expect(css).toContain('.history-browser{display:grid');expect(css).toContain('.report-metric-grid{display:grid');expect(css).toContain('.danger-zone{');expect(css).toContain('@media(max-width:650px)');});
+  it('跨项目历史上下文与 intent 专属资料具有独立视觉层级',()=>{expect(css).toContain('.history-scope{grid-column:1/-1');expect(css).toContain('.history-table td:first-child strong');expect(css).toContain('.formal-intent-fields,.approval-fields');expect(css).toContain('.clean-recheck-error');});
 });

@@ -57,7 +57,6 @@ function makeFacade(): Ctx {
       newSiteAddress: '新址',
       instrumentCount: 1,
       contractAmount: '100000',
-      finalAmount: '100000',
       siteConfirmed: false,
     },
   });
@@ -151,6 +150,38 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
       );
     }
     closeDatabase(ctx.db);
+  });
+
+  it('pendingAmount 排除已取消项目：仅取消项目存在时显示 0.00', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    // makeFacade 已有已进单项目（contractAmount=100000、final=100000，尚待掉票）
+    expect(reader(ctx).overview().metrics.pendingAmount).toBe('100000.00');
+
+    // 取消该项目（无掉票历史允许取消）→ pendingAmount 归 0（仅取消项目时显示 0）
+    facade.v2Mutate({ op: 'cancel_project', projectId, time: '2026-08-12', reason: '客户取消' });
+    const overview = reader(ctx).overview();
+    expect(overview.metrics.pendingAmount).toBe('0.00');
+    expect(overview.metrics.totalProjects).toBe(1);
+    expect(overview.metrics.activeProjects).toBe(0);
+
+    // 再建一个已进单未取消项目 → 只统计非取消项目
+    const second = facade.v2Mutate({
+      op: 'create_project',
+      payload: {
+        intent: 'formal',
+        customerName: '待掉票客户乙',
+        ecc: 'ECC-PEND-002',
+        region: '华东',
+        instrumentCount: 1,
+        contractAmount: '50000',
+      },
+    });
+    const secondId = second.changed!.projectId!;
+    expect(reader(ctx).overview().metrics.pendingAmount).toBe('50000.00');
+    facade.v2Mutate({ op: 'cancel_project', projectId: secondId, time: '2026-08-13', reason: '业务调整' });
+    expect(reader(ctx).overview().metrics.pendingAmount).toBe('0.00');
+    closeDatabase(db);
   });
 
   it('提醒边界：昨日/今日/窗口内/窗口外/仅备注 分类与纯函数完全同口径', () => {
@@ -446,6 +477,24 @@ describe('工作台 v2 独立模块 + lookup 分页（Oracle #10）', () => {
     closeDatabase(db);
   });
 
+  it('independent serial_address：无仪器独立保存时 instrumentId 返回 null，绝不输出字符串 "null"', () => {
+    const ctx = makeFacade();
+    const { db, facade } = ctx;
+    // 历史导入路径写入 instrument_id = NULL（独立保存）
+    db.prepare(
+      `INSERT INTO serial_address_updates (id, instrument_id, customer_name, new_site_address, serial_no, account_id, updated_at, created_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+    ).run('sa-null', null, '独立客户', '独立新址', 'SN-FREE', 'ACC-FREE', '2026-08-10', '2026-08-10T00:00:00+08:00');
+
+    const page = facade.v2IndependentPage({ kind: 'serial_address' });
+    expect(page.total).toBe(1);
+    const row = page.rows[0] as Extract<typeof page.rows[number], { kind: 'serial_address' }>;
+    expect(row.instrumentId).toBeNull();
+    expect(row.instrumentName).toBe('');
+    expect(row.serialNo).toBe('SN-FREE');
+    closeDatabase(db);
+  });
+
   it('lookup：ship_to_requests / customers 分页与 query', () => {
     const ctx = makeFacade();
     const { db, facade } = ctx;
@@ -480,7 +529,6 @@ describe('工作台 v2 独立模块 + lookup 分页（Oracle #10）', () => {
         newSiteAddress: '新址',
         instrumentCount: 1,
         contractAmount: '1000',
-        finalAmount: '1000',
         siteConfirmed: false,
       },
     });
@@ -661,6 +709,164 @@ describe('Oracle #10 二次复审：independent/lookup 分页缺陷回归', () =
   });
 });
 
+/**
+ * Oracle #10 往期/时间筛选：independent / section / lookup 支持可选 from/to
+ * （业务日期 yyyy-mm-dd，含边界），缺省完全兼容现有行为。
+ */
+describe('工作台 v2 往期/时间筛选（from/to）', () => {
+  it('independentPage：serial_address 按更新日期、qr_request 按申请日期过滤', () => {
+    const ctx = makeFacade();
+    const { db, facade } = ctx;
+    const serialStmt = db.prepare(
+      `INSERT INTO serial_address_updates (id, instrument_id, customer_name, new_site_address, serial_no, account_id, updated_at, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+    );
+    serialStmt.run('sa-d1', null, '客户甲', '新址A', 'SN-D1', 'ACC-D1', '2026-07-15', '2026-07-15T00:00:00+08:00');
+    serialStmt.run('sa-d2', null, '客户乙', '新址B', 'SN-D2', 'ACC-D2', '2026-08-10', '2026-08-10T00:00:00+08:00');
+    serialStmt.run('sa-d3', null, '客户丙', '新址C', 'SN-D3', 'ACC-D3', '2026-09-20', '2026-09-20T00:00:00+08:00');
+
+    expect(facade.v2IndependentPage({ kind: 'serial_address', from: '2026-08-01', to: '2026-08-31' }).total).toBe(1);
+    expect(facade.v2IndependentPage({ kind: 'serial_address', from: '2026-07-01', to: '2026-08-31' }).total).toBe(2);
+    expect(facade.v2IndependentPage({ kind: 'serial_address', from: '2026-09-20' }).total).toBe(1);
+    // 与 query 组合
+    expect(facade.v2IndependentPage({ kind: 'serial_address', from: '2026-08-01', to: '2026-08-31', query: '客户乙' }).total).toBe(1);
+
+    const qrStmt = db.prepare('INSERT INTO qr_requests (id, applicant, requested_at, created_at) VALUES (?,?,?,?)');
+    qrStmt.run('qr-d1', '申请人甲', '2026-07-05', '2026-07-05T00:00:00+08:00');
+    qrStmt.run('qr-d2', '申请人乙', '2026-08-06', '2026-08-06T00:00:00+08:00');
+    qrStmt.run('qr-d3', '申请人丙', '2026-09-07', '2026-09-07T00:00:00+08:00');
+    expect(facade.v2IndependentPage({ kind: 'qr_request', from: '2026-08-01', to: '2026-08-31' }).total).toBe(1);
+    expect(facade.v2IndependentPage({ kind: 'qr_request', to: '2026-07-31' }).total).toBe(1);
+    expect(facade.v2IndependentPage({ kind: 'qr_request', from: '2026-07-01', to: '2026-09-30' }).total).toBe(3);
+    closeDatabase(db);
+  });
+
+  it('sectionPage：按各 kind 业务日期过滤（invoices 按掉票日期）', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-07-10', amount: '1000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-15', amount: '2000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-09-01', amount: '3000' } } });
+
+    expect(facade.v2SectionPage({ projectId, kind: 'invoices', from: '2026-08-01', to: '2026-08-31' }).total).toBe(1);
+    expect(facade.v2SectionPage({ projectId, kind: 'invoices', to: '2026-07-31' }).total).toBe(1);
+    expect(facade.v2SectionPage({ projectId, kind: 'invoices' }).total).toBe(3); // 缺省不限时间
+    closeDatabase(db);
+  });
+
+  it('lookupPage：ship_to_requests 按首次提交日期过滤；from > to 抛 RANGE_ORDER', () => {
+    const ctx = makeFacade();
+    const { db, facade } = ctx;
+    const reqStmt = db.prepare(
+      `INSERT INTO ship_to_requests (id, customer_name, new_site_address, status, submitted_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
+    );
+    reqStmt.run('r-d1', '客户甲', '新址A', 'completed', '2026-07-05', '2026-07-05T00:00:00+08:00', 't');
+    reqStmt.run('r-d2', '客户乙', '新址B', 'processing', '2026-08-06', '2026-08-06T00:00:00+08:00', 't');
+    reqStmt.run('r-d3', '客户丙', '新址C', 'pending_submit', null, '2026-09-07T00:00:00+08:00', 't');
+    expect(facade.v2LookupPage({ kind: 'ship_to_requests', from: '2026-08-01', to: '2026-08-31' }).total).toBe(1);
+    // submitted_at 为空的行在过滤后不计入（有值才参与时间筛选）
+    expect(facade.v2LookupPage({ kind: 'ship_to_requests', to: '2026-07-31' }).total).toBe(1);
+    expect(() => facade.v2IndependentPage({ kind: 'serial_address', from: '2026-09-01', to: '2026-08-01' })).toThrow(/起始日期不得晚于截止日期/);
+    closeDatabase(db);
+  });
+});
+
+/**
+ * ora-1 #6：跨项目历史有界分页（historyPage）——kind/from/to/cursor/limit，
+ * 返回项目上下文（projectId/customerName/ecc/tempNo）与可用于 v2Delete 的 id；
+ * created_at 类（instrument）to 截止日期包含当天。
+ */
+describe('工作台 v2 跨项目历史分页（historyPage）', () => {
+  it('batch/invoice/activity/damage/service_order：返回项目上下文 + 日期筛选 + keyset 翻页', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    // 为当前项目造子记录（日期跨月）
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '运输甲', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '11000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-07-15', amount: '1000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-20', amount: '2000' } } });
+    const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'visit', projectId, values: { visitAt: '2026-08-12', engineers: '工程师甲', status: 'done', instrumentIds: [instrumentId], workTypes: ['teardown'] } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'order', projectId, values: { orderType: 'relocation', serviceOrderNo: 'SO-HIST-001', orderedAt: '2026-08-11', engineer: '工程师乙' } } });
+
+    // batch：项目上下文 + 日期筛选（含边界）
+    const batchPage = facade.v2HistoryPage({ kind: 'batch' });
+    expect(batchPage.total).toBe(1);
+    const batchRow = batchPage.rows[0] as Extract<typeof batchPage.rows[number], { kind: 'batch' }>;
+    expect(batchRow.id).toBe(batchPage.rows[0].id);
+    expect(batchRow.projectId).toBe(projectId);
+    expect(batchRow.customerName).toBe('集成客户甲');
+    expect(batchRow.ecc).toBe('ECC-V2-001');
+    expect(batchRow.businessDate).toBe('2026-08-10');
+    expect(facade.v2HistoryPage({ kind: 'batch', from: '2026-09-01' }).total).toBe(0);
+
+    // invoice：from/to 筛选 + keyset（limit=1 首页翻页无重复；后续页缺省 limit 返回剩余并终止）
+    const invFirst = facade.v2HistoryPage({ kind: 'invoice', limit: 1 });
+    expect(invFirst.total).toBe(2);
+    expect(invFirst.rows.length).toBe(1);
+    expect(invFirst.nextCursor).toBeTruthy();
+    const invSecond = facade.v2HistoryPage({ kind: 'invoice', cursor: invFirst.nextCursor! });
+    expect(invSecond.rows.length).toBe(1);
+    expect(invSecond.nextCursor).toBeNull();
+    const invIds = [...invFirst.rows, ...invSecond.rows].map((r) => r.id);
+    expect(new Set(invIds).size).toBe(2);
+    expect(facade.v2HistoryPage({ kind: 'invoice', from: '2026-08-01', to: '2026-08-31' }).total).toBe(1);
+
+    // activity / service_order / damage 上下文
+    const activityRow = facade.v2HistoryPage({ kind: 'activity' }).rows[0] as Extract<ReturnType<WorkbenchFacade['v2HistoryPage']>['rows'][number], { kind: 'activity' }>;
+    expect(activityRow.projectId).toBe(projectId);
+    expect(activityRow.engineers).toBe('工程师甲');
+    const orderRow = facade.v2HistoryPage({ kind: 'service_order' }).rows[0] as Extract<ReturnType<WorkbenchFacade['v2HistoryPage']>['rows'][number], { kind: 'service_order' }>;
+    expect(orderRow.serviceOrderNo).toBe('SO-HIST-001');
+    expect(orderRow.orderedAt).toBe('2026-08-11');
+    expect(facade.v2HistoryPage({ kind: 'damage' }).total).toBe(0);
+    closeDatabase(db);
+  });
+
+  it('instrument：created_at 截止日期包含当天（to=登记当天仍计入）', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    // makeFacade 已有 1 台仪器（登记时间为真实当前时间）；登记第二台并固定其 created_at。
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'instrument', projectId, values: { name: '历史仪器', serialNo: 'SN-HIST' } } });
+    const instruments = db.prepare('SELECT id FROM instruments WHERE project_id = ? ORDER BY created_at').all(projectId) as Array<{ id: string }>;
+    db.prepare("UPDATE instruments SET created_at = '2026-07-01T10:00:00+08:00' WHERE id = ?").run(instruments[0].id);
+    db.prepare("UPDATE instruments SET created_at = '2026-08-10T23:59:59+08:00' WHERE id = ?").run(instruments[1].id);
+
+    const page = facade.v2HistoryPage({ kind: 'instrument', from: '2026-08-10', to: '2026-08-10' });
+    expect(page.total).toBe(1); // to 含当天（substr 日期部分比较）
+    const row = page.rows[0] as Extract<typeof page.rows[number], { kind: 'instrument' }>;
+    expect(row.businessDate).toBe('2026-08-10');
+    expect(row.id).toBe(instruments[1].id);
+    expect(facade.v2HistoryPage({ kind: 'instrument', from: '2026-08-11' }).total).toBe(0); // 上界排除
+    closeDatabase(db);
+  });
+
+  it('acceptance（仅已验收项目）与 ship_to_request（无项目上下文）：分页与筛选', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    // 标记验收 → 待掉票
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'acceptance', projectId, values: { reportDate: '2026-08-15' } } });
+    const acc = facade.v2HistoryPage({ kind: 'acceptance' });
+    expect(acc.total).toBe(1);
+    const accRow = acc.rows[0] as Extract<typeof acc.rows[number], { kind: 'acceptance' }>;
+    expect(accRow.id).toBe(projectId); // v2Delete acceptance 使用 projectId
+    expect(accRow.acceptanceReportDate).toBe('2026-08-15');
+    expect(facade.v2HistoryPage({ kind: 'acceptance', from: '2026-08-16' }).total).toBe(0);
+
+    // ship_to_request：无项目上下文
+    const created = facade.createShipToRequest({ customerName: '历史 ShipTo 客户', newSiteAddress: '新址' });
+    facade.submitShipToRequest(created.request.id);
+    const str = facade.v2HistoryPage({ kind: 'ship_to_request' });
+    expect(str.total).toBe(1);
+    const strRow = str.rows[0] as Extract<typeof str.rows[number], { kind: 'ship_to_request' }>;
+    expect(strRow.projectId).toBeNull();
+    expect(strRow.customerName).toBe('历史 ShipTo 客户');
+    expect(strRow.status).toBe('processing');
+
+    // from > to 拒绝
+    expect(() => facade.v2HistoryPage({ kind: 'invoice', from: '2026-09-01', to: '2026-08-01' })).toThrow(/起始日期不得晚于截止日期/);
+    closeDatabase(db);
+  });
+});
+
 describe('工作台 v2 mutation（Oracle #10：复用写逻辑，无 snapshot）', () => {
   it('create_project：返回 bounded 结果（revision + invalidate + changed），不返回快照', () => {
     const ctx = makeFacade();
@@ -679,7 +885,6 @@ describe('工作台 v2 mutation（Oracle #10：复用写逻辑，无 snapshot）
         newSiteAddress: '新址',
         instrumentCount: 1,
         contractAmount: '50000',
-        finalAmount: '50000',
         siteConfirmed: false,
       },
     });
@@ -795,7 +1000,6 @@ describe('工作台 v2 BigInt 金额（Oracle #10 精度）', () => {
           newSiteAddress: '新址',
           instrumentCount: 1,
           contractAmount: BIG,
-          finalAmount: BIG,
           actualInstallDoneAt: '2026-08-08',
           siteConfirmed: false,
         },

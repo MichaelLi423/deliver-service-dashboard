@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import {
   IMPORT_WIZARD_CHANNELS,
   IPC_CHANNELS,
+  type IpcEnvelope,
   type ImportWizardProgressEventDto,
   type WorkbenchApi,
 } from '../shared/ipc';
@@ -9,9 +10,18 @@ import {
 /**
  * preload 脚本：仅暴露最小化语义 API（tasks 1.1 工程骨架 + 8.48 导入向导边界）。
  * 渲染层无 Node 访问（contextIsolation: true, nodeIntegration: false, sandbox: true）。
- * 导入向导只暴露语义方法：不暴露任意文件系统路径、数据库连接、worker 或内部路径能力；
- * 进度经受信窗口事件（onProgress 订阅），dialog 只返回展示元数据/结果。
+ *
+ * ora-1 #7：v2Delete / cleanPrepare / cleanConfirm 的 IPC 线上为错误信封
+ * {ok:true,data}|{ok:false,error:{code,message}}（handler 在进程内转换，不依赖 Error
+ * 自定义属性穿透 Electron）。本层把信封适配回既有 UI 契约：成功返回 data，失败抛出
+ * message 含稳定 code 的 Error（保留稳定 code 供 UI 精确提示）。
  */
+async function unwrap<T>(promise: Promise<IpcEnvelope<T>>): Promise<T> {
+  const result = await promise;
+  if (result.ok) return result.data;
+  throw new Error(`${result.error.code}: ${result.error.message}`);
+}
+
 const api: WorkbenchApi = {
   getCapabilities: () => ipcRenderer.invoke(IPC_CHANNELS.capabilitiesList),
   getAccountStatus: () => ipcRenderer.invoke(IPC_CHANNELS.accountGetStatus),
@@ -23,7 +33,11 @@ const api: WorkbenchApi = {
   v2SectionPage: (request) => ipcRenderer.invoke(IPC_CHANNELS.workbenchV2SectionPage, request),
   v2IndependentPage: (request) => ipcRenderer.invoke(IPC_CHANNELS.workbenchV2IndependentPage, request),
   v2LookupPage: (request) => ipcRenderer.invoke(IPC_CHANNELS.workbenchV2LookupPage, request),
+  v2HistoryPage: (request) => ipcRenderer.invoke(IPC_CHANNELS.workbenchV2HistoryPage, request),
   v2Mutate: (request) => ipcRenderer.invoke(IPC_CHANNELS.workbenchV2Mutate, request),
+  v2Delete: (request) => unwrap(ipcRenderer.invoke(IPC_CHANNELS.workbenchV2Delete, request)),
+  cleanPrepare: () => unwrap(ipcRenderer.invoke(IPC_CHANNELS.dataCleanPrepare)),
+  cleanConfirm: (request) => unwrap(ipcRenderer.invoke(IPC_CHANNELS.dataCleanConfirm, request)),
   createShipToRequest: (input) => ipcRenderer.invoke(IPC_CHANNELS.shipToCreateRequest, input),
   submitShipToRequest: (requestId) => ipcRenderer.invoke(IPC_CHANNELS.shipToSubmitRequest, requestId),
   buildReport: (filter) => ipcRenderer.invoke(IPC_CHANNELS.reportBuild, filter),

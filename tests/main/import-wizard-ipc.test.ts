@@ -140,6 +140,7 @@ function makeContext(dir: string): Ctx {
     showOpenDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] }),
     writeFile: vi.fn().mockResolvedValue(undefined),
     createManualBackup: () => Promise.resolve(join(dir, 'manual.db')),
+    createCleanupBackup: () => Promise.resolve(join(dir, 'cleanup-backup.db')),
     restoreFromBackup: () => ({ restored: false }),
     importWizardFacade: () => facade,
     importWizardEnabled: () => importWizardDisabled === null,

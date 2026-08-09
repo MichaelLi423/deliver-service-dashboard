@@ -288,7 +288,6 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
         newSiteAddress: '新址',
         instrumentCount: 1,
         contractAmount: '90071992547409.93',
-        finalAmount: '90071992547409.93',
         siteConfirmed: false,
       },
     });

@@ -12,6 +12,35 @@ import {
 } from '../shared/ipc';
 import { WorkbenchFacade } from './workbench-facade';
 import type { ImportWizardFacade } from './import-wizard-facade';
+import type { IpcEnvelope } from '../shared/ipc';
+
+/**
+ * 错误可跨 IPC 序列化的最小信封（ora-1：#7）。
+ * 在进程内把 DomainError 转成 {ok:false,error:{code,message}} —— 绝不依赖 Error 自定义
+ * 属性穿透 Electron 序列化（Electron 只保留 message）。code 保留稳定拒绝码。
+ */
+function toErrorBody(err: unknown): { code: string; message: string } {
+  const e = err as { code?: unknown; message?: unknown };
+  const code = typeof e?.code === 'string' && e.code !== '' ? e.code : 'IPC_UNKNOWN';
+  const message = typeof e?.message === 'string' && e.message !== '' ? e.message : String(err);
+  return { code, message };
+}
+
+function runEnveloped<T>(fn: () => T): IpcEnvelope<T> {
+  try {
+    return { ok: true, data: fn() };
+  } catch (err) {
+    return { ok: false, error: toErrorBody(err) };
+  }
+}
+
+async function runEnvelopedAsync<T>(fn: () => Promise<T>): Promise<IpcEnvelope<T>> {
+  try {
+    return { ok: true, data: await fn() };
+  } catch (err) {
+    return { ok: false, error: toErrorBody(err) };
+  }
+}
 
 /**
  * IPC 通道注册（tasks 1.1 工程骨架；本模块为 main/index.ts 的可测试抽取）。
@@ -86,6 +115,8 @@ export interface IpcHandlerDeps {
   writeFile(path: string, data: Uint8Array): Promise<void>;
   /** 手动备份到所选目录（文件名由备份服务生成）。 */
   createManualBackup(targetDir: string): Promise<string>;
+  /** 「清理全部业务数据」confirm 前安全备份（复用现有备份机制；返回备份路径）。 */
+  createCleanupBackup(): Promise<string>;
   /** 从备份文件恢复；成功时内部重建数据库连接。返回是否成功恢复。 */
   restoreFromBackup(backupPath: string): { restored: boolean };
   /** 历史数据导入向导 facade（编排工作区/worker/校验/seal/提交）。 */
@@ -182,7 +213,9 @@ export function registerIpcHandlers(bus: IpcBus, deps: IpcHandlerDeps): void {
 
   const facadeFor = (event: IpcEvent): WorkbenchFacade => {
     const session = requireSessionAndSender(event, deps);
-    return new WorkbenchFacade(deps.db(), () => session);
+    return new WorkbenchFacade(deps.db(), () => session, {
+      cleanupBackup: () => deps.createCleanupBackup(),
+    });
   };
 
   // ---- Oracle #10：工作台 v2 有界读取 / mutation（旧 snapshot 通道已删除，仅此入口） ----
@@ -202,8 +235,20 @@ export function registerIpcHandlers(bus: IpcBus, deps: IpcHandlerDeps): void {
   bus.handle(IPC_CHANNELS.workbenchV2LookupPage, (event, request) =>
     facadeFor(event).v2LookupPage(request),
   );
+  bus.handle(IPC_CHANNELS.workbenchV2HistoryPage, (event, request) =>
+    facadeFor(event).v2HistoryPage(request),
+  );
   bus.handle(IPC_CHANNELS.workbenchV2Mutate, (event, request) =>
     facadeFor(event).v2Mutate(request),
+  );
+  bus.handle(IPC_CHANNELS.workbenchV2Delete, (event, request) =>
+    runEnveloped(() => facadeFor(event).v2Delete(request)),
+  );
+  bus.handle(IPC_CHANNELS.dataCleanPrepare, (event) =>
+    runEnveloped(() => facadeFor(event).cleanPrepare()),
+  );
+  bus.handle(IPC_CHANNELS.dataCleanConfirm, (event, request) =>
+    runEnvelopedAsync(() => facadeFor(event).cleanConfirm(request)),
   );
   bus.handle(IPC_CHANNELS.shipToCreateRequest, (event, input: ShipToRequestInputDto) =>
     facadeFor(event).createShipToRequest(input),

@@ -43,7 +43,7 @@ async function makeFacade(): Promise<{ facade: WorkbenchFacade; db: import('node
     password: 'password1',
   });
   const facade = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }));
-  const created = facade.v2Mutate({ op: 'create_project', payload: wizard({ customerName: '新批次客户', ecc: 'ECC-NEW-001', contractAmount: '100000', finalAmount: '100000' }) });
+  const created = facade.v2Mutate({ op: 'create_project', payload: wizard({ customerName: '新批次客户', ecc: 'ECC-NEW-001', contractAmount: '100000' }) });
   return { facade, db, projectId: created.changed!.projectId! };
 }
 
@@ -58,7 +58,7 @@ describe('新建项目：instrumentCount 正整数 + 计划装机完成日期独
     expect(detail.siteConfirmed).toBe(false);
   });
 
-  it('instrumentCount 非正整数被拒且不落库', async () => {
+  it('instrumentCount 提供非正整数被拒且不落库；未提供/0 不再必填', async () => {
     const dir = makeTempDir('new-batch-count-');
     dirs.push(dir);
     const { db } = bootstrapDatabase({ dataDir: dir });
@@ -67,12 +67,21 @@ describe('新建项目：instrumentCount 正整数 + 计划装机完成日期独
       password: 'password1',
     });
     const facade = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }));
-    for (const instrumentCount of [0, -1, 1.5, undefined]) {
+    // 提供了但非法（0/负数/小数）→ 拒绝
+    for (const instrumentCount of [0, -1, 1.5]) {
       expect(() =>
         facade.v2Mutate({ op: 'create_project', payload: wizard({ instrumentCount: instrumentCount as never }) }),
       ).toThrow(/instrumentCount/);
     }
     expect(facade.v2Overview().metrics.totalProjects).toBe(0);
+    // 未提供 → 允许（不确认搬迁范围；正式进单不再要求搬迁范围）
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ customerName: '未提供数量客户', ecc: 'ECC-NO-COUNT', contractAmount: '1000', instrumentCount: undefined as never }),
+    });
+    const detail = facade.v2ProjectDetail(created.changed!.projectId!);
+    expect(detail.detail!.temporaryInstrumentCount).toBeNull();
+    expect(detail.project!.formallyEntered).toBe(true);
   });
 
   it('计划装机完成日期：可随新建/补齐/更新写入，且不触发生命周期', async () => {
@@ -91,7 +100,6 @@ describe('新建项目：instrumentCount 正整数 + 计划装机完成日期独
         customerName: '计划装机客户',
         ecc: 'ECC-PLAN-001',
         contractAmount: '1000',
-        finalAmount: '1000',
         plannedInstallDoneAt: '2026-08-20',
       }),
     });
@@ -151,7 +159,6 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
         customerName: '补齐资料客户',
         region: '华南',
         approvalReason: '客户进度紧急，经理已批复优先执行',
-        missingItems: '合同尚未签署',
       }),
     });
     return { facade, projectId: created.changed!.projectId! };
@@ -190,8 +197,8 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     detail = facade.v2ProjectDetail(projectId).project!;
     expect(detail.formallyEntered).toBe(true);
     expect(detail.ecc).toBe('ECC-SUPP-001');
-    // 无实际完成/验收事实时，正式进单后主状态保持领域重算结果（待进单，由负责人后续人工确定）
-    expect(detail.status).toBe('pending_entry');
+    // 无实际完成/验收事实时，正式进单后基线待执行（由负责人后续人工确定主状态）
+    expect(detail.status).toBe('pending_execution');
     expect(detail.preEntryExecution).toBe(false); // 正式进单清除未进单先执行标签
     const detailFull = facade.v2ProjectDetail(projectId).detail!;
     expect(detailFull.oldSiteContact).toBe('旧址王工');
@@ -226,19 +233,27 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     expect(facade.v2ProjectDetail(projectId).project!.preEntryExecution).toBe(true);
   });
 
-  it('supplement 正式进单不绕过领域校验：缺客户/合同金额 0 时按领域规则拒绝', async () => {
+  it('supplement 正式进单：合同金额 0 允许（final 保持 null）；未携带 ECC 不触发正式进单', async () => {
     const { facade, projectId } = await makePendingProject();
-    // 合同金额为 0 且未录入最终可确认金额 → formalEntry 拒绝（最终可确认金额必须 > 0）
-    expect(() =>
-      facade.v2Mutate({
-        op: 'supplement_project',
-        payload: { projectId, contractAmount: '0', ecc: 'ECC-SUPP-003' },
-      }),
-    ).toThrow(/最终可确认金额/);
+    // 未携带 ECC → 不触发正式进单（formallyEntered=false），可仅补合同金额
+    facade.v2Mutate({
+      op: 'supplement_project',
+      payload: { projectId, contractAmount: '0' },
+    });
     expect(facade.v2ProjectDetail(projectId).project!.formallyEntered).toBe(false);
+    // 合同金额 0 + ECC → 正式进单成功、final 保持 null（2.1 更新：不再强制最终可确认金额）
+    const result = facade.v2Mutate({
+      op: 'supplement_project',
+      payload: { projectId, contractAmount: '0', ecc: 'ECC-SUPP-003' },
+    });
+    expect(result.changed?.projectId).toBe(projectId);
+    const project = facade.v2ProjectDetail(projectId).project!;
+    expect(project.formallyEntered).toBe(true);
+    expect(project.finalAmount).toBeNull();
+    expect(project.status).toBe('pending_execution');
   });
 
-  it('supplement 携带 instrumentCount + ECC 正式进单成功：补齐搬迁范围数量并通过 SCOPE_REQUIRED', async () => {
+  it('supplement 携带 instrumentCount + ECC 正式进单成功：补齐搬迁范围数量（范围不再强制）', async () => {
     const dir = makeTempDir('new-batch-supp-count-');
     dirs.push(dir);
     const { db } = bootstrapDatabase({ dataDir: dir });
@@ -249,7 +264,7 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     const facade = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }));
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', customerName: '补数量客户', region: '华北', approvalReason: '先执行，搬迁范围后补', missingItems: '仪器数量与合同' }),
+      payload: wizard({ intent: 'pre_entry_execution', customerName: '补数量客户', region: '华北', approvalReason: '先执行，搬迁范围后补' }),
     });
     const projectId = created.changed!.projectId!;
     // 模拟"搬迁范围未明确"的存量/导入项目：范围未确认、暂定数量为空。
@@ -271,10 +286,10 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     const detail = facade.v2ProjectDetail(projectId).detail!;
     expect(detail.temporaryInstrumentCount).toBe(3); // 补齐数量落库
     const project = facade.v2ProjectDetail(projectId).project!;
-    expect(project.formallyEntered).toBe(true); // 正式进单成功（SCOPE_REQUIRED 已通过）
+    expect(project.formallyEntered).toBe(true); // 正式进单成功（搬迁范围已非强制项）
     expect(project.ecc).toBe('ECC-SUPP-COUNT');
-    // 无实际完成事实：正式进单后主状态保持领域重算结果（待进单，由负责人后续人工确定）
-    expect(project.status).toBe('pending_entry');
+    // 无实际完成事实：正式进单后基线待执行
+    expect(project.status).toBe('pending_execution');
   });
 
   it('supplement 携带 actualInstallDoneAt + ECC：正式进单后按实际装机事实自动待验收（不覆盖领域重算）', async () => {
@@ -403,7 +418,6 @@ describe('damage_update：复用 updateIssueStatus/setPartStatus/updatePart，pr
         customerName: '维修客户',
         ecc: 'ECC-DMG-001',
         contractAmount,
-        finalAmount: contractAmount === '0' ? '5000' : contractAmount,
       }),
     });
     const projectId = created.changed!.projectId!;
@@ -505,8 +519,8 @@ describe('项目页 repair:"open" 伪筛选 + overview 开放维修项目数（E
     });
     const facade = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }));
     // 项目一：登记开放维修事项；项目二：无维修事项
-    const repairProject = facade.v2Mutate({ op: 'create_project', payload: wizard({ customerName: '维修项目客户', ecc: 'ECC-REP-001', contractAmount: '10000', finalAmount: '10000' }) }).changed!.projectId!;
-    facade.v2Mutate({ op: 'create_project', payload: wizard({ customerName: '无维修客户', ecc: 'ECC-CLEAN-001', contractAmount: '1000', finalAmount: '1000' }) });
+    const repairProject = facade.v2Mutate({ op: 'create_project', payload: wizard({ customerName: '维修项目客户', ecc: 'ECC-REP-001', contractAmount: '10000' }) }).changed!.projectId!;
+    facade.v2Mutate({ op: 'create_project', payload: wizard({ customerName: '无维修客户', ecc: 'ECC-CLEAN-001', contractAmount: '1000' }) });
     facade.v2Mutate({ op: 'submit_action', projectId: repairProject, action: { type: 'instrument', projectId: repairProject, values: { name: '维修仪器', serialNo: 'SN-REP' } } });
     const instrumentId = String(facade.v2SectionPage({ projectId: repairProject, kind: 'instruments' }).rows[0].id);
     expect(facade.v2ProjectPage({ repair: 'open' }).total).toBe(0); // 尚未登记维修事项

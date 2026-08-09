@@ -215,7 +215,7 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
       ctx.reminder.setReminder(p1, { at: '2026-08-01', note: '仅提醒' }, ACTOR);
       const rejected = ctx.projectService.adjustStatus(p1, 'completed');
       expect(rejected.ok).toBe(false);
-      expect(ctx.projects.findById(p1)!.status).toBe('pending_entry');
+      expect(ctx.projects.findById(p1)!.status).toBe('pending_execution');
 
       // financial 仅消费 lifecycle 校验结果：取消有掉票历史的项目被 lifecycle 拒绝
       ctx.financial.recordInvoice(p1, { amountCents: 100000n, invoicedAt: '2026-07-15' }, ACTOR);

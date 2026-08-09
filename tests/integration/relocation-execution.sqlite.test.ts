@@ -160,7 +160,7 @@ describe('relocation-execution SQLite 集成（3.11）', () => {
     try {
       const ctx = openService(dir);
       const projectId = prepareEnteredProject(ctx);
-      expect(ctx.projects.findById(projectId)!.status).toBe('pending_entry');
+      expect(ctx.projects.findById(projectId)!.status).toBe('pending_execution');
 
       // 批次开始运输 → 执行中
       const batch = ctx.service.createBatch(projectId, ACTOR);
@@ -175,7 +175,7 @@ describe('relocation-execution SQLite 集成（3.11）', () => {
       // 另一个项目：首个上门活动工作事实开始 → 执行中（创建活动/排期不计）
       const projectId2 = prepareEnteredProject(ctx);
       const activity = ctx.service.createActivity(projectId2, null, ['工程师甲'], ACTOR);
-      expect(ctx.projects.findById(projectId2)!.status).toBe('pending_entry'); // 仅排期不计
+      expect(ctx.projects.findById(projectId2)!.status).toBe('pending_execution'); // 仅排期不计
       const i2 = ctx.service.registerInstrument(projectId2, { name: '仪器C' }, ACTOR);
       ctx.service.startWorkFact(activity.id, i2.id, 'teardown', ACTOR);
       expect(ctx.projects.findById(projectId2)!.status).toBe('executing');

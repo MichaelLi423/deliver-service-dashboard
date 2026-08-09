@@ -139,22 +139,32 @@ describe('最终可确认金额（5.4 / TBD-20）', () => {
     expect(ctx.contracts.findByProjectId(projectId)!.finalConfirmableAmountCents).toBe(900000n);
   });
 
-  it('合同金额为 0 时正式进单最终可确认金额必须另行录入大于 0', () => {
+  it('合同金额为 0 时正式进单 final 保持 null（不再强制另行录入，进单后基线待执行）', () => {
     const ctx = setup();
+    // 未另行录入 → final 保持 null、进单成功（2.1 正式进单规则更新）
     const projectId = ctx.projectService.createPendingProject().id;
     const contract = ctx.projectService.attachContract(projectId);
     ctx.contracts.save(contract);
     ctx.financial.setContractUsdTaxAmount(projectId, 0n);
     ctx.projectService.linkCustomer(projectId, 'customer-1');
     ctx.projectService.confirmScope(projectId);
-    // 未另行录入 → 拒绝且不能默认为 0（2.1 正式进单规则）
-    expect(() => ctx.projectService.formalEntry(projectId, { ecc: 'ECC-ZERO' })).toThrow(/必须另行录入大于 0/);
+    const entered = ctx.projectService.formalEntry(projectId, { ecc: 'ECC-ZERO' });
+    expect(entered.status).toBe('pending_execution');
+    expect(ctx.contracts.findByProjectId(projectId)!.finalConfirmableAmountCents).toBeNull();
+
     // 另行录入 > 0 → 允许
-    const entered = ctx.projectService.formalEntry(projectId, {
-      ecc: 'ECC-ZERO',
+    const projectId2 = ctx.projectService.createPendingProject().id;
+    const contract2 = ctx.projectService.attachContract(projectId2);
+    ctx.contracts.save(contract2);
+    ctx.financial.setContractUsdTaxAmount(projectId2, 0n);
+    ctx.projectService.linkCustomer(projectId2, 'customer-1');
+    ctx.projectService.confirmScope(projectId2);
+    const entered2 = ctx.projectService.formalEntry(projectId2, {
+      ecc: 'ECC-ZERO-2',
       finalConfirmableAmountCents: 500000n,
     });
-    expect(entered.status).toBe('pending_entry');
+    expect(entered2.status).toBe('pending_execution');
+    expect(ctx.contracts.findByProjectId(projectId2)!.finalConfirmableAmountCents).toBe(500000n);
   });
 
   it('最终可确认金额不得低于累计掉票金额', () => {

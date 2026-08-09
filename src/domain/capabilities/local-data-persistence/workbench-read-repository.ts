@@ -1,9 +1,14 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { formatCents } from '../../core/money';
-import type { BusinessDate } from '../../core/time';
+import { ValidationError } from '../../core/errors';
+import { assertValidBusinessDate, type BusinessDate } from '../../core/time';
 import type { ProjectStatus } from '../../../shared/ipc';
 import type {
   WorkbenchProjectRow,
+  WorkbenchV2HistoryKind,
+  WorkbenchV2HistoryPageDto,
+  WorkbenchV2HistoryPageRequest,
+  WorkbenchV2HistoryRow,
   WorkbenchV2IndependentKind,
   WorkbenchV2IndependentPageDto,
   WorkbenchV2IndependentPageRequest,
@@ -99,6 +104,36 @@ function buildWhereClause(clauses: string[]): string {
 }
 
 /**
+ * 往期/时间筛选子句构建（业务日期 yyyy-mm-dd，含边界）。
+ * column 为带表名/别名的日期列（如 s.updated_at）；from > to 时抛 RANGE_ORDER。
+ * 返回不带 AND 前缀的裸子句（由 buildWhereClause / 调用方统一拼接），
+ * 缺省（均未提供）返回空串，完全兼容现有行为。
+ */
+function dateRangeClause(
+  range: { from?: string | null; to?: string | null },
+  column: string,
+): { sql: string; params: SQLInputValue[] } {
+  const clauses: string[] = [];
+  const params: SQLInputValue[] = [];
+  const from = range.from;
+  const to = range.to;
+  if (from !== undefined && from !== null && from !== '') {
+    assertValidBusinessDate(from, '起始日期');
+    clauses.push(`${column} >= ?`);
+    params.push(from);
+  }
+  if (to !== undefined && to !== null && to !== '') {
+    assertValidBusinessDate(to, '截止日期');
+    clauses.push(`${column} <= ?`);
+    params.push(to);
+  }
+  if (from && to && from > to) {
+    throw new ValidationError('RANGE_ORDER', '起始日期不得晚于截止日期');
+  }
+  return { sql: clauses.join(' AND '), params };
+}
+
+/**
  * 统一 keyset 游标子句构建（游标列一律带表别名，避免 JOIN 后歧义/缺列）。
  * - desc：`(<alias>.<col>, <alias>.id) < (?, ?)`（ORDER BY col DESC, id DESC 的后续页）；
  * - asc：`(<alias>.<col>, <alias>.id) > (?, ?)`（ORDER BY col ASC, id ASC 的后续页）。
@@ -155,7 +190,8 @@ export class WorkbenchReadRepository {
        FROM projects p
        JOIN contracts c ON c.project_id = p.id
        LEFT JOIN (SELECT project_id, SUM(amount_cents) AS total FROM invoices WHERE revoked_at IS NULL GROUP BY project_id) inv ON inv.project_id = p.id
-       WHERE p.entry_at IS NOT NULL AND c.final_confirmable_amount_cents IS NOT NULL`,
+       WHERE p.entry_at IS NOT NULL AND c.final_confirmable_amount_cents IS NOT NULL
+         AND p.status <> 'cancelled'`,
     ).get() as { pending_cents: bigint | string | number };
 
     const metrics = {
@@ -330,23 +366,29 @@ export class WorkbenchReadRepository {
   sectionPage(request: WorkbenchV2SectionPageRequest): WorkbenchV2SectionPageDto {
     const limit = pageLimit(request.limit);
     const spec = SECTION_SPECS[request.kind];
-    const params: SQLInputValue[] = [request.projectId];
+    // 往期/时间筛选：行查询用表别名、count 查询用表名（SQLite 不允许引用已别名表的原名）。
+    // created_at 类（instruments）按日期部分比较，保证 to 截止日期包含当天。
+    const rangeRows = dateRangeClause(request, spec.dateAliasExpr);
+    const rangeCount = dateRangeClause(request, spec.dateTableExpr);
+    const rowsRangeSql = rangeRows.sql === '' ? '' : ` AND ${rangeRows.sql}`;
+    const countRangeSql = rangeCount.sql === '' ? '' : ` AND ${rangeCount.sql}`;
     let cursorSql = '';
+    const cursorParams: SQLInputValue[] = [];
     if (request.cursor) {
       const cursor = decodeCursor(request.cursor);
       cursorSql = ` AND ${spec.cursorSql}`;
-      params.push(cursor.sortKey ?? '', cursor.id);
+      cursorParams.push(cursor.sortKey ?? '', cursor.id);
     }
-    params.push(limit);
+    const params: SQLInputValue[] = [request.projectId, ...rangeRows.params, ...cursorParams, limit];
 
     const rows = prepareReadBigInt(
       this.db,
-      `${spec.baseSql} ${cursorSql} ${spec.orderSql} LIMIT ?`,
+      `${spec.baseSql} ${rowsRangeSql} ${cursorSql} ${spec.orderSql} LIMIT ?`,
     ).all(...params) as Row[];
 
     const totalRow = this.db
-      .prepare(spec.countSql)
-      .get(request.projectId) as { n: number };
+      .prepare(`${spec.countSql} ${countRangeSql}`)
+      .get(request.projectId, ...rangeCount.params) as { n: number };
     const total = totalRow.n;
 
     const last = rows[rows.length - 1];
@@ -377,6 +419,9 @@ export class WorkbenchReadRepository {
         where.push("(s.customer_name LIKE ? ESCAPE '\\' OR s.serial_no LIKE ? ESCAPE '\\' OR s.new_site_address LIKE ? ESCAPE '\\' OR s.account_id LIKE ? ESCAPE '\\')");
         whereParams.push(pattern, pattern, pattern, pattern);
       }
+      // 往期/时间筛选：按业务更新日期（updated_at）。
+      const range = dateRangeClause(request, 's.updated_at');
+      if (range.sql !== '') where.push(range.sql);
       const { clause: cursorClause, params: cursorParams } = buildKeysetClause('s', 'created_at', 'desc', request.cursor);
       const rowWhere = buildWhereClause(cursorClause ? [...where, cursorClause] : where);
       const countWhere = buildWhereClause(where);
@@ -389,10 +434,10 @@ export class WorkbenchReadRepository {
          ${rowWhere}
          ORDER BY s.created_at DESC, s.id DESC
          LIMIT ?`,
-      ).all(...whereParams, ...cursorParams, limit) as Row[];
+      ).all(...whereParams, ...range.params, ...cursorParams, limit) as Row[];
       const totalRow = this.db
         .prepare(`SELECT COUNT(*) AS n FROM serial_address_updates s ${countWhere}`)
-        .get(...whereParams) as { n: number };
+        .get(...whereParams, ...range.params) as { n: number };
       const total = totalRow.n;
       const last = rows[rows.length - 1];
       const nextCursor = rows.length === limit && last ? encodeCursor(String(last.created_at), String(last.id)) : null;
@@ -403,8 +448,8 @@ export class WorkbenchReadRepository {
           (r): WorkbenchV2IndependentRow => ({
             kind: 'serial_address',
             id: String(r.id),
-            instrumentId: String(r.instrument_id),
-            instrumentName: r.instrument_name === null ? '' : String(r.instrument_name),
+            instrumentId: r.instrument_id === null || r.instrument_id === undefined ? null : String(r.instrument_id),
+            instrumentName: r.instrument_name === null || r.instrument_name === undefined ? '' : String(r.instrument_name),
             serialNo: String(r.serial_no),
             customerName: String(r.customer_name),
             newSiteAddress: String(r.new_site_address),
@@ -426,6 +471,9 @@ export class WorkbenchReadRepository {
       where.push("q.applicant LIKE ? ESCAPE '\\'");
       whereParams.push(pattern);
     }
+    // 往期/时间筛选：按业务申请日期（requested_at）。
+    const range = dateRangeClause(request, 'q.requested_at');
+    if (range.sql !== '') where.push(range.sql);
     const { clause: cursorClause, params: cursorParams } = buildKeysetClause('q', 'created_at', 'desc', request.cursor);
     const rowWhere = buildWhereClause(cursorClause ? [...where, cursorClause] : where);
     const countWhere = buildWhereClause(where);
@@ -435,10 +483,10 @@ export class WorkbenchReadRepository {
          ORDER BY q.created_at DESC, q.id DESC
          LIMIT ?`,
       )
-      .all(...whereParams, ...cursorParams, limit) as Row[];
+      .all(...whereParams, ...range.params, ...cursorParams, limit) as Row[];
     const totalRow = this.db
       .prepare(`SELECT COUNT(*) AS n FROM qr_requests q ${countWhere}`)
-      .get(...whereParams) as { n: number };
+      .get(...whereParams, ...range.params) as { n: number };
     const total = totalRow.n;
     const typesByRequest = this.qrTypesFor(rows.map((r) => String(r.id)));
     const last = rows[rows.length - 1];
@@ -480,6 +528,9 @@ export class WorkbenchReadRepository {
         where.push("(trim(r.customer_name) LIKE ? ESCAPE '\\' OR trim(r.new_site_address) LIKE ? ESCAPE '\\')");
         whereParams.push(pattern, pattern);
       }
+      // 往期/时间筛选：按首次实际提交日期（submitted_at，业务日期）。
+      const range = dateRangeClause(request, 'r.submitted_at');
+      if (range.sql !== '') where.push(range.sql);
       const { clause: cursorClause, params: cursorParams } = buildKeysetClause('r', 'created_at', 'desc', request.cursor);
       const rowWhere = buildWhereClause(cursorClause ? [...where, cursorClause] : where);
       const countWhere = buildWhereClause(where);
@@ -489,10 +540,10 @@ export class WorkbenchReadRepository {
          FROM ship_to_requests r ${rowWhere}
          ORDER BY r.created_at DESC, r.id DESC
          LIMIT ?`,
-      ).all(...whereParams, ...cursorParams, limit) as Row[];
+      ).all(...whereParams, ...range.params, ...cursorParams, limit) as Row[];
       const totalRow = this.db
         .prepare(`SELECT COUNT(*) AS n FROM ship_to_requests r ${countWhere}`)
-        .get(...whereParams) as { n: number };
+        .get(...whereParams, ...range.params) as { n: number };
       const total = totalRow.n;
       const last = rows[rows.length - 1];
       const nextCursor = rows.length === limit && last ? encodeCursor(String(last.created_at), String(last.id)) : null;
@@ -526,6 +577,9 @@ export class WorkbenchReadRepository {
       where.push("c.name LIKE ? ESCAPE '\\'");
       whereParams.push(pattern);
     }
+    // 往期/时间筛选：按登记时间（created_at，审计技术时间；客户无独立业务日期）。
+    const range = dateRangeClause(request, 'c.created_at');
+    if (range.sql !== '') where.push(range.sql);
     const { clause: cursorClause, params: cursorParams } = buildKeysetClause('c', 'name', 'asc', request.cursor);
     const rowWhere = buildWhereClause(cursorClause ? [...where, cursorClause] : where);
     const countWhere = buildWhereClause(where);
@@ -535,10 +589,10 @@ export class WorkbenchReadRepository {
          ORDER BY c.name ASC, c.id ASC
          LIMIT ?`,
       )
-      .all(...whereParams, ...cursorParams, limit) as Row[];
+      .all(...whereParams, ...range.params, ...cursorParams, limit) as Row[];
     const totalRow = this.db
       .prepare(`SELECT COUNT(*) AS n FROM customers c ${countWhere}`)
-      .get(...whereParams) as { n: number };
+      .get(...whereParams, ...range.params) as { n: number };
     const total = totalRow.n;
     const last = rows[rows.length - 1];
     const nextCursor = rows.length === limit && last ? encodeCursor(String(last.name), String(last.id)) : null;
@@ -557,6 +611,152 @@ export class WorkbenchReadRepository {
       nextCursor,
       limit,
     };
+  }
+
+  // ---- 跨项目历史有界分页（ora-1：#6） ----
+
+  historyPage(request: WorkbenchV2HistoryPageRequest): WorkbenchV2HistoryPageDto {
+    const limit = pageLimit(request.limit);
+    const spec = HISTORY_SPECS[request.kind];
+    // 往期/时间筛选：按各 kind 业务日期表达式（created_at 类用 substr 取日期部分，
+    // 保证 to 截止日期包含当天）。
+    const range = dateRangeClause(request, spec.dateExpr);
+    const conditions = [
+      spec.extraWhere ? ` AND ${spec.extraWhere}` : '',
+      range.sql !== '' ? ` AND ${range.sql}` : '',
+    ].join('');
+    const whereSql = ` WHERE 1=1 ${conditions}`;
+    const orderSql = ` ORDER BY COALESCE(${spec.dateExpr}, '') DESC, ${spec.idExpr} DESC`;
+    let cursorSql = '';
+    let cursorParams: SQLInputValue[] = [];
+    if (request.cursor) {
+      const cursor = decodeCursor(request.cursor);
+      cursorSql = ` AND (COALESCE(${spec.dateExpr}, ''), ${spec.idExpr}) < (?, ?)`;
+      cursorParams = [cursor.sortKey ?? '', cursor.id];
+    }
+    const rows = prepareReadBigInt(
+      this.db,
+      `SELECT ${spec.selectSql}, COALESCE(${spec.dateExpr}, '') AS __business_date
+       ${spec.fromSql}
+       ${whereSql} ${cursorSql} ${orderSql} LIMIT ?`,
+    ).all(...range.params, ...cursorParams, limit) as Row[];
+    const totalRow = this.db
+      .prepare(`SELECT COUNT(*) AS n ${spec.fromSql} ${whereSql}`)
+      .get(...range.params) as { n: number };
+    const total = totalRow.n;
+    const last = rows[rows.length - 1];
+    const nextCursor =
+      rows.length === limit && last
+        ? encodeCursor(String(last.__business_date ?? ''), String(last.id))
+        : null;
+    return {
+      businessRevision: readBusinessRevision(this.db),
+      kind: request.kind,
+      rows: rows.map((r) => this.toHistoryRow(request.kind, r)),
+      total,
+      nextCursor,
+      limit,
+    };
+  }
+
+  private toHistoryRow(kind: WorkbenchV2HistoryKind, r: Row): WorkbenchV2HistoryRow {
+    const ctx = (): { projectId: string; customerName: string; ecc: string | null; tempNo: string } => ({
+      projectId: String(r.project_id),
+      customerName: r.customer_name === null || r.customer_name === undefined ? '' : String(r.customer_name),
+      ecc: nullString(r.ecc),
+      tempNo: String(r.temp_no ?? ''),
+    });
+    switch (kind) {
+      case 'batch':
+        return {
+          kind,
+          id: String(r.id),
+          ...ctx(),
+          planTransportDate: nullString(r.plan_transport_date),
+          transportCompany: nullString(r.transport_company),
+          startedAt: nullString(r.started_at),
+          businessDate: nullString(r.plan_transport_date),
+          createdAt: String(r.created_at),
+        };
+      case 'instrument':
+        return {
+          kind,
+          id: String(r.id),
+          ...ctx(),
+          name: String(r.name),
+          model: nullString(r.model),
+          serialNo: nullString(r.serial_no),
+          businessDate: String(r.created_at).slice(0, 10),
+          createdAt: String(r.created_at),
+        };
+      case 'activity':
+        return {
+          kind,
+          id: String(r.id),
+          ...ctx(),
+          visitAt: nullString(r.visit_at),
+          engineers: r.engineers === null || r.engineers === undefined ? '' : String(r.engineers),
+          businessDate: nullString(r.visit_at),
+          createdAt: String(r.created_at),
+        };
+      case 'service_order':
+        return {
+          kind,
+          id: String(r.id),
+          ...ctx(),
+          orderType: r.order_type as 'relocation' | 'certification' | 'parts_by_mail' | 'pm',
+          serviceOrderNo: nullString(r.service_order_no),
+          orderedAt: String(r.ordered_at),
+          engineer: String(r.engineer),
+          businessDate: String(r.ordered_at),
+          createdAt: String(r.created_at),
+        };
+      case 'invoice':
+        return {
+          kind,
+          id: String(r.id),
+          ...ctx(),
+          amount: formatCents(toBigInt(r.amount_cents) ?? 0n),
+          invoicedAt: String(r.invoiced_at),
+          active: r.revoked_at === null,
+          businessDate: String(r.invoiced_at),
+          createdAt: String(r.created_at),
+        };
+      case 'damage':
+        return {
+          kind,
+          id: String(r.id),
+          ...ctx(),
+          instrumentName: r.instrument_name === null || r.instrument_name === undefined ? '' : String(r.instrument_name),
+          issueStatus: String(r.issue_status),
+          registeredAt: String(r.registered_at),
+          businessDate: String(r.registered_at),
+          createdAt: String(r.created_at),
+        };
+      case 'acceptance':
+        return {
+          kind,
+          id: String(r.id),
+          ...ctx(),
+          acceptanceReportDate: String(r.acceptance_report_date),
+          businessDate: String(r.acceptance_report_date),
+          createdAt: String(r.created_at),
+        };
+      case 'ship_to_request':
+        return {
+          kind,
+          id: String(r.id),
+          projectId: null,
+          customerName: String(r.customer_name),
+          ecc: null,
+          tempNo: '',
+          newSiteAddress: String(r.new_site_address),
+          status: r.status as 'pending_submit' | 'processing' | 'completed',
+          submittedAt: nullString(r.submitted_at),
+          businessDate: nullString(r.submitted_at),
+          createdAt: String(r.created_at),
+        };
+    }
   }
 
   // ---- 内部：项目行构建与有界计数 ----
@@ -931,7 +1131,7 @@ const PROJECT_BASE_SELECT = `
 /** 各 tab 子记录分页查询（keyset 游标列一律 COALESCE 成可比较字符串）。 */
 const SECTION_SPECS: Record<
   WorkbenchV2SectionKind,
-  { baseSql: string; countSql: string; orderSql: string; cursorSql: string; timeColumn: string }
+  { baseSql: string; countSql: string; orderSql: string; cursorSql: string; timeColumn: string; table: string; alias: string; dateAliasExpr: string; dateTableExpr: string }
 > = {
   batches: {
     baseSql:
@@ -940,6 +1140,10 @@ const SECTION_SPECS: Record<
     orderSql: 'ORDER BY b.created_at DESC, b.id DESC',
     cursorSql: '(b.created_at, b.id) < (?, ?)',
     timeColumn: 'created_at',
+    table: 'batches',
+    alias: 'b',
+    dateAliasExpr: 'b.plan_transport_date',
+    dateTableExpr: 'batches.plan_transport_date',
   },
   instruments: {
     baseSql:
@@ -948,6 +1152,10 @@ const SECTION_SPECS: Record<
     orderSql: 'ORDER BY i.created_at DESC, i.id DESC',
     cursorSql: '(i.created_at, i.id) < (?, ?)',
     timeColumn: 'created_at',
+    table: 'instruments',
+    alias: 'i',
+    dateAliasExpr: 'substr(i.created_at, 1, 10)',
+    dateTableExpr: 'substr(instruments.created_at, 1, 10)',
   },
   activities: {
     baseSql: `SELECT a.id, a.project_id, a.visit_at, a.created_at,
@@ -957,6 +1165,10 @@ const SECTION_SPECS: Record<
     orderSql: "ORDER BY COALESCE(a.visit_at, '') DESC, a.id DESC",
     cursorSql: "(COALESCE(a.visit_at, ''), a.id) < (?, ?)",
     timeColumn: 'visit_at',
+    table: 'activities',
+    alias: 'a',
+    dateAliasExpr: 'a.visit_at',
+    dateTableExpr: 'activities.visit_at',
   },
   orders: {
     baseSql:
@@ -965,6 +1177,10 @@ const SECTION_SPECS: Record<
     orderSql: 'ORDER BY o.created_at DESC, o.id DESC',
     cursorSql: '(o.created_at, o.id) < (?, ?)',
     timeColumn: 'created_at',
+    table: 'service_orders',
+    alias: 'o',
+    dateAliasExpr: 'o.ordered_at',
+    dateTableExpr: 'service_orders.ordered_at',
   },
   invoices: {
     baseSql:
@@ -973,6 +1189,10 @@ const SECTION_SPECS: Record<
     orderSql: 'ORDER BY v.created_at DESC, v.id DESC',
     cursorSql: '(v.created_at, v.id) < (?, ?)',
     timeColumn: 'created_at',
+    table: 'invoices',
+    alias: 'v',
+    dateAliasExpr: 'v.invoiced_at',
+    dateTableExpr: 'invoices.invoiced_at',
   },
   damage_items: {
     baseSql: `SELECT d.id, d.project_id, d.instrument_id, d.damage_reason, d.issue_status,
@@ -986,9 +1206,99 @@ const SECTION_SPECS: Record<
     orderSql: 'ORDER BY d.created_at DESC, d.id DESC',
     cursorSql: '(d.created_at, d.id) < (?, ?)',
     timeColumn: 'created_at',
+    table: 'damage_repair_items',
+    alias: 'd',
+    dateAliasExpr: 'd.registered_at',
+    dateTableExpr: 'damage_repair_items.registered_at',
   },
 };
 
 /** 独立模块分页 kind 合法校验（独立页面查询使用）。 */
 export const INDEPENDENT_KINDS: readonly WorkbenchV2IndependentKind[] = ['serial_address', 'qr_request'] as const;
 export const LOOKUP_KINDS: readonly WorkbenchV2LookupKind[] = ['ship_to_requests', 'customers'] as const;
+
+/**
+ * 跨项目历史分页查询规格（ora-1：#6）。
+ * - 项目关联 kind 全部 INNER JOIN projects/customers/contracts（跨项目历史只浏览项目内记录；
+ *   service_orders.project_id 可空 → 非搬迁类开单不计入跨项目历史）；
+ * - dateExpr：业务日期表达式；instrument 无业务日期字段，按 created_at 日期部分
+ *   （substr）过滤与输出，保证 to 截止日期包含当天；
+ * - 排序/游标统一按 COALESCE(dateExpr,'') DESC, id DESC（无日期者排在末尾）。
+ */
+interface HistorySpec {
+  fromSql: string;
+  selectSql: string;
+  idExpr: string;
+  dateExpr: string;
+  extraWhere?: string;
+}
+
+const HISTORY_SPECS: Record<WorkbenchV2HistoryKind, HistorySpec> = {
+  batch: {
+    fromSql:
+      'FROM batches b JOIN projects p ON p.id = b.project_id LEFT JOIN customers cu ON cu.id = p.customer_id LEFT JOIN contracts c ON c.project_id = p.id',
+    selectSql:
+      'b.id, b.project_id, b.plan_transport_date, b.transport_company, b.started_at, b.created_at, cu.name AS customer_name, c.ecc, p.temp_no',
+    idExpr: 'b.id',
+    dateExpr: 'b.plan_transport_date',
+  },
+  instrument: {
+    fromSql:
+      'FROM instruments i JOIN projects p ON p.id = i.project_id LEFT JOIN customers cu ON cu.id = p.customer_id LEFT JOIN contracts c ON c.project_id = p.id',
+    selectSql:
+      'i.id, i.project_id, i.name, i.model, i.serial_no, i.created_at, cu.name AS customer_name, c.ecc, p.temp_no',
+    idExpr: 'i.id',
+    dateExpr: 'substr(i.created_at, 1, 10)',
+  },
+  activity: {
+    fromSql:
+      'FROM activities a JOIN projects p ON p.id = a.project_id LEFT JOIN customers cu ON cu.id = p.customer_id LEFT JOIN contracts c ON c.project_id = p.id',
+    selectSql: `a.id, a.project_id, a.visit_at, a.created_at,
+                (SELECT GROUP_CONCAT(ae.engineer, '、') FROM activity_engineers ae WHERE ae.activity_id = a.id) AS engineers,
+                cu.name AS customer_name, c.ecc, p.temp_no`,
+    idExpr: 'a.id',
+    dateExpr: 'a.visit_at',
+  },
+  service_order: {
+    fromSql:
+      'FROM service_orders o JOIN projects p ON p.id = o.project_id LEFT JOIN customers cu ON cu.id = p.customer_id LEFT JOIN contracts c ON c.project_id = p.id',
+    selectSql:
+      'o.id, o.project_id, o.order_type, o.service_order_no, o.ordered_at, o.engineer, o.created_at, cu.name AS customer_name, c.ecc, p.temp_no',
+    idExpr: 'o.id',
+    dateExpr: 'o.ordered_at',
+  },
+  invoice: {
+    fromSql:
+      'FROM invoices v JOIN projects p ON p.id = v.project_id LEFT JOIN customers cu ON cu.id = p.customer_id LEFT JOIN contracts c ON c.project_id = p.id',
+    selectSql:
+      'v.id, v.project_id, v.amount_cents, v.invoiced_at, v.revoked_at, v.created_at, cu.name AS customer_name, c.ecc, p.temp_no',
+    idExpr: 'v.id',
+    dateExpr: 'v.invoiced_at',
+  },
+  damage: {
+    fromSql: `FROM damage_repair_items d
+              JOIN projects p ON p.id = d.project_id
+              LEFT JOIN customers cu ON cu.id = p.customer_id
+              LEFT JOIN contracts c ON c.project_id = p.id
+              LEFT JOIN instruments di ON di.id = d.instrument_id`,
+    selectSql:
+      'd.id, d.project_id, d.issue_status, d.registered_at, d.created_at, di.name AS instrument_name, cu.name AS customer_name, c.ecc, p.temp_no',
+    idExpr: 'd.id',
+    dateExpr: 'd.registered_at',
+  },
+  acceptance: {
+    fromSql:
+      'FROM projects p LEFT JOIN customers cu ON cu.id = p.customer_id LEFT JOIN contracts c ON c.project_id = p.id',
+    selectSql: 'p.id, p.id AS project_id, p.temp_no, p.acceptance_report_date, p.created_at, cu.name AS customer_name, c.ecc',
+    idExpr: 'p.id',
+    dateExpr: 'p.acceptance_report_date',
+    extraWhere: 'p.acceptance_report = 1',
+  },
+  ship_to_request: {
+    fromSql: 'FROM ship_to_requests r',
+    selectSql:
+      "r.id, NULL AS project_id, r.customer_name, r.new_site_address, r.status, r.submitted_at, r.created_at, '' AS temp_no, NULL AS ecc",
+    idExpr: 'r.id',
+    dateExpr: 'r.submitted_at',
+  },
+};

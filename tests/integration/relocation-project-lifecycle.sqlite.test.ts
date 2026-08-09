@@ -63,7 +63,7 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
         ecc: 'ECC-001',
         entryAt: '2026-07-01',
       });
-      expect(entered.status).toBe('pending_entry');
+      expect(entered.status).toBe('pending_execution');
 
       const contract = contracts.findByProjectId(projectId)!;
       expect(contract.ecc).toBe('ECC-001');

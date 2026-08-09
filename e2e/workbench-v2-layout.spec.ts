@@ -18,15 +18,20 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: 
   const layout = await page.evaluate(() => {
     const queue = document.querySelector<HTMLElement>('.queue-table-wrap');
     const filters = document.querySelector<HTMLElement>('.queue-filters');
+    const topbar = document.querySelector<HTMLElement>('.topbar');
     return {
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       queueOverflow: queue ? getComputedStyle(queue).overflowX : '',
       filtersOverflow: filters ? filters.scrollWidth - filters.clientWidth : 999,
+      topbarPosition: topbar ? getComputedStyle(topbar).position : '',
+      topbarTop: topbar?.getBoundingClientRect().top ?? 999,
     };
   });
   expect(layout.pageOverflow).toBeLessThanOrEqual(1);
   expect(layout.queueOverflow).toMatch(/auto|scroll/);
   expect(layout.filtersOverflow).toBeLessThanOrEqual(1);
+  expect(layout.topbarPosition).toBe('sticky');
+  expect(layout.topbarTop).toBeGreaterThanOrEqual(-1);
   await expect(page.getByRole('heading', { name: /高密项目队列/ })).toBeVisible();
   await expect(page.getByText(/第 0–0 项 \/ 共 0 项/)).toBeVisible();
   await page.screenshot({ path: screenshot, fullPage: true });
@@ -54,6 +59,23 @@ async function assertIndependentDrawer(page: Page, width: 820 | 1024, screenshot
   await page.getByRole('button', { name: '关闭' }).click();
 }
 
+async function assertHistoryDrawer(page: Page, width: 820 | 1024, screenshot: string): Promise<void> {
+  await page.setViewportSize({ width, height: 768 });
+  await page.getByRole('button', { name: '浏览全部记录' }).click();
+  const dialog = page.getByRole('dialog', { name: '浏览往期与全部记录' });
+  await expect(dialog.getByText('全部项目')).toBeVisible();
+  await expect(dialog.getByText(/后端尚未提供|请选择项目/)).toHaveCount(0);
+  await expect(dialog.getByRole('columnheader', { name: '项目 / 客户' })).toBeVisible();
+  const layout = await dialog.locator('.history-browser').evaluate((root) => ({
+    columns: getComputedStyle(root).gridTemplateColumns.split(' ').filter(Boolean).length,
+    pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  }));
+  expect(layout.columns).toBe(width === 1024 ? 2 : 1);
+  expect(layout.pageOverflow).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: screenshot, fullPage: true });
+  await dialog.getByRole('button', { name: '关闭' }).click();
+}
+
 test('Oracle #10 任务指挥台在 820 / 1024 / 1440 无页面横溢且独立模块记录区可读', async ({}, testInfo) => {
   const root = mkdtempSync(join(tmpdir(), 'rw-v2-layout-'));
   const userData = join(root, 'user-data');
@@ -67,6 +89,8 @@ test('Oracle #10 任务指挥台在 820 / 1024 / 1440 无页面横溢且独立�
     await assertViewport(page, 820, testInfo.outputPath('workbench-v2-820.png'));
     await assertIndependentDrawer(page, 1024, testInfo.outputPath('serial-address-drawer-1024.png'));
     await assertIndependentDrawer(page, 820, testInfo.outputPath('serial-address-drawer-820.png'));
+    await assertHistoryDrawer(page, 1024, testInfo.outputPath('history-drawer-1024.png'));
+    await assertHistoryDrawer(page, 820, testInfo.outputPath('history-drawer-820.png'));
   } finally {
     await app?.close().catch(() => undefined);
     rmSync(root, { recursive: true, force: true });

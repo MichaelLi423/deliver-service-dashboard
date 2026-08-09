@@ -76,7 +76,7 @@ export class SqliteInstrumentAddressReader implements InstrumentAddressReader {
 function rowToSerialAddressUpdate(row: Record<string, unknown>): SerialAddressUpdate {
   return {
     id: String(row.id),
-    instrumentId: String(row.instrument_id),
+    instrumentId: row.instrument_id === null || row.instrument_id === undefined ? null : String(row.instrument_id),
     customerName: String(row.customer_name),
     newSiteAddress: String(row.new_site_address),
     serialNo: String(row.serial_no),

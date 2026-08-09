@@ -10,6 +10,7 @@ import ExcelJS from "exceljs";
 import type {
   AccountSessionInfo,
   AdjustableProjectStatus,
+  DataCleanPrepareDto,
   InstrumentBulkImportRow,
   ProjectStatus,
   ProjectSupplementPayload,
@@ -23,6 +24,9 @@ import type {
   WorkbenchProjectRow,
   WorkbenchV2IndependentKind,
   WorkbenchV2IndependentPageDto,
+  WorkbenchV2HistoryKind,
+  WorkbenchV2HistoryPageDto,
+  WorkbenchV2HistoryRow,
   WorkbenchV2InvalidateTag,
   WorkbenchV2LookupPageDto,
   WorkbenchV2LookupRow,
@@ -33,6 +37,7 @@ import type {
   WorkbenchV2SectionKind,
   WorkbenchV2SectionPageDto,
   WorkbenchV2SectionRow,
+  WorkbenchV2DeleteRequest,
 } from "../../shared/ipc";
 import {
   HistoryImportWizard,
@@ -83,6 +88,11 @@ const TABS = [
   "申请与维修",
 ] as const;
 type DetailTab = (typeof TABS)[number];
+type DeleteInput = WorkbenchV2DeleteRequest extends infer Request
+  ? Request extends { expectedRevision: number }
+    ? Omit<Request, "expectedRevision">
+    : never
+  : never;
 const TAB_SECTION: Partial<Record<DetailTab, WorkbenchV2SectionKind>> = {
   搬迁仪器: "instruments",
   物流费用登记: "batches",
@@ -134,6 +144,7 @@ type V2Method =
   | "v2ProjectPage"
   | "v2ProjectDetail"
   | "v2SectionPage"
+  | "v2HistoryPage"
   | "v2IndependentPage"
   | "v2LookupPage"
   | "v2Mutate";
@@ -151,6 +162,36 @@ function requireV2<K extends V2Method>(
 }
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+function errorCode(error: unknown): string {
+  return messageOf(error).match(/^([A-Z][A-Z0-9_]+):/)?.[1] ?? "";
+}
+function mutationErrorMessage(error: unknown): string {
+  const code = errorCode(error);
+  if (code === "WIZARD_DEPRECATED_FIELD") return "新建项目包含已移除字段，请关闭后重新打开表单。";
+  if (code === "WIZARD_ECC_ONLY_FORMAL") return "ECC 仅可用于正式进单，请重新选择保存意图。";
+  if (code === "WIZARD_ENTRY_AT_ONLY_FORMAL") return "进单日期仅可用于正式进单，请重新选择保存意图。";
+  if (code === "WIZARD_CONTRACT_AMOUNT_ONLY_FORMAL") return "合同金额仅可在正式进单时提交，请重新选择保存意图。";
+  const message = messageOf(error);
+  return code ? message.replace(/^[A-Z][A-Z0-9_]+:\s*/, "") : message;
+}
+function deleteErrorMessage(error: unknown): string {
+  const code = errorCode(error);
+  if (code === "DELETE_REJECTED_REVISION") return "数据已被其他操作更新，请刷新后重试。";
+  if (code === "DELETE_REJECTED_NOT_FOUND") return "这条记录已不存在，列表将重新刷新。";
+  if (code === "DELETE_REJECTED_DEPENDENCIES") return "这条记录已被其他业务数据使用，暂时不能删除。";
+  if (code === "DELETE_REJECTED_STATUS_RECALC") return "该记录会影响项目状态，当前不支持删除。";
+  if (code === "DELETE_REJECTED_INVOICE_REQUIRES_REVOKE") return "掉票记录不能直接删除，请填写日期和原因后撤销。";
+  return "操作未完成，请刷新数据后重试。";
+}
+function cleanErrorMessage(error: unknown): string {
+  const code = errorCode(error);
+  if (code === "CLEAN_CONFIRM_TEXT_REQUIRED") return "确认文本不完整，请重新检查数据。";
+  if (code === "CLEAN_NOT_PREPARED" || code === "CLEAN_TOKEN_MISMATCH") return "本次清理确认已失效，请重新检查数据。";
+  if (code === "CLEAN_TOKEN_EXPIRED") return "本次清理确认已过期，请重新检查数据。";
+  if (code === "CLEAN_REVISION_CHANGED") return "检查后业务数据发生了变化，请重新检查数据。";
+  if (code === "CLEAN_BACKUP_FAILED") return "安全备份未完成，清理已停止。请重新检查数据。";
+  return "清理未完成；安全备份可能已经生成，请重新检查数据后再操作。";
 }
 function businessDate(value?: string | null): string {
   return value?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? "";
@@ -187,7 +228,7 @@ interface Filters {
   query: string;
 }
 type LayerState =
-  | { kind: "new" | "quick" | "reminder" | "cancel" | "report" | "edit-project" | "correct-entry" }
+  | { kind: "new" | "quick" | "reminder" | "cancel" | "report" | "history" | "clean" | "edit-project" | "correct-entry" }
   | { kind: "action"; action: WorkbenchActionType }
   | { kind: "independent"; module: WorkbenchV2IndependentKind }
   | {
@@ -522,7 +563,29 @@ export function WorkbenchV2({
       setToast(success);
       window.setTimeout(() => setToast(""), 2800);
     } catch (cause) {
-      throw new Error(messageOf(cause));
+      throw new Error(mutationErrorMessage(cause));
+    }
+  }
+
+  async function deleteRecord(
+    request: DeleteInput,
+    success: string,
+    closeLayer = true,
+  ): Promise<void> {
+    try {
+      const api = bridge();
+      if (!api?.v2Delete) throw new Error("当前环境暂不支持移除记录");
+      const result = await api.v2Delete({ ...request, expectedRevision: revision.current } as WorkbenchV2DeleteRequest);
+      revision.current = Math.max(revision.current, result.businessRevision);
+      await refreshInvalidated(result.invalidated, result.changed?.projectId);
+      if (closeLayer) setLayer(null);
+      setToast(success);
+      window.setTimeout(() => setToast(""), 2800);
+    } catch (cause) {
+      if (request.kind === "acceptance" && errorCode(cause) === "DELETE_REJECTED_DEPENDENCIES") {
+        throw new Error("项目已有掉票历史，不能删除验收记录。");
+      }
+      throw new Error(deleteErrorMessage(cause));
     }
   }
 
@@ -719,6 +782,7 @@ export function WorkbenchV2({
           >
             二维码申请
           </button>
+          <button onClick={() => setLayer({ kind: "history" })}>浏览全部记录</button>
           <button onClick={() => setLayer({ kind: "report" })}>运营报表</button>
           <details className="data-menu">
             <summary>数据管理</summary>
@@ -732,6 +796,10 @@ export function WorkbenchV2({
               <button onClick={() => void runBackup()}>手动备份</button>
               <button className="danger-text" onClick={() => void runRestore()}>
                 恢复备份
+              </button>
+              <div className="data-menu-divider" />
+              <button className="danger-text" onClick={() => setLayer({ kind: "clean" })}>
+                清理全部业务数据
               </button>
             </div>
           </details>
@@ -1168,6 +1236,11 @@ export function WorkbenchV2({
           }
           onBatchEdit={(batch) => setLayer({ kind: "batch-edit", batch })}
           onDamageUpdate={(damage) => setLayer({ kind: "damage-update", damage })}
+          onDelete={(kind, id) => {
+            if (!window.confirm("删除后无法恢复，确认删除这条记录？")) return;
+            void deleteRecord({ kind, id } as DeleteInput, "记录已删除")
+              .catch((cause) => setDetailError(messageOf(cause)));
+          }}
         />
       </main>
       {toast && <div className="toast success" role="status">{toast}</div>}
@@ -1175,7 +1248,7 @@ export function WorkbenchV2({
         <Layer
           title={layerTitle(layer)}
           description={layerDescription(layer, selected)}
-          side={layer.kind === "independent" || layer.kind === "report"}
+          side={layer.kind === "independent" || layer.kind === "report" || layer.kind === "history"}
           onClose={() => setLayer(null)}
         >
           {layer.kind === "new" ? (
@@ -1280,6 +1353,7 @@ export function WorkbenchV2({
                   "记录已保存",
                 )
               }
+              onDelete={(kind, id) => deleteRecord({ kind, id } as DeleteInput, "记录已删除")}
             />
           ) : layer.kind === "invoice-edit" ? (
             <InvoiceMutationForm
@@ -1301,17 +1375,7 @@ export function WorkbenchV2({
             <InvoiceMutationForm
               mode="revoke"
               invoice={layer.invoice}
-              onSave={(values) =>
-                mutate(
-                  {
-                    op: "invoice_revoke",
-                    invoiceId: layer.invoice.id,
-                    time: values.time,
-                    reason: values.reason,
-                  },
-                  "掉票已撤销",
-                )
-              }
+              onSave={(values) => deleteRecord({ kind: "invoice", id: layer.invoice.id, revokedAt: values.time, revokeReason: values.reason }, "掉票已撤销")}
             />
           ) : layer.kind === "batch-edit" ? (
             <BatchEditForm
@@ -1335,6 +1399,19 @@ export function WorkbenchV2({
             />
           ) : layer.kind === "report" ? (
             <ReportPanelV2 />
+          ) : layer.kind === "history" ? (
+            <HistoryBrowserV2 onRevision={(next) => { revision.current = Math.max(revision.current, next); }} onDelete={(request, success) => deleteRecord(request, success, false)} />
+          ) : layer.kind === "clean" ? (
+            <DataCleanPanel onComplete={async () => {
+              revision.current = 0;
+              setSelectedId("");
+              setDetail(null);
+              setSectionPage(null);
+              setCursorStack([null]);
+              await Promise.all([loadOverview(), loadProjects(null, 0)]);
+              setLayer(null);
+              setToast("业务数据已清理，并已创建安全备份");
+            }} />
           ) : null}
         </Layer>
       )}
@@ -1486,6 +1563,7 @@ function ProjectDetails({
   onInvoiceRevoke,
   onBatchEdit,
   onDamageUpdate,
+  onDelete,
 }: {
   project: WorkbenchProjectRow | null;
   detail: WorkbenchV2ProjectDetailDto | null;
@@ -1514,6 +1592,7 @@ function ProjectDetails({
   onDamageUpdate: (
     damage: Extract<WorkbenchV2SectionRow, { kind: "damage_items" }>,
   ) => void;
+  onDelete: (kind: "service_order" | "activity" | "damage_repair_item" | "batch" | "instrument", id: string) => void;
 }): JSX.Element {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const action: Partial<Record<DetailTab, WorkbenchActionType>> = {
@@ -1667,6 +1746,7 @@ function ProjectDetails({
             onInvoiceRevoke={onInvoiceRevoke}
             onBatchEdit={onBatchEdit}
             onDamageUpdate={onDamageUpdate}
+            onDelete={onDelete}
           />
         )}
       </div>
@@ -1703,6 +1783,7 @@ function SectionTable({
   onInvoiceRevoke,
   onBatchEdit,
   onDamageUpdate,
+  onDelete,
 }: {
   page: WorkbenchV2SectionPageDto | null;
   onInvoiceEdit: (
@@ -1717,6 +1798,7 @@ function SectionTable({
   onDamageUpdate: (
     damage: Extract<WorkbenchV2SectionRow, { kind: "damage_items" }>,
   ) => void;
+  onDelete: (kind: "service_order" | "activity" | "damage_repair_item" | "batch" | "instrument", id: string) => void;
 }): JSX.Element {
   if (!page?.rows.length)
     return <Empty title="暂无记录" copy="通过就近记录入口新增业务事实。" />;
@@ -1728,9 +1810,7 @@ function SectionTable({
             {sectionColumns(page.kind).map((column) => (
               <th key={column}>{columnLabel(column)}</th>
             ))}
-            {(page.kind === "invoices" || page.kind === "batches" || page.kind === "damage_items") && (
-              <th>操作</th>
-            )}
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -1768,21 +1848,17 @@ function SectionTable({
               )}
               {row.kind === "batches" && (
                 <td>
-                  <button
-                    className="button small"
-                    onClick={() => onBatchEdit(row)}
-                  >
-                    编辑
-                  </button>
+                  <div className="row-actions compact"><button className="button small" onClick={() => onBatchEdit(row)}>编辑</button><button className="button danger small" onClick={() => onDelete("batch", row.id)}>删除</button></div>
                 </td>
               )}
               {row.kind === "damage_items" && (
                 <td>
-                  <button className="button small" onClick={() => onDamageUpdate(row)}>
-                    更新维修状态
-                  </button>
+                  <div className="row-actions compact"><button className="button small" onClick={() => onDamageUpdate(row)}>更新维修状态</button><button className="button danger small" onClick={() => onDelete("damage_repair_item", row.id)}>删除</button></div>
                 </td>
               )}
+              {row.kind === "instruments" && <td><button className="button danger small" onClick={() => onDelete("instrument", row.id)}>删除</button></td>}
+              {row.kind === "orders" && <td><button className="button danger small" onClick={() => onDelete("service_order", row.id)}>删除</button></td>}
+              {row.kind === "activities" && <td><button className="button danger small" onClick={() => onDelete("activity", row.id)}>删除</button></td>}
             </tr>
           ))}
         </tbody>
@@ -2852,15 +2928,19 @@ function IndependentModuleV2({
   project,
   refreshToken,
   onSave,
+  onDelete,
 }: {
   kind: WorkbenchV2IndependentKind;
   project: WorkbenchProjectRow | null;
   refreshToken: number;
   onSave: (action: WorkbenchActionPayload) => Promise<void>;
+  onDelete: (kind: "serial_address" | "qr_request", id: string) => Promise<void>;
 }): JSX.Element {
   const [page, setPage] = useState<WorkbenchV2IndependentPageDto | null>(null);
   const [stack, setStack] = useState<Array<string | null>>([null]);
   const [query, setQuery] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [instrumentId, setInstrumentId] = useState("");
@@ -2874,7 +2954,7 @@ function IndependentModuleV2({
       const next = await requireV2(
         api,
         "v2IndependentPage",
-      )({ kind, query: query.trim() || null, limit: 50, cursor });
+      )({ kind, query: query.trim() || null, from: from || null, to: to || null, limit: 50, cursor });
       if (id === sequence.current) setPage(next);
     } catch (cause) {
       setError(messageOf(cause));
@@ -2924,16 +3004,14 @@ function IndependentModuleV2({
           {kind === "serial_address" ? (
             <>
               {project ? (
-                <BoundedSectionPicker
-                  projectId={project.id}
-                  kind="instruments"
-                  value={instrumentId}
-                  onChange={setInstrumentId}
-                  required
-                />
+                <div className="optional-link full">
+                  <span>可选关联</span>
+                  <BoundedSectionPicker projectId={project.id} kind="instruments" value={instrumentId} onChange={setInstrumentId} />
+                  <small>可关联当前项目仪器，也可以留空独立登记。</small>
+                </div>
               ) : (
                 <p className="notice full">
-                  请先在项目队列选择项目，再从该项目的仪器分页中选择。
+                  无需选择项目或仪器，直接填写下面的业务信息即可。
                 </p>
               )}
               <Field
@@ -3027,7 +3105,7 @@ function IndependentModuleV2({
           </span>
           <button
             className="button primary"
-            disabled={busy || (kind === "serial_address" && !instrumentId)}
+            disabled={busy}
           >
             {busy
               ? "正在保存…"
@@ -3063,9 +3141,14 @@ function IndependentModuleV2({
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
+          <label>起始日期<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+          <label>截止日期<input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
           <button className="button">查找</button>
         </form>
-        <DataRows kind={kind} rows={page?.rows ?? []} />
+        <DataRows kind={kind} rows={page?.rows ?? []} onDelete={(id) => {
+          if (!window.confirm("删除后无法恢复，确认删除这条记录？")) return;
+          void onDelete(kind, id).then(() => load(stack.at(-1) ?? null)).catch((cause) => setError(messageOf(cause)));
+        }} />
         <div className="queue-pagination">
           <button
             className="button"
@@ -3102,25 +3185,23 @@ function IndependentModuleV2({
 function DataRows({
   kind,
   rows,
+  onDelete,
 }: {
   kind: WorkbenchV2IndependentKind;
   rows: WorkbenchV2IndependentPageDto["rows"];
+  onDelete: (id: string) => void;
 }): JSX.Element {
   if (!rows.length)
     return <Empty title="暂无记录" copy="使用左侧表单新增记录。" />;
   return (
     <div className="table-scroll">
       <table className="data-table">
-        {kind === "qr_request" && (
-          <thead>
+        <thead>
             <tr>
-              <th>申请人</th>
-              <th>申请日期</th>
-              <th>申请类型</th>
-              <th className="numeric">工作量</th>
+              {kind === "qr_request" ? <><th>申请人</th><th>申请日期</th><th>申请类型</th><th className="numeric">工作量</th></> : <><th>客户 / 序列号</th><th>新址</th><th>Account ID</th><th>更新日期</th></>}
+              <th>操作</th>
             </tr>
           </thead>
-        )}
         <tbody>
           {rows.map((row) =>
             row.kind === "qr_request" ? (
@@ -3133,14 +3214,18 @@ function DataRows({
                   ).join("、")}
                 </td>
                 <td className="numeric qr-workload-cell">{row.workload}</td>
+                <td><button className="button danger small" onClick={() => onDelete(row.id)}>删除</button></td>
               </tr>
             ) : (
               <tr key={row.id}>
                 <td>
                   <strong>{row.customerName}</strong>
-                  <small>{`${row.serialNo} · ${row.accountId}`}</small>
+                  <small>{row.serialNo}</small>
                 </td>
+                <td>{row.newSiteAddress}</td>
+                <td>{row.accountId}</td>
                 <td>{businessDate(row.updatedAt)}</td>
+                <td><button className="button danger small" onClick={() => onDelete(row.id)}>删除</button></td>
               </tr>
             ),
           )}
@@ -3280,59 +3365,56 @@ function ProjectEditForm({
 }
 
 function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWizardPayload) => Promise<void> }): JSX.Element {
-  const [ecc, setEcc] = useState("");
+  const [intent, setIntent] = useState<ProjectWizardPayload["intent"]>("draft");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const hasEcc = Boolean(ecc.trim());
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const value = (key: string) => String(data.get(key) || "").trim();
-    const button = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
-    const intent = (button?.value || "formal") as ProjectWizardPayload["intent"];
     if (intent === "formal" && !value("ecc")) { setError("正式进单必须填写 ECC。"); return; }
-    if (intent === "pre_entry_execution" && value("ecc")) { setError("已填写 ECC，请选择正式进单。"); return; }
-    if (intent === "pre_entry_execution" && !value("approvalReason")) { setError("未进单先执行必须填写经理批复原因。"); return; }
-    if (value("serviceOrderNo") && !value("engineers")) { setError("已填写服务单号，请先补齐工程师。"); return; }
+    if (intent === "pre_entry_execution" && !value("approvalReason")) { setError("选择提前执行时，请填写批复说明。"); return; }
     setBusy(true); setError("");
     try {
       await onSave({
-        intent, customerName: value("customerName"), ecc: value("ecc"), entryAt: value("entryAt"), region: value("region"),
+        intent, customerName: value("customerName"), region: value("region"),
         contractStartDate: value("contractStartDate") || null, contractEndDate: value("contractEndDate") || null,
-        contractAmount: value("contractAmount"), finalAmount: value("finalAmount"), oldSiteAddress: value("oldSiteAddress"),
-        newSiteAddress: value("newSiteAddress"), oldSiteContact: value("oldSiteContact"), newSiteContact: value("newSiteContact"),
-        instrumentCount: Number(value("instrumentCount")), planVisitAt: value("planVisitAt"), planTransportAt: value("planTransportAt"),
-        plannedInstallDoneAt: value("plannedInstallDoneAt"), siteConfirmed: data.get("siteConfirmed") === "on",
-        serviceOrderNo: value("serviceOrderNo"), engineers: value("engineers"), serviceOrderNote: value("serviceOrderNote"),
-        approvalReason: value("approvalReason"), missingItems: value("missingItems"),
+        ...(intent === "formal" ? { ecc: value("ecc"), entryAt: value("entryAt"), contractAmount: value("contractAmount") } : {}),
+        oldSiteAddress: value("oldSiteAddress") || null,
+        newSiteAddress: value("newSiteAddress") || null, oldSiteContact: value("oldSiteContact"), newSiteContact: value("newSiteContact"),
+        instrumentCount: value("instrumentCount") ? Number(value("instrumentCount")) : null,
+        planVisitAt: value("planVisitAt"), planTransportAt: value("planTransportAt"), plannedInstallDoneAt: value("plannedInstallDoneAt"),
+        siteConfirmed: data.get("siteConfirmed") === "on",
+        approvalReason: intent === "pre_entry_execution" ? value("approvalReason") : undefined,
       });
     } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); }
   }
+  const intents: Array<[ProjectWizardPayload["intent"], string, string]> = [
+    ["draft", "保存为待进单", "先建项目，资料稍后补齐"],
+    ["pre_entry_execution", "提前执行", "已获得经理批复，仍保持待进单"],
+    ["formal", "正式进单", "明确使用 ECC 和进单日期完成进单"],
+  ];
   return <form className="project-create-form" onSubmit={(event) => void submit(event)}>
-    <p className="notice">四组资料一次填完。标记“可后补”的字段可留空；合同开始和截止日期不必填。</p>
+    <p className="notice">先明确保存意图。旧址、新址和仪器数量均可后补，不影响建立项目。</p>
     <div className="create-form-sections">
       <fieldset className="edit-form-section"><legend>项目与进单</legend><div className="form-grid">
-        <Field name="customerName" label="客户名称" required autoFocus /><Field name="ecc" label="ECC" optional onChange={(event) => { setEcc(event.currentTarget.value); setError(""); }} />
-        <Field name="region" label="区域" required /><Field name="entryAt" label="进单日期" type="date" defaultValue={todayDate()} optional />
-        <Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="允许为 0；正式进单且金额为 0 时须填写最终可确认金额。" />
-        <Field name="finalAmount" label="最终可确认金额（USD）" type="number" min="0" step="0.01" optional />
+        <Field name="customerName" label="客户名称" required autoFocus /><Field name="region" label="区域" required />
         <Field name="contractStartDate" label="合同开始日期" type="date" optional /><Field name="contractEndDate" label="合同截止日期" type="date" optional />
       </div></fieldset>
-      <fieldset className="edit-form-section"><legend>搬迁范围</legend><div className="form-grid">
-        <Field name="oldSiteAddress" label="旧址地址" required /><Field name="newSiteAddress" label="新址地址" required />
+      <fieldset className="edit-form-section"><legend>搬迁范围（均可后补）</legend><div className="form-grid">
+        <Field name="oldSiteAddress" label="旧址地址" optional /><Field name="newSiteAddress" label="新址地址" optional />
         <Field name="oldSiteContact" label="旧址联系人" optional /><Field name="newSiteContact" label="新址联系人" optional />
-        <Field name="instrumentCount" label="仪器数量" type="number" min="1" step="1" required />
+        <Field name="instrumentCount" label="仪器数量" type="number" min="1" step="1" optional />
       </div></fieldset>
-      <fieldset className="edit-form-section"><legend>执行准备与服务单</legend><div className="form-grid">
+      <fieldset className="edit-form-section"><legend>执行准备</legend><div className="form-grid">
         <Field name="planVisitAt" label="计划上门日期" type="date" optional /><Field name="planTransportAt" label="计划运输日期" type="date" optional />
         <Field name="plannedInstallDoneAt" label="计划装机完成日期" type="date" optional /><label className="confirm-check full"><input name="siteConfirmed" type="checkbox" />现场条件已确认</label>
-        <div className="form-group-title full">可选服务单</div><Field name="serviceOrderNo" label="服务单号" optional /><Field name="engineers" label="工程师" optional />
-        <TextArea name="serviceOrderNote" label="开单备注" optional />
       </div></fieldset>
-      <fieldset className="edit-form-section"><legend>保存方式</legend><div className="form-grid">
-        <Field name="approvalReason" label="经理批复原因" required={!hasEcc} optional={hasEcc} /><Field name="missingItems" label="缺失资料" optional />
-        <p className="notice full" role="status">{hasEcc ? "已取得 ECC：请选择正式进单。" : "暂无 ECC：可按经理批复先执行，项目保持待进单并显示提醒。"}</p>
-        <div className="save-paths full" aria-label="保存路径"><button name="intent" value="pre_entry_execution" disabled={busy || hasEcc}><strong>未进单先执行</strong><span>记录批复原因，主状态保持待进单。</span></button><button className="primary-path" name="intent" value="formal" disabled={busy || !hasEcc}><strong>正式进单</strong><span>{hasEcc ? "按当前资料完成进单校验。" : "请先填写 ECC。"}</span></button></div>
+      <fieldset className="edit-form-section"><legend>保存意图</legend><div className="form-grid">
+        <div className="intent-choices full" role="radiogroup" aria-label="保存意图">{intents.map(([value,label,copy]) => <label key={value} className={intent === value ? "selected" : ""}><input type="radio" name="projectIntent" value={value} checked={intent === value} onChange={() => { setIntent(value); setError(""); }} /><strong>{label}</strong><span>{copy}</span></label>)}</div>
+        {intent === "formal" && <div className="formal-intent-fields full" role="group" aria-label="正式进单资料"><div className="wizard-section-head"><div><h3>正式进单资料</h3><p>这些字段仅随正式进单提交；切换其他意图后不会保留或发送。</p></div><span>正式进单专属</span></div><div className="form-grid"><Field name="ecc" label="ECC" required autoFocus /><Field name="entryAt" label="进单日期" type="date" defaultValue={todayDate()} required /><Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="可留空后补；新建时不录最终可确认金额。" /></div></div>}
+        {intent === "pre_entry_execution" && <div className="approval-fields full" role="group" aria-label="提前执行批复"><label className="confirm-check"><input type="checkbox" required autoFocus />是否批复：是，已取得提前执行批复</label><TextArea name="approvalReason" label="批复说明" required help="填写批复人、结论或必要的执行边界。" /></div>}
+        <div className="form-footer full"><span>{intent === "draft" ? "项目将保持待进单" : intent === "formal" ? "将按正式进单意图校验" : "将标记为提前执行"}</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : intent === "draft" ? "保存为待进单" : intent === "formal" ? "正式进单" : "确认提前执行"}</button></div>
       </div></fieldset>
     </div>
     {error && <div className="inline-error" role="alert">{error}</div>}
@@ -3450,7 +3532,9 @@ function InvoiceMutationForm({
   onSave,
 }: {
   mode: "edit" | "revoke";
-  invoice: Extract<WorkbenchV2SectionRow, { kind: "invoices" }>;
+  invoice:
+    | Extract<WorkbenchV2SectionRow, { kind: "invoices" }>
+    | Extract<WorkbenchV2HistoryRow, { kind: "invoice" }>;
   onSave: (values: {
     time: string;
     amount: string;
@@ -3520,6 +3604,116 @@ function InvoiceMutationForm({
   );
 }
 
+type HistoryKind = WorkbenchV2HistoryKind | WorkbenchV2IndependentKind;
+const HISTORY_KINDS: Array<[HistoryKind, string]> = [
+  ["batch", "物流费用"], ["instrument", "搬迁仪器"], ["activity", "到访记录"], ["service_order", "开单记录"],
+  ["invoice", "掉票记录"], ["damage", "损坏维修"], ["acceptance", "验收记录"], ["ship_to_request", "Account ID 申请"],
+  ["serial_address", "序列号地址更新"], ["qr_request", "二维码申请"],
+];
+
+function historyDeleteRequest(row: WorkbenchV2HistoryRow): DeleteInput | null {
+  if (row.kind === "invoice") return null;
+  if (row.kind === "acceptance") return { kind: "acceptance", projectId: row.projectId };
+  if (row.kind === "damage") return { kind: "damage_repair_item", id: row.id };
+  return { kind: row.kind, id: row.id } as DeleteInput;
+}
+
+function historyRecordText(row: WorkbenchV2HistoryRow): string {
+  if (row.kind === "batch") return row.transportCompany || "运输安排";
+  if (row.kind === "instrument") return `${row.name}${row.serialNo ? ` · ${row.serialNo}` : ""}`;
+  if (row.kind === "activity") return row.engineers || "到访活动";
+  if (row.kind === "service_order") return `${row.serviceOrderNo || "服务单号待补"} · ${row.engineer}`;
+  if (row.kind === "invoice") return money(row.amount);
+  if (row.kind === "damage") return `${row.instrumentName} · ${row.issueStatus}`;
+  if (row.kind === "acceptance") return "验收报告";
+  return `${row.newSiteAddress} · ${row.status}`;
+}
+
+function HistoryBrowserV2({ onDelete, onRevision }: {
+  onDelete: (request: DeleteInput, success: string) => Promise<void>;
+  onRevision: (revision: number) => void;
+}): JSX.Element {
+  const [kind, setKind] = useState<HistoryKind>("service_order");
+  const [from, setFrom] = useState(""); const [to, setTo] = useState("");
+  const [page, setPage] = useState<WorkbenchV2HistoryPageDto | WorkbenchV2IndependentPageDto | null>(null);
+  const [stack, setStack] = useState<Array<string | null>>([null]);
+  const [error, setError] = useState("");
+  const [revoke, setRevoke] = useState<Extract<WorkbenchV2HistoryRow, { kind: "invoice" }> | null>(null);
+  const independent = kind === "serial_address" || kind === "qr_request";
+  async function load(cursor: string | null): Promise<void> {
+    setError("");
+    try {
+      const api = bridge(); if (!api) throw new Error();
+      const range = { from: from || null, to: to || null, cursor, limit: 50 };
+      const next = independent
+        ? await requireV2(api, "v2IndependentPage")({ ...range, kind })
+        : await requireV2(api, "v2HistoryPage")({ ...range, kind });
+      onRevision(next.businessRevision);
+      setPage(next);
+    } catch { setError("历史记录读取失败，请调整日期后重试。"); }
+  }
+  useEffect(() => { setStack([null]); setRevoke(null); void load(null); }, [kind]);
+  const rows = page?.rows ?? [];
+  async function remove(request: DeleteInput, success = "记录已删除"): Promise<boolean> {
+    try { await onDelete(request, success); await load(stack.at(-1) ?? null); return true; }
+    catch (cause) { setError(messageOf(cause)); return false; }
+  }
+  return <div className="history-browser">
+    <div className="history-kind-list" role="tablist" aria-label="记录类型">{HISTORY_KINDS.map(([value,label]) => <button key={value} role="tab" aria-selected={kind === value} onClick={() => setKind(value)}>{label}</button>)}</div>
+    <section className="history-content">
+      <form className="history-filters" onSubmit={(event) => { event.preventDefault(); setStack([null]); void load(null); }}>
+        <div className="history-scope"><strong>{independent ? "独立登记" : "全部项目"}</strong><span>{independent ? "按登记业务日期汇总" : "跨项目汇总并保留项目上下文"}</span></div>
+        <label>起始日期<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+        <label>截止日期<input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+        <button className="button primary">查看记录</button>
+      </form>
+      {revoke && <div className="history-inline-action"><InvoiceMutationForm mode="revoke" invoice={revoke} onSave={async (values) => { if (await remove({ kind: "invoice", id: revoke.id, revokedAt: values.time, revokeReason: values.reason }, "掉票已撤销")) setRevoke(null); }} /></div>}
+      {error && <div className="inline-error" role="alert">{error}</div>}
+      <div className="history-table table-scroll"><table className="data-table"><thead><tr><th>项目 / 客户</th><th>业务记录</th><th>业务日期</th><th>操作</th></tr></thead><tbody>{rows.map((row) => {
+        if (row.kind === "serial_address" || row.kind === "qr_request") {
+          const context = row.kind === "serial_address" ? row.customerName : "独立二维码申请";
+          const record = row.kind === "serial_address" ? `${row.serialNo} · ${row.accountId}` : `${row.applicant} · ${row.types.map((type) => QR_REQUEST_TYPE_LABEL.get(type) ?? type).join("、")}`;
+          const date = row.kind === "serial_address" ? row.updatedAt : row.requestedAt;
+          return <tr key={row.id}><td><strong>{context}</strong><small>独立登记</small></td><td>{record}</td><td>{businessDate(date)}</td><td><button className="button danger small" onClick={() => { if (window.confirm("删除后无法恢复，确认删除这条记录？")) void remove({ kind: row.kind, id: row.id }); }}>删除</button></td></tr>;
+        }
+        const request = historyDeleteRequest(row);
+        return <tr key={row.id}><td><strong>{row.customerName}</strong><small>{row.ecc ?? row.tempNo}</small></td><td>{historyRecordText(row)}</td><td>{row.businessDate || "—"}</td><td>{row.kind === "invoice" ? (row.active ? <button className="button danger small" onClick={() => setRevoke(row)}>撤销</button> : <span className="terminal-note">已撤销</span>) : <button className="button danger small" onClick={() => { if (request && window.confirm("删除后无法恢复，确认删除这条记录？")) void remove(request); }}>删除</button>}</td></tr>;
+      })}</tbody></table>{rows.length === 0 && <Empty title="暂无记录" copy="调整记录类型或日期范围后再试。" />}</div>
+      <div className="queue-pagination"><button className="button" disabled={stack.length <= 1} onClick={() => { const next = stack.slice(0,-1); setStack(next); void load(next.at(-1) ?? null); }}>上一页</button><span>本页 {rows.length} / 共 {page?.total ?? 0}</span><button className="button" disabled={!page?.nextCursor} onClick={() => { if (!page?.nextCursor) return; const next = [...stack,page.nextCursor]; setStack(next); void load(page.nextCursor); }}>下一页</button></div>
+    </section>
+  </div>;
+}
+
+function DataCleanPanel({ onComplete }: { onComplete: () => Promise<void> }): JSX.Element {
+  const [prepared, setPrepared] = useState<DataCleanPrepareDto | null>(null);
+  const [confirmText, setConfirmText] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const [needsRecheck, setNeedsRecheck] = useState(false);
+  const labels: Record<keyof DataCleanPrepareDto["counts"], string> = {
+    customers: "客户", projects: "项目", contracts: "合同", batches: "搬迁批次", instruments: "仪器",
+    batch_change_history: "批次变更记录", activities: "到访活动", activity_engineers: "活动工程师", work_facts: "工作事实",
+    service_orders: "开单", ship_tos: "Account ID 地址", ship_to_requests: "Account ID 申请", serial_address_updates: "序列号地址更新",
+    damage_repair_items: "损坏维修事项", activity_damage_links: "活动维修关联", qr_requests: "二维码申请", qr_request_types: "二维码申请类型",
+    logistics_fees: "物流费用", invoices: "掉票",
+  };
+  async function prepare(): Promise<void> {
+    setBusy(true); setError("");
+    try { const api = bridge(); if (!api?.cleanPrepare) throw new Error(); setPrepared(await api.cleanPrepare()); setNeedsRecheck(false); setConfirmText(""); }
+    catch (cause) { setPrepared(null); setNeedsRecheck(true); setError(cleanErrorMessage(cause)); }
+    finally { setBusy(false); }
+  }
+  async function clean(): Promise<void> {
+    if (!prepared) return;
+    setBusy(true); setError("");
+    try { const api = bridge(); if (!api?.cleanConfirm) throw new Error(); await api.cleanConfirm({ token: prepared.token, confirmText }); await onComplete(); }
+    catch (cause) { setPrepared(null); setConfirmText(""); setNeedsRecheck(true); setError(cleanErrorMessage(cause)); }
+    finally { setBusy(false); }
+  }
+  const total = prepared ? Object.values(prepared.counts).reduce((sum, count) => sum + count, 0) : 0;
+  return <div className="clean-panel"><div className="danger-zone"><p className="overline">危险操作区</p><h3>清理全部业务数据</h3><p>账号、应用设置和已有备份会保留。确认清理前还会再创建一份安全备份。</p></div>
+    {!prepared ? <button className={`button ${needsRecheck ? "primary" : "danger"}`} disabled={busy} onClick={() => void prepare()}>{busy ? "正在检查…" : needsRecheck ? "重新检查数据" : "先检查将清理的数据"}</button> : <><div className="clean-summary"><strong>将清理 {total} 行业务数据</strong><dl>{Object.entries(prepared.counts).filter(([,count]) => count > 0).map(([table,count]) => <div key={table}><dt>{labels[table as keyof typeof labels] ?? table}</dt><dd>{count}</dd></div>)}</dl><p>另含导入审计 {prepared.auditCounts.migrationAudit + prepared.auditCounts.importRecordAudit + prepared.auditCounts.importRun} 行。账号、设置、备份不会清理。</p></div><label className="field full"><span>输入“清理全部业务数据”确认</span><input value={confirmText} onChange={(event) => setConfirmText(event.target.value)} autoFocus /></label><button className="button danger" disabled={busy || confirmText !== "清理全部业务数据"} onClick={() => void clean()}>{busy ? "正在备份并清理…" : "创建安全备份并清理"}</button></>}
+    {error && <div className="inline-error clean-recheck-error" role="alert">{error}</div>}</div>;
+}
+
 function ReportPanelV2(): JSX.Element {
   const [filter, setFilter] = useState<ReportFilterDto>({
     monthFrom: "",
@@ -3569,6 +3763,7 @@ function ReportPanelV2(): JSX.Element {
   }
   return (
     <div className="report">
+      <section className="report-intro"><p className="overline">运营视图</p><h3>按业务月份查看结果，再下钻核对明细</h3><p>筛选只改变统计范围，不改变现有业务口径。</p></section>
       <form className="report-filter" onSubmit={(event) => void build(event)}>
         <Field
           name="monthFrom"
@@ -3596,16 +3791,16 @@ function ReportPanelV2(): JSX.Element {
         </div>
       )}
       {report && (
-        <section>
-          <h3>有界报表结果</h3>
-          {report.sections.map((section) => (
+        <section className="report-results">
+          <div className="report-section-head"><div><p className="overline">计算结果</p><h3>{report.range.from} 至 {report.range.to}</h3></div><span>{report.sections.length} 项指标</span></div>
+          <div className="report-metric-grid">{report.sections.map((section) => (
             <article className="report-section" key={section.key}>
-              <strong>{section.label.replaceAll("Ship-to", "Account ID")}</strong>
-              <span>{section.rows.length} 行</span>
+              <span>指标</span><strong>{section.label.replaceAll("Ship-to", "Account ID")}</strong>
+              <b>{section.rows.length}<small> 行</small></b>
               <button className="button small" onClick={() => void drill(section.key)}>查看明细</button>
             </article>
-          ))}
-          <div className="row-actions">
+          ))}</div>
+          <div className="report-export"><div><strong>导出当前结果</strong><span>使用同一筛选范围生成文件</span></div><div className="row-actions">
             <button className="button" disabled={Boolean(busy)} onClick={() => void exportFile("xlsx")}>
               {busy === "xlsx" ? "正在导出…" : "导出 Excel"}
             </button>
@@ -3615,17 +3810,22 @@ function ReportPanelV2(): JSX.Element {
             <button className="button" disabled={Boolean(busy)} onClick={() => void exportFile("pdf")}>
               {busy === "pdf" ? "正在导出…" : "导出 PDF"}
             </button>
-          </div>
+          </div></div>
         </section>
       )}
       {details.length > 0 && (
-        <section>
-          <h3>下钻明细</h3>
-          <div className="table-scroll"><table className="data-table"><tbody>{details.map((row, index) => <tr key={String(row.id ?? index)}>{Object.values(row).map((value, cell) => <td key={cell}>{String(value ?? "—")}</td>)}</tr>)}</tbody></table></div>
+        <section className="report-details">
+          <div className="report-section-head"><div><p className="overline">核对数据</p><h3>下钻明细</h3></div><span>{details.length} 行</span></div>
+          <div className="table-scroll"><table className="data-table"><thead><tr>{Object.keys(details[0] ?? {}).map((key) => <th key={key}>{reportColumnLabel(key)}</th>)}</tr></thead><tbody>{details.map((row, index) => <tr key={String(row.id ?? index)}>{Object.entries(row).map(([key,value]) => <td key={key}>{String(value ?? "—")}</td>)}</tr>)}</tbody></table></div>
         </section>
       )}
     </div>
   );
+}
+
+function reportColumnLabel(key: string): string {
+  const labels: Record<string, string> = { id: "记录编号", customerName: "客户名称", ecc: "ECC", region: "区域", status: "状态", amount: "金额", count: "数量", month: "月份", date: "日期", engineer: "工程师", transportCompany: "运输公司", orderType: "开单类型" };
+  return labels[key] ?? key.replaceAll("_", " ");
 }
 
 function Layer({
@@ -3818,6 +4018,8 @@ function layerTitle(layer: LayerState): string {
   if (layer.kind === "reminder") return "维护项目提醒";
   if (layer.kind === "cancel") return "取消项目";
   if (layer.kind === "report") return "运营报表";
+  if (layer.kind === "history") return "浏览往期与全部记录";
+  if (layer.kind === "clean") return "清理全部业务数据";
   if (layer.kind === "independent")
     return layer.module === "serial_address" ? "序列号地址更新" : "二维码申请";
   if (layer.kind === "invoice-edit") return "编辑掉票";
@@ -3839,6 +4041,8 @@ function layerDescription(
   if (layer.kind === "edit-project") return project ? `${project.customerName} · 项目级资料` : "项目级资料";
   if (layer.kind === "correct-entry") return project ? `${project.customerName} · 已正式进单项目` : "已正式进单项目";
   if (layer.kind === "report") return "手工月份区间与有界导出";
+  if (layer.kind === "history") return "统一按类型、项目和日期查找业务记录";
+  if (layer.kind === "clean") return "先检查数量，再输入固定文本确认";
   if (layer.kind === "independent") return "独立模块 · 记录按页读取";
   if (layer.kind === "cancel") return "记录取消日期与原因（终态，不可恢复）";
   return project

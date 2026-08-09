@@ -79,13 +79,9 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         customerName: '集成测试客户',
         ecc: 'ECC-UI-001',
         contractAmount: '100000',
-        finalAmount: '100000',
         instrumentCount: 1,
         oldSiteContact: '旧址王工',
         newSiteContact: '新址李工',
-        serviceOrderNo: 'SO-WIZ-001',
-        engineers: '工程师甲、乙',
-        serviceOrderNote: '现场提前联系',
       }),
     });
     const projectId = projectIdOf(created);
@@ -93,6 +89,12 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(detail.formallyEntered).toBe(true);
     expect(detail.ecc).toBe('ECC-UI-001');
     expect(facade.v2ProjectDetail(projectId).detail).toMatchObject({ oldSiteContact: '旧址王工', newSiteContact: '新址李工' });
+    // 搬迁开单经独立 submit_action（create_project 不再消费 serviceOrderNo/engineers/note）
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'order', projectId, values: { orderType: 'relocation', serviceOrderNo: 'SO-WIZ-001', orderedAt: '2026-08-11', engineer: '工程师甲、乙', note: '现场提前联系' } },
+    });
     expect(facade.v2SectionPage({ projectId, kind: 'orders' }).rows[0]).toMatchObject({ serviceOrderNo: 'SO-WIZ-001', engineer: '工程师甲、乙', note: '现场提前联系' });
     facade.v2Mutate({ op: 'set_reminder', projectId, reminderAt: '2026-08-09', reminderNote: '确认运输安排' });
     expect(facade.v2ProjectDetail(projectId).project!.reminderNote).toBe('确认运输安排');
@@ -204,7 +206,6 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         customerName: '掉票编辑客户',
         ecc: 'ECC-INV-EDIT',
         contractAmount: '2000',
-        finalAmount: '2000',
         actualInstallDoneAt: '2026-08-08',
         instrumentCount: 1,
       }),
@@ -402,7 +403,6 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         ecc: 'ECC-UPD-1',
         entryAt: '2026-08-01',
         contractAmount: '100000',
-        finalAmount: '100000',
       }),
     });
     const projectId = projectIdOf(created);
@@ -452,7 +452,6 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         customerName: '原子更正客户',
         ecc: 'ECC-ATOMIC',
         contractAmount: '2000',
-        finalAmount: '2000',
       }),
     });
     const projectId = projectIdOf(created);
@@ -476,11 +475,11 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade } = await makeFacade();
     const first = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '唯一客户一', ecc: 'ECC-UNIQUE-1', contractAmount: '1000', finalAmount: '1000' }),
+      payload: wizard({ customerName: '唯一客户一', ecc: 'ECC-UNIQUE-1', contractAmount: '1000' }),
     });
     const second = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '唯一客户二', ecc: 'ECC-UNIQUE-2', contractAmount: '1000', finalAmount: '1000' }),
+      payload: wizard({ customerName: '唯一客户二', ecc: 'ECC-UNIQUE-2', contractAmount: '1000' }),
     });
     // ECC 冲突：拒绝且原值保持不变
     expect(() =>

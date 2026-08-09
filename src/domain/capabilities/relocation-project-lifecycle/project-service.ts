@@ -60,7 +60,10 @@ export interface FormalEntryInput {
   ecc: string;
   /** 进单日期（业务日期）；缺省取当前日期，允许补录修正。 */
   entryAt?: BusinessDate;
-  /** 最终可确认金额（分）；缺省取合同 USD 含税金额；合同金额为空/0 时必填且 > 0。 */
+  /**
+   * 最终可确认金额（分）。缺省取合同 USD 含税金额；合同金额为空/0 时保持 null
+   * （不要求另行录入）。有值时必须 > 0。
+   */
   finalConfirmableAmountCents?: bigint | null;
 }
 
@@ -153,10 +156,11 @@ export class ProjectService {
   // ---- 2.1 正式进单 ----
 
   /**
-   * 正式进单：校验合同、客户单位、搬迁范围齐备，任一缺失拒绝进单并就地提示；
+   * 正式进单：校验合同、客户单位齐备，任一缺失拒绝进单并就地提示；
    * 补充唯一 ECC；进单时间必填（缺省当前、允许补录修正）；锁定进单金额快照；
-   * 合同金额为 0/空时最终可确认金额必须另行录入 > 0；清除未进单先执行标签，
-   * 并按明确自动触发重新校验主状态（如先录入实际装机完成时间 → 自动待验收）。
+   * 最终可确认金额缺省取合同金额，合同金额为空/0 时保持 null（不再强制另行录入）；
+   * 不再要求明确搬迁范围（scope）；进单后按明确自动触发重算主状态、
+   * 无自动触发时基线为 pending_execution。
    */
   formalEntry(projectId: string, input: FormalEntryInput): Project {
     const project = this.requireProject(projectId);
@@ -170,9 +174,6 @@ export class ProjectService {
     if (!project.customerId) {
       throw new ValidationError('CUSTOMER_REQUIRED', '正式进单必须关联客户单位');
     }
-    if (!project.scopeConfirmed) {
-      throw new ValidationError('SCOPE_REQUIRED', '正式进单必须明确搬迁范围');
-    }
 
     // ECC：必填 + 全局唯一（TBD-01/21）。
     const ecc = normalizeBusinessId(input.ecc);
@@ -185,10 +186,10 @@ export class ProjectService {
     const entryAt = input.entryAt ?? this.today();
     assertValidBusinessDate(entryAt, '进单时间');
 
-    // 最终可确认金额：合同金额 > 0 时默认取合同金额；合同金额为空/0 时必须另行录入 > 0
-    // （TBD-11：合同金额为 0 时最终可确认金额不能默认成 0）。
+    // 最终可确认金额：缺省取合同金额；合同金额为空/0 时保持 null（不强制另行录入）。
+    // 有值时必须 > 0。
     const contractAmount = contract.usdTaxAmountCents;
-    let final: bigint;
+    let final: bigint | null;
     if (input.finalConfirmableAmountCents !== undefined && input.finalConfirmableAmountCents !== null) {
       if (input.finalConfirmableAmountCents <= 0n) {
         throw new ValidationError('AMOUNT_MUST_BE_POSITIVE', '最终可确认金额有值时必须大于 0');
@@ -197,10 +198,7 @@ export class ProjectService {
     } else if (contractAmount !== null && contractAmount > 0n) {
       final = contractAmount;
     } else {
-      throw new ValidationError(
-        'FINAL_AMOUNT_REQUIRED',
-        '合同金额为空或 0 时，正式进单的最终可确认金额必须另行录入大于 0 的值',
-      );
+      final = null;
     }
 
     project.entryAt = entryAt;
@@ -218,8 +216,9 @@ export class ProjectService {
     this.projects.save(project);
     this.contracts.save(contract);
 
-    // 正式进单后按明确自动触发重新校验主状态（标签已清除，自动触发不再被拦截）。
-    this.adjustStatus(projectId, project.status);
+    // 正式进单后按明确自动触发重新校验主状态（标签已清除，自动触发不再被拦截）；
+    // 无自动触发时基线 pending_execution（进单即视为已进入执行准备阶段）。
+    this.adjustStatus(projectId, 'pending_execution');
     return this.requireProject(projectId);
   }
 
@@ -383,6 +382,55 @@ export class ProjectService {
     this.projects.save(project);
     this.adjustStatus(projectId, project.status);
     return this.requireProject(projectId);
+  }
+
+  /**
+   * 删除验收报告（受保护删除，2.4 反向操作）：
+   * - 存在任何掉票历史（含已撤销）拒绝（掉票闭环事实不可逆回退）；
+   * - 清空 acceptanceReport / acceptanceReportDate，并按现有事实确定性回退主状态：
+   *   未进单先执行标签存在 → 待进单（标签规则，TBD-08）；
+   *   已录入实际装机完成日期 → 待验收（自动触发 2 同口径）；
+   *   已开始执行（首次上门工作事实/批次开始运输）→ 执行中；
+   *   已正式进单 → 待执行（进单基线）；
+   *   否则 → 待进单。
+   * 该回退是事实驱动的确定性重算，尊重生命周期不变量：绝不进入 cancelled /
+   * completed（不绕过取消终态与金额闭环约束）、不产生与上述事实矛盾的非法状态；
+   * 反向回退无法经前向自动触发表达，故由本方法直接落库（结果与 lifecycle 规则一致）。
+   */
+  clearAcceptance(
+    projectId: string,
+    facts: { hasAnyInvoiceHistory: boolean; executionStarted: boolean },
+  ): Project {
+    const project = this.requireProject(projectId);
+    if (isCancelled(project.status)) {
+      throw new ValidationError('CANCELLED_PROJECT', '已取消项目不可删除验收报告');
+    }
+    if (facts.hasAnyInvoiceHistory) {
+      throw new ValidationError(
+        'ACCEPTANCE_DELETE_REQUIRES_NO_INVOICE',
+        '该项目存在掉票历史（含已撤销），验收报告不可删除；掉票闭环事实不可逆回退',
+      );
+    }
+    project.acceptanceReport = false;
+    project.acceptanceReportDate = null;
+    project.updatedAt = this.now();
+
+    // 确定性回退主状态（与 lifecycle 自动触发/约束同口径）。
+    let target: ProjectStatusOrCancelled;
+    if (project.preEntryExecution) {
+      target = 'pending_entry'; // 未进单先执行标签：主状态保持待进单（TBD-08）
+    } else if (project.actualInstallDoneAt !== null) {
+      target = 'pending_acceptance'; // 已实际装机完成
+    } else if (facts.executionStarted) {
+      target = 'executing'; // 已开始执行
+    } else if (isFormallyEntered(project)) {
+      target = 'pending_execution'; // 正式进单基线
+    } else {
+      target = 'pending_entry';
+    }
+    project.status = target;
+    this.projects.save(project);
+    return project;
   }
 
   // ---- 2.5 取消 ----

@@ -73,6 +73,7 @@ function makeContext(dir: string) {
     showOpenDialog: vi.fn().mockResolvedValue({ canceled: true, filePaths: [] }),
     writeFile: vi.fn().mockResolvedValue(undefined),
     createManualBackup: (targetDir) => createManualBackup(db, targetDir, { clock: new SystemClock() }),
+    createCleanupBackup: () => createManualBackup(db, join(dir, 'cleanup-backups'), { clock: new SystemClock() }),
     restoreFromBackup: (backupPath) =>
       restoreFromBackup({
         backupPath,
@@ -140,7 +141,6 @@ const PROJECT_PAYLOAD = (overrides: Partial<ProjectWizardPayload> = {}): Project
   newSiteAddress: '新址',
   instrumentCount: 1,
   contractAmount: '50000',
-  finalAmount: '50000',
   siteConfirmed: false,
   ...overrides,
 });
@@ -221,16 +221,21 @@ describe('金额 IPC 边界（十进制字符串 → 主进程 Money 精确解�
     const bus = await loggedInBus();
     const created = (await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'create_project',
-      payload: PROJECT_PAYLOAD({ contractAmount: '0.1', finalAmount: '1234.567' }),
+      payload: PROJECT_PAYLOAD({ contractAmount: '0.1' }),
     } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
     const projectId = created.changed.projectId;
     const detail = (await bus.invoke(IPC_CHANNELS.workbenchV2ProjectDetail, 100, projectId)) as {
       project: { contractAmount: string | null; finalAmount: string | null; id: string };
     };
     expect(detail.project.contractAmount).toBe('0.10'); // 0.1 元 = 10 分 → 十进制字符串
-    expect(detail.project.finalAmount).toBe('1234.57'); // 1234.567 元 HALF_UP → 123457 分
+    // finalAmount 已废弃不再消费：默认取合同金额（0.1 元）
+    expect(detail.project.finalAmount).toBe('0.10');
 
-    // 掉票金额同样按十进制字符串精确入账（v2 详情金额为十进制字符串，不引入 Number 精度）
+    // 先提高最终可确认金额，再验证掉票金额精确入账（十进制字符串，不引入 Number 精度）
+    await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'update_project',
+      payload: { projectId, finalConfirmableAmount: '2000' },
+    } as WorkbenchV2MutationRequest);
     await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'submit_action',
       projectId,
@@ -252,7 +257,6 @@ describe('金额 IPC 边界（十进制字符串 → 主进程 Money 精确解�
         customerName: '超精度客户',
         ecc: 'ECC-BIG-001',
         contractAmount: BIG_DEC,
-        finalAmount: BIG_DEC,
         actualInstallDoneAt: '2026-08-08',
       }),
     } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
@@ -453,7 +457,6 @@ describe('掉票编辑/撤销（v2 invoice_edit / invoice_revoke）', () => {
         customerName: '掉票IPC客户',
         ecc: 'ECC-INV-IPC',
         contractAmount: '2000',
-        finalAmount: '2000',
         actualInstallDoneAt: '2026-08-08',
       }),
     } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };

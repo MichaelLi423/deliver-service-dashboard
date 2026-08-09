@@ -26,7 +26,8 @@ import type {
  *   更新事实为准；未登记更新事实的仪器不视为已关联新址。
  * - 更新事实不创建、修改或删除不可变 Ship-to 主数据。
  * - 更新时间必填、默认当前时间并可补录历史时间。
- * - 序列号非空且与登记的搬迁仪器一致，不引入未确认的序列号格式约束。
+ * - 关联搬迁仪器（instrumentId 有值）时序列号须与登记仪器一致；
+ *   独立保存（instrumentId 空）时不校验仪器，不引入未确认的序列号格式约束。
  * 手工登记绑定当前登录账号归属快照。
  */
 export class SerialAddressUpdateService {
@@ -36,32 +37,43 @@ export class SerialAddressUpdateService {
     private readonly clock: Clock = new SystemClock(),
   ) {}
 
-  /** 逐台登记一条序列号地址更新事实。 */
-  register(instrumentId: string, input: SerialAddressUpdateInput, actor: ActorSnapshot): SerialAddressUpdate {
-    const instrument = this.instruments.findById(instrumentId);
-    if (!instrument) {
-      throw new ValidationError('INSTRUMENT_NOT_FOUND', `搬迁仪器不存在: ${instrumentId}`);
+  /**
+   * 逐台登记一条序列号地址更新事实。
+   * instrumentId 可空：不传（null/undefined/空串）时独立保存（不关联搬迁仪器）；
+   * 传时保留「仪器存在 + 序列号与登记仪器一致」校验。
+   */
+  register(instrumentId: string | null | undefined, input: SerialAddressUpdateInput, actor: ActorSnapshot): SerialAddressUpdate {
+    const normalizedInstrumentId = instrumentId === undefined || instrumentId === null || instrumentId.trim() === '' ? null : instrumentId.trim();
+    let instrumentSerial: string | null = null;
+    if (normalizedInstrumentId !== null) {
+      const instrument = this.instruments.findById(normalizedInstrumentId);
+      if (!instrument) {
+        throw new ValidationError('INSTRUMENT_NOT_FOUND', `搬迁仪器不存在: ${normalizedInstrumentId}`);
+      }
+      instrumentSerial = instrument.serialNo;
     }
     const customerName = assertRequiredText(input.customerName, '客户名称');
     const newSiteAddress = assertRequiredText(input.newSiteAddress, '新址地址');
     const serialNo = assertRequiredText(input.serialNo, '序列号');
     const accountId = assertRequiredText(input.accountId, 'Account ID');
-    // 序列号与登记的搬迁仪器一致（仪器无序列号占位时无法匹配，拒绝登记）
-    if (instrument.serialNo === null || instrument.serialNo === '') {
-      throw new ValidationError('INSTRUMENT_SERIAL_EMPTY', '该搬迁仪器尚无序列号，无法登记序列号地址更新');
-    }
-    if (serialNo !== instrument.serialNo) {
-      throw new ValidationError(
-        'SERIAL_NO_MISMATCH',
-        `序列号「${serialNo}」与该搬迁仪器登记序列号「${instrument.serialNo}」不一致`,
-      );
+    // 关联仪器时：序列号必须与登记仪器一致（仪器无序列号占位时无法匹配，拒绝登记）。
+    if (normalizedInstrumentId !== null) {
+      if (instrumentSerial === null || instrumentSerial === '') {
+        throw new ValidationError('INSTRUMENT_SERIAL_EMPTY', '该搬迁仪器尚无序列号，无法登记序列号地址更新');
+      }
+      if (serialNo !== instrumentSerial) {
+        throw new ValidationError(
+          'SERIAL_NO_MISMATCH',
+          `序列号「${serialNo}」与该搬迁仪器登记序列号「${instrumentSerial}」不一致`,
+        );
+      }
     }
     const updatedAt = input.updatedAt ?? this.today();
     assertValidBusinessDate(updatedAt, '更新时间');
     const now = this.now();
     const update: SerialAddressUpdate = {
       id: newInternalId(),
-      instrumentId,
+      instrumentId: normalizedInstrumentId,
       customerName,
       newSiteAddress,
       serialNo,

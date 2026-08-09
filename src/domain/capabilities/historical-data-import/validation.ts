@@ -232,10 +232,10 @@ function validateEccReferences(
   for (const fee of plan.logisticsFees) check(fee, fee.ecc, 'logistics_fee.ecc');
 }
 
-/** 跨类唯一性（8.31）：重复非空服务单号、重复 Account ID、序列号匹配与同项目唯一。 */
+/** 跨类唯一性（8.31）：重复非空服务单号、重复 Account ID、序列号地址独立导入与同项目唯一。 */
 function validateCrossClass(
   plan: NormalizedImportPlan,
-  target: TargetConflictReader | undefined,
+  _target: TargetConflictReader | undefined,
   byRowId: Map<string, NormalizedRow>,
   problems: ImportProblem[],
 ): void {
@@ -285,57 +285,9 @@ function validateCrossClass(
     }
   }
 
-  // 序列号匹配：序列号地址更新必须唯一匹配计划或目标库中的搬迁仪器。
-  const planProjectsBySerial = new Map<string, string[]>();
-  for (const project of plan.projects) {
-    for (const inst of project.instruments) {
-      if (isEmpty(inst.serialNo)) continue;
-      const list = planProjectsBySerial.get(inst.serialNo!) ?? [];
-      if (!list.includes(project.ecc)) list.push(project.ecc);
-      planProjectsBySerial.set(inst.serialNo!, list);
-    }
-  }
-  for (const update of plan.serialAddressUpdates) {
-    const serial = update.serialNo;
-    if (isEmpty(serial)) continue;
-    const row = byRowId.get(update.rows[0]?.rowId ?? '') ?? update.rows[0];
-    const inPlanProjects = planProjectsBySerial.get(serial!) ?? [];
-    if (inPlanProjects.length > 1) {
-      problems.push(
-        problem(
-          row,
-          'SERIAL_NO_MISMATCH',
-          'serial_address_update.serial_no',
-          `序列号「${serial}」在本计划中匹配多个项目，无法唯一匹配搬迁仪器`,
-        ),
-      );
-      continue;
-    }
-    if (inPlanProjects.length === 1) continue; // 计划内唯一匹配
-    if (target !== undefined) {
-      const targetProjects = target.projectsBySerial(serial!);
-      if (targetProjects.length === 1) continue; // 目标库唯一匹配
-      problems.push(
-        problem(
-          row,
-          'SERIAL_NO_MISMATCH',
-          'serial_address_update.serial_no',
-          targetProjects.length === 0
-            ? `序列号「${serial}」在计划与目标库中均未匹配到搬迁仪器`
-            : `序列号「${serial}」在目标库中匹配多个项目，无法唯一匹配`,
-        ),
-      );
-    } else {
-      problems.push(
-        problem(
-          row,
-          'SERIAL_NO_MISMATCH',
-          'serial_address_update.serial_no',
-          `序列号「${serial}」未在本计划中匹配到搬迁仪器，且未提供目标库用于唯一匹配`,
-        ),
-      );
-    }
-  }
+  // 序列号地址更新不再要求匹配搬迁仪器（ora-1）：来源无 instrumentId 时允许独立导入，
+  // 落库为 instrument_id = NULL 的独立记录，且不创建项目/仪器/Ship-to（与领域模型的
+  // 可选 instrumentId 语义一致）。仅校验业务必填字段（客户名称/新址/序列号/Account ID/更新日期）。
 
   // 同项目序列号唯一性：非空序列号在同一 ECC 项目内不得重复。
   for (const project of plan.projects) {

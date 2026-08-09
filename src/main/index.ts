@@ -214,6 +214,10 @@ function registerIpcHandlersWithDeps(): void {
     writeFile: (filePath, bytes) => writeFile(filePath, bytes),
     createManualBackup: (targetDir) =>
       createManualBackup(requireDb(), targetDir, { clock: new SystemClock() }),
+    createCleanupBackup: () => {
+      const backupDir = path.join(app.getPath('userData'), 'backups', 'clean');
+      return createManualBackup(requireDb(), backupDir, { clock: new SystemClock() });
+    },
     restoreFromBackup: (backupPath) =>
       restoreFromBackup({
         backupPath,

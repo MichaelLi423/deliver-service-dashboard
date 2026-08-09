@@ -471,3 +471,57 @@ describe('8.82 草稿与业务生命周期：退出恢复、删除、提交中�
     }
   });
 });
+
+describe('8.83 序列号地址更新独立导入（ora-1）：来源无 instrumentId 时允许独立导入且不创建项目/仪器/Ship-to', () => {
+  it('序列号未匹配任何搬迁仪器也可独立导入：instrument_id 为 NULL，不创建项目/仪器/Ship-to', async () => {
+    const dir = makeTempDir();
+    try {
+      const env = openEnv(dir);
+      const { repo, db } = env;
+      const d = repo.createDraft({ name: '独立序列号地址草稿', createdBy: 'acc-s', createdByUsername: '负责人' });
+      let rev = repo.transitionState(d.id, 1, 'start_parsing');
+      // 仅序列号地址更新类别：序列号未在计划/目标库匹配任何搬迁仪器（来源无 instrumentId）。
+      rev = await parseTemplateInto(repo, d.id, rev, {
+        serial_address_update: [
+          { source_row_id: 'sid-sau-ind', 客户名称: '独立客户', 新址地址: '独立新址', 序列号: 'SN-INDEPENDENT', 'Account ID': 'ACC-IND', 更新时间: '2026-04-01T00:00:00+08:00' },
+        ],
+      });
+      rev = repo.transitionState(d.id, rev, 'parsing_finished');
+
+      // 完整校验通过：不再要求序列号匹配搬迁仪器（无 SERIAL_NO_MISMATCH）。
+      const { rows, declared, validation } = validateDraft(repo, d.id, ['serial_address_update']);
+      expect(validation.eligible).toBe(true);
+      expect(validation.problems.some((p) => p.code === 'SERIAL_NO_MISMATCH')).toBe(false);
+
+      // 封存 + 单事务提交。
+      rev = repo.transitionState(d.id, rev, 'start_validating');
+      rev = generateValidationSeal(repo, { draftId: d.id, expectedRevision: rev, planDigest: buildPlanFromRows(rows).planDigest, problems: validation.problems, targetDb: db });
+      expect(repo.getDraft(d.id)!.state).toBe('sealed');
+      const snapshotDir = join(dir, 'snap');
+      const outcome = await env.coordinator.commitSealedPlanAtomically(
+        db, repo,
+        commitInput(d.id, rev, rows, declared, validation.problems, snapshotDir, { accountId: 'acc-c', username: '提交人' }),
+      );
+      expect(outcome.status).toBe('committed');
+
+      // 独立导入落库：instrument_id = NULL（不关联仪器）。
+      const row = db.prepare('SELECT instrument_id, serial_no, customer_name FROM serial_address_updates').get() as {
+        instrument_id: string | null;
+        serial_no: string;
+        customer_name: string;
+      };
+      expect(row.serial_no).toBe('SN-INDEPENDENT');
+      expect(row.instrument_id).toBeNull();
+      expect(row.customer_name).toBe('独立客户');
+      // 不创建项目/仪器/Ship-to（独立导入不生成任何关联记录）。
+      const count = (t: string): number => (db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n;
+      expect(count('projects')).toBe(0);
+      expect(count('instruments')).toBe(0);
+      expect(count('ship_tos')).toBe(0);
+      expect(count('customers')).toBe(0);
+      env.close();
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+});

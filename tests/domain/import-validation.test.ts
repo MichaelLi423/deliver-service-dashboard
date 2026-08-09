@@ -350,13 +350,25 @@ describe('8.31 跨类 ECC / 服务单号 / Account ID / 序列号', () => {
     expect(result.eligible).toBe(false);
   });
 
-  it('序列号必须唯一匹配搬迁仪器；无法唯一匹配阻止提交', () => {
+  it('序列号地址更新可独立导入：不要求匹配搬迁仪器（来源无 instrumentId 时独立保存）', () => {
     const rows = [
       nrow('project', { 'contract.ecc': 'E-1', 'contract.customer_name': '甲' }),
       nrow('serial_address_update', { 'serial_address_update.customer_name': '甲', 'serial_address_update.new_site_address': '新址', 'serial_address_update.serial_no': 'SN-NOPE', 'serial_address_update.account_id': 'ACC-1', 'serial_address_update.updated_at': '2026-01-05' }),
     ];
-    const result = validatePlan(rows, { declared: { project: 'data', serial_address_update: 'data' } });
-    expect(hasCode(result.problems, 'SERIAL_NO_MISMATCH')).toBe(true);
+    const result = validatePlan(rows, {
+      declared: {
+        project: 'data',
+        serial_address_update: 'data',
+        service_order: 'none',
+        invoice: 'none',
+        logistics_fee: 'none',
+        qr_request: 'none',
+        ship_to_request: 'none',
+      },
+    });
+    // ora-1：不再要求序列号匹配搬迁仪器（独立导入 instrument_id 为 NULL）
+    expect(hasCode(result.problems, 'SERIAL_NO_MISMATCH')).toBe(false);
+    expect(result.eligible).toBe(true);
   });
 
   it('违反同项目序列号唯一性 → 阻断错误', () => {

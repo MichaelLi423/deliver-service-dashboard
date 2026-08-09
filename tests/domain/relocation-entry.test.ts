@@ -137,11 +137,11 @@ describe('正式进单（2.1）', () => {
     service.confirmScope(noCustomer.id);
     expect(() => service.formalEntry(noCustomer.id, { ecc: 'ECC-001' })).toThrow(/客户单位/);
 
-    // 缺搬迁范围
+    // 缺搬迁范围不再拒绝（2.1 更新：正式进单不要求明确搬迁范围）
     const noScope = service.createPendingProject();
     service.attachContract(noScope.id);
     service.linkCustomer(noScope.id, 'customer-1');
-    expect(() => service.formalEntry(noScope.id, { ecc: 'ECC-001' })).toThrow(/搬迁范围/);
+    expect(service.formalEntry(noScope.id, { ecc: 'ECC-001' }).status).toBe('pending_execution');
   });
 
   it('缺合同拒绝进单并提示先补齐合同', () => {
@@ -173,25 +173,31 @@ describe('正式进单（2.1）', () => {
     expect(contracts.findByProjectId(projectId)?.finalConfirmableAmountCents).toBe(1000000n);
   });
 
-  it('合同金额为 0 时正式进单最终可确认金额必须另行录入大于 0 的值（TBD-11）', () => {
-    const { service } = setup();
+  it('合同金额为 0 时正式进单 final 保持 null，另行录入 > 0 才设值（TBD-11 更新）', () => {
+    const { contracts, service } = setup();
     const project = service.createPendingProject();
     const contract = service.attachContract(project.id);
     new ContractService().setUsdTaxAmount(contract, Money.parse('0'));
     service.linkCustomer(project.id, 'customer-1');
     service.confirmScope(project.id);
 
-    // 未另行录入 → 拒绝且不能默认为 0
-    expect(() => service.formalEntry(project.id, { ecc: 'ECC-001' })).toThrow(
-      /最终可确认金额必须另行录入大于 0/,
-    );
+    // 未另行录入 → 进单成功、final 保持 null（不得默认为 0）
+    const entered = service.formalEntry(project.id, { ecc: 'ECC-001' });
+    expect(entered.status).toBe('pending_execution');
+    expect(contracts.findByProjectId(project.id)!.finalConfirmableAmountCents).toBeNull();
 
     // 另行录入 > 0 → 允许
-    const entered = service.formalEntry(project.id, {
-      ecc: 'ECC-001',
+    const project2 = service.createPendingProject();
+    const contract2 = service.attachContract(project2.id);
+    new ContractService().setUsdTaxAmount(contract2, Money.parse('0'));
+    service.linkCustomer(project2.id, 'customer-1');
+    service.confirmScope(project2.id);
+    const entered2 = service.formalEntry(project2.id, {
+      ecc: 'ECC-002',
       finalConfirmableAmountCents: 500000n,
     });
-    expect(entered.status).toBe('pending_entry');
+    expect(entered2.status).toBe('pending_execution');
+    expect(contracts.findByProjectId(project2.id)!.finalConfirmableAmountCents).toBe(500000n);
   });
 
   it('最终可确认金额有值时必须大于 0，负数或 0 拒绝', () => {

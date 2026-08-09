@@ -22,13 +22,17 @@ import {
   SqliteRepairActivityReader, SqliteReportingFactReader, SqliteSerialAddressUpdateRepository,
   SqliteServiceOrderRepository, SqliteShipToAddressReader, SqliteShipToRepository,
   SqliteShipToRequestRepository, SqliteWorkFactRepository,
+  DataCleanupService, type DataCleanupOptions,
   WorkbenchReadRepository,
 } from '../domain/capabilities/local-data-persistence';
 import { readBusinessRevision } from '../domain/capabilities/local-data-persistence/identity';
+import { DELETE_REJECTION_CODES, WIZARD_REJECTION_CODES } from '../shared/ipc';
 import type {
-  AccountSessionInfo, BatchEditPayload, InstrumentBulkImportPayload, ProjectSupplementPayload,
+  AccountSessionInfo, BatchEditPayload, DataCleanConfirmRequestDto, DataCleanConfirmResultDto,
+  DataCleanPrepareDto, InstrumentBulkImportPayload, ProjectSupplementPayload,
   ProjectUpdatePayload, ProjectWizardPayload, ReportDto, ReportFilterDto, ShipToRequestDto,
   ShipToRequestInputDto, ShipToRequestResultDto, ShipToRequestStatus, WorkbenchActionPayload,
+  WorkbenchV2DeleteRequest, WorkbenchV2DeleteResult, WorkbenchV2HistoryPageDto, WorkbenchV2HistoryPageRequest,
   WorkbenchV2IndependentPageDto, WorkbenchV2IndependentPageRequest, WorkbenchV2InvalidateTag,
   WorkbenchV2LookupPageDto, WorkbenchV2LookupPageRequest, WorkbenchV2MutationRequest,
   WorkbenchV2MutationResult, WorkbenchV2OverviewDto, WorkbenchV2ProjectDetailDto,
@@ -44,6 +48,12 @@ import type { ShipToRequest as ShipToRequestRecord } from '../domain/capabilitie
 const parseAmountInput = (value: unknown): bigint => {
   const raw = String(value ?? '').trim();
   if (raw === '') return 0n;
+  return Money.parse(raw).cents;
+};
+/** 可选金额解析：空/缺失返回 null（不虚构 0），有值按 Money 精确解析。 */
+const optionalMoney = (value: unknown): bigint | null => {
+  const raw = String(value ?? '').trim();
+  if (raw === '') return null;
   return Money.parse(raw).cents;
 };
 const text = (v: unknown): string => String(v ?? '').trim();
@@ -82,7 +92,13 @@ export class WorkbenchFacade {
     private readonly db: DatabaseSync,
     private readonly session: () => AccountSessionInfo,
     /** 测试/接线可注入的服务覆盖（事务感知仓储，用于验证原子性）。 */
-    private readonly injected?: { shipToService?: ShipToService },
+    private readonly injected?: {
+      shipToService?: ShipToService;
+      /** 「清理全部业务数据」confirm 前安全备份执行器（复用现有备份机制）。 */
+      cleanupBackup?: () => Promise<string>;
+      /** 仅测试注入的清理测试钩子（now/rotateGeneration/onAfterDeletes/onBeforeForeignKeys）。 */
+      cleanupHooks?: Partial<Pick<DataCleanupOptions, 'now' | 'rotateGeneration' | 'onAfterDeletes' | 'onBeforeForeignKeys'>>;
+    },
   ) {
     this.projects = new SqliteProjectRepository(db);
     this.contracts = new SqliteContractRepository(db);
@@ -149,6 +165,35 @@ export class WorkbenchFacade {
 
   v2LookupPage(request: WorkbenchV2LookupPageRequest): WorkbenchV2LookupPageDto {
     return this.v2Reader().lookupPage(request);
+  }
+
+  v2HistoryPage(request: WorkbenchV2HistoryPageRequest): WorkbenchV2HistoryPageDto {
+    return this.v2Reader().historyPage(request);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 「清理全部业务数据」两阶段 API（prepare → confirm）。
+  // 备份执行器由接线层注入（复用现有备份机制）；token 绑定 DB identity/generation/revision。
+  // ---------------------------------------------------------------------------
+
+  cleanPrepare(): DataCleanPrepareDto {
+    return this.cleanupService().prepare();
+  }
+
+  cleanConfirm(request: DataCleanConfirmRequestDto): Promise<DataCleanConfirmResultDto> {
+    return this.cleanupService().confirm(request);
+  }
+
+  private cleanupService(): DataCleanupService {
+    return new DataCleanupService(this.db, {
+      backup: () => {
+        if (!this.injected?.cleanupBackup) {
+          throw new ValidationError('CLEAN_BACKUP_UNAVAILABLE', '未配置清理前安全备份执行器');
+        }
+        return this.injected.cleanupBackup();
+      },
+      ...(this.injected?.cleanupHooks ?? {}),
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -279,14 +324,280 @@ export class WorkbenchFacade {
   }
 
   // ---------------------------------------------------------------------------
+  // 受保护登记记录删除（判别联合 + 预期业务修订防并发）。
+  // - BEGIN IMMEDIATE 事务内原子完成（含导入审计联动）；expectedRevision 在事务内
+  //   重新核验（防 TOCTOU：BEGIN IMMEDIATE 之前发生的写入也会被拒绝）；
+  // - 严格守卫（ora-1）：batch 仅未开始运输/无当前仪器/无改批历史；activity 存在
+  //   工作事实或维修关联拒绝（不级联清事实）；damage 仅未处理、备件未使用、无活动
+  //   关联；completed ship_to_request 禁止；instrument 所属批次已开始运输也禁止；
+  // - 不再假称反向重算：允许删除的均为不会触发状态变化的空记录，无需状态回退；
+  // - acceptance 真正实现：有 invoice 历史拒绝，否则清空验收事实并按事实确定性回退状态；
+  // - invoice 映射到现有 revoke（必填撤销日期/原因），绝不物理删除。
+  // ---------------------------------------------------------------------------
+
+  v2Delete(request: WorkbenchV2DeleteRequest): WorkbenchV2DeleteResult {
+    const state: {
+      changed: { kind: WorkbenchV2DeleteRequest['kind']; id: string; projectId?: string } | null;
+      extraTags: WorkbenchV2InvalidateTag[];
+    } = { changed: null, extraTags: [] };
+    this.transactionImmediate(() => {
+      // 事务内核验 expectedRevision（BEGIN IMMEDIATE 锁下防并发竞态）。
+      const currentRevision = readBusinessRevision(this.db);
+      if (request.expectedRevision !== currentRevision) {
+        throw new ValidationError(
+          DELETE_REJECTION_CODES.REVISION_MISMATCH,
+          `业务修订已变化（预期 ${request.expectedRevision}，当前 ${currentRevision}），请刷新后重试`,
+        );
+      }
+      switch (request.kind) {
+        case 'service_order': {
+          const order = this.orders.findById(request.id);
+          if (!order) {
+            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `开单记录不存在: ${request.id}`);
+          }
+          this.deleteBusinessRow('service_orders', request.id);
+          state.changed = { kind: 'service_order', id: request.id, projectId: order.projectId ?? undefined };
+          break;
+        }
+        case 'activity': {
+          const activity = this.activities.findById(request.id);
+          if (!activity) {
+            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `上门活动不存在: ${request.id}`);
+          }
+          // 严格守卫：存在工作事实或维修关联 → 拒绝（不级联清事实）。
+          if (this.existsWhere('work_facts', 'activity_id', request.id)) {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.DEPENDENCIES,
+              '该上门活动已产生工作事实，无法删除；请先处理工作事实',
+            );
+          }
+          if (this.existsWhere('activity_damage_links', 'activity_id', request.id)) {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.DEPENDENCIES,
+              '该上门活动已关联损坏/维修事项，无法删除；请先解除维修关联',
+            );
+          }
+          // 活动自身的参与工程师属活动记录一部分（非独立事实），随活动删除。
+          this.db.prepare('DELETE FROM activity_engineers WHERE activity_id = ?').run(request.id);
+          this.deleteBusinessRow('activities', request.id);
+          state.changed = { kind: 'activity', id: request.id, projectId: activity.projectId };
+          break;
+        }
+        case 'acceptance': {
+          const project = this.projects.findById(request.projectId);
+          if (!project) {
+            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `项目不存在: ${request.projectId}`);
+          }
+          // 有 invoice 历史（含已撤销）→ 拒绝（掉票闭环事实不可逆回退）；否则清空验收事实
+          // 并按事实确定性回退主状态（clearAcceptance 内部同样防御校验）。
+          const hasAnyInvoiceHistory = this.projectInvoiceHistoryExists(request.projectId);
+          if (hasAnyInvoiceHistory) {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.DEPENDENCIES,
+              '该项目存在掉票历史（含已撤销），验收报告不可删除；掉票闭环事实不可逆回退',
+            );
+          }
+          const executionStarted = this.projectExecutionStarted(request.projectId);
+          this.projectService().clearAcceptance(request.projectId, { hasAnyInvoiceHistory: false, executionStarted });
+          state.changed = { kind: 'acceptance', id: request.projectId, projectId: request.projectId };
+          break;
+        }
+        case 'damage_repair_item': {
+          const item = this.damageItems.findById(request.id);
+          if (!item) {
+            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `损坏/维修事项不存在: ${request.id}`);
+          }
+          // 严格守卫：仅未处理、备件未使用、无维修活动关联可删除。
+          if (item.issueStatus !== 'untreated') {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.DEPENDENCIES,
+              `该损坏/维修事项已处理（${item.issueStatus}），无法删除；仅未处理事项可删除`,
+            );
+          }
+          if (item.partStatus === 'used') {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.DEPENDENCIES,
+              '该损坏/维修事项备件已使用（计入维修费用），无法删除',
+            );
+          }
+          if (this.existsWhere('activity_damage_links', 'damage_item_id', request.id)) {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.DEPENDENCIES,
+              '该损坏/维修事项已关联上门活动，无法删除；请先解除维修关联',
+            );
+          }
+          this.deleteBusinessRow('damage_repair_items', request.id);
+          state.changed = { kind: 'damage_repair_item', id: request.id, projectId: item.projectId };
+          break;
+        }
+        case 'serial_address': {
+          const update = this.serialUpdates.findById(request.id);
+          if (!update) {
+            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `序列号地址更新记录不存在: ${request.id}`);
+          }
+          const projectId = update.instrumentId
+            ? this.projectOfInstrument(update.instrumentId)
+            : undefined;
+          this.deleteBusinessRow('serial_address_updates', request.id);
+          state.changed = { kind: 'serial_address', id: request.id, projectId };
+          state.extraTags.push('independent:serial_address');
+          break;
+        }
+        case 'qr_request': {
+          const requestRow = this.qrRequests.findById(request.id);
+          if (!requestRow) {
+            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `二维码申请记录不存在: ${request.id}`);
+          }
+          this.db.prepare('DELETE FROM qr_request_types WHERE qr_request_id = ?').run(request.id);
+          this.deleteBusinessRow('qr_requests', request.id);
+          state.changed = { kind: 'qr_request', id: request.id };
+          state.extraTags.push('independent:qr_request');
+          break;
+        }
+        case 'batch': {
+          const batch = this.batches.findById(request.id);
+          if (!batch) {
+            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `搬迁批次不存在: ${request.id}`);
+          }
+          // 严格守卫：仅未开始运输、无当前仪器、无改批历史可删除。
+          if (batch.startedAt !== null) {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.DEPENDENCIES,
+              '该搬迁批次已开始运输，无法删除',
+            );
+          }
+          if (this.existsWhere('instruments', 'batch_id', request.id)) {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.DEPENDENCIES,
+              '该搬迁批次仍存在当前仪器，无法删除；请先解绑仪器',
+            );
+          }
+          if (
+            this.existsWhere('batch_change_history', 'from_batch_id', request.id) ||
+            this.existsWhere('batch_change_history', 'to_batch_id', request.id)
+          ) {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.DEPENDENCIES,
+              '该搬迁批次存在改批历史，无法删除',
+            );
+          }
+          // 批次与物流费用合并为一次记录：批次自身唯一物流费用随批次删除。
+          const fee = this.fees.findByBatchId(request.id);
+          if (fee) this.deleteBusinessRow('logistics_fees', fee.id);
+          this.deleteBusinessRow('batches', request.id);
+          state.changed = { kind: 'batch', id: request.id, projectId: batch.projectId };
+          break;
+        }
+        case 'instrument': {
+          const instrument = this.instruments.findById(request.id);
+          if (!instrument) {
+            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `搬迁仪器不存在: ${request.id}`);
+          }
+          // 所属批次已开始运输 → 禁止删除。
+          if (instrument.batchId) {
+            const batch = this.batches.findById(instrument.batchId);
+            if (batch && batch.startedAt !== null) {
+              throw new ValidationError(
+                DELETE_REJECTION_CODES.DEPENDENCIES,
+                '该搬迁仪器所属批次已开始运输，无法删除',
+              );
+            }
+          }
+          // 保留其他依赖检查（损坏事项/工作事实/改批历史/序列号更新）。
+          this.assertInstrumentDeletable(request.id);
+          this.deleteBusinessRow('instruments', request.id);
+          state.changed = { kind: 'instrument', id: request.id, projectId: instrument.projectId };
+          break;
+        }
+        case 'ship_to_request': {
+          const shipRequest = this.shipRequests.findById(request.id);
+          if (!shipRequest) {
+            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `Ship-to 申请记录不存在: ${request.id}`);
+          }
+          if (shipRequest.status === 'completed') {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.DEPENDENCIES,
+              '已完成的 Ship-to 申请不可删除',
+            );
+          }
+          this.deleteBusinessRow('ship_to_requests', request.id);
+          state.changed = { kind: 'ship_to_request', id: request.id };
+          state.extraTags.push('lookup:ship_to_requests');
+          break;
+        }
+        case 'invoice': {
+          const invoice = this.invoices.findById(request.id);
+          if (!invoice) {
+            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `掉票记录不存在: ${request.id}`);
+          }
+          if (request.revokedAt === undefined || request.revokedAt === '' || request.revokeReason === undefined || request.revokeReason.trim() === '') {
+            throw new ValidationError(
+              DELETE_REJECTION_CODES.INVOICE_REQUIRES_REVOKE,
+              '掉票记录不可物理删除：删除必须携带撤销日期与撤销原因（映射为撤销）',
+            );
+          }
+          const revoked = this.financialService().revokeInvoice(
+            request.id,
+            { revokedAt: businessDate(request.revokedAt, '撤销日期') ?? '', revokeReason: request.revokeReason },
+            this.actor(),
+          );
+          state.changed = { kind: 'invoice', id: request.id, projectId: revoked.projectId };
+          break;
+        }
+        default: {
+          const kind = String((request as { kind?: unknown }).kind);
+          throw new ValidationError('DELETE_UNKNOWN_KIND', `未知的删除记录类型: ${kind}`);
+        }
+      }
+    });
+    const tags: WorkbenchV2InvalidateTag[] = ['overview', 'projects'];
+    if (state.changed?.projectId) {
+      tags.push(`project:${state.changed.projectId}`, `sections:${state.changed.projectId}`);
+    }
+    tags.push(...state.extraTags);
+    return {
+      businessRevision: readBusinessRevision(this.db),
+      invalidated: [...new Set(tags)],
+      changed: state.changed,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Oracle #10：写逻辑抽取（v1 snapshot 与 v2 mutation 共用，v2 路径不调用 snapshot()）。
   // 旧 API 仅为 UI 迁移暂留，后续随旧 UI 一并删除。
   // ---------------------------------------------------------------------------
 
   private writeCreateProject(input: ProjectWizardPayload): { projectId: string } {
+    // 契约收紧（ora-1）：废弃字段有值即稳定拒绝（绝不静默忽略）。
+    const deprecatedFields: Array<[string, unknown]> = [
+      ['finalAmount', input.finalAmount],
+      ['serviceOrderNo', input.serviceOrderNo],
+      ['engineers', input.engineers],
+      ['serviceOrderNote', input.serviceOrderNote],
+      ['missingItems', input.missingItems],
+    ];
+    for (const [name, value] of deprecatedFields) {
+      if (String(value ?? '').trim() !== '') {
+        throw new ValidationError(
+          WIZARD_REJECTION_CODES.DEPRECATED_FIELD,
+          `新建项目已不再支持字段「${name}」（值「${String(value)}」已被拒绝，未静默忽略）；请经正式进单/补齐资料或独立动作提交`,
+        );
+      }
+    }
+    // 仅 formal 允许携带 ECC/进单日期/合同金额；非 formal 有值即稳定拒绝。
+    if (input.intent !== 'formal') {
+      if (text(input.ecc) !== '') {
+        throw new ValidationError(WIZARD_REJECTION_CODES.ECC_ONLY_FORMAL, 'ECC 仅允许 intent=formal 新建项目携带；draft/pre_entry_execution 请先建草稿再经正式进单');
+      }
+      if (input.entryAt !== undefined && input.entryAt !== '') {
+        throw new ValidationError(WIZARD_REJECTION_CODES.ENTRY_AT_ONLY_FORMAL, '进单日期仅允许 intent=formal 新建项目携带；draft/pre_entry_execution 请先建草稿再经正式进单');
+      }
+      if (text(input.contractAmount) !== '') {
+        throw new ValidationError(WIZARD_REJECTION_CODES.CONTRACT_AMOUNT_ONLY_FORMAL, '合同金额仅允许 intent=formal 新建项目携带；draft/pre_entry_execution 请先建草稿再经正式进单');
+      }
+    }
     let projectId = '';
     this.transaction(() => {
-      const actor = this.actor();
       const projectService = this.projectService();
       const customerRepo = new SqliteCustomerRepository(this.db);
       const customer = customerRepo.findByName(input.customerName.trim()) ?? new CustomerService(customerRepo).register(input.customerName);
@@ -294,7 +605,7 @@ export class WorkbenchFacade {
       projectId = project.id;
       projectService.linkCustomer(project.id, customer.id);
       projectService.setRegion(project.id, input.region);
-      projectService.updateBasicInfo(project.id, { oldSiteContact: input.oldSiteContact, newSiteContact: input.newSiteContact, oldSiteAddress: input.oldSiteAddress, newSiteAddress: input.newSiteAddress, contractStartDate: input.contractStartDate ?? null, contractEndDate: input.contractEndDate ?? null });
+      projectService.updateBasicInfo(project.id, { oldSiteContact: input.oldSiteContact, newSiteContact: input.newSiteContact, oldSiteAddress: input.oldSiteAddress ?? null, newSiteAddress: input.newSiteAddress ?? null, contractStartDate: input.contractStartDate ?? null, contractEndDate: input.contractEndDate ?? null });
       projectService.updateExecutionPreparation(project.id, {
         planVisitAt: input.planVisitAt ? businessDate(input.planVisitAt, '计划上门日期') ?? null : null,
         planTransportAt: input.planTransportAt ? businessDate(input.planTransportAt, '计划运输日期') ?? null : null,
@@ -304,43 +615,38 @@ export class WorkbenchFacade {
       if (input.plannedInstallDoneAt) {
         projectService.setPlannedInstallDoneAt(project.id, businessDate(input.plannedInstallDoneAt, '计划装机完成日期') ?? null);
       }
-      // 暂定仪器数量（正整数，必填）：只记录数量、不生成虚拟仪器；
-      // 仪器名称/型号/UPS 不再随新建项目创建，改经单条录入或 .xlsx 批量导入登记。
+      // 暂定仪器数量（正整数，可空）：有值（正整数）才记录数量并确认搬迁范围，
+      // 不生成虚拟仪器；未提供/0/空则不确定范围（正式进单已不再要求搬迁范围）。
       const instrumentCount = input.instrumentCount;
-      if (instrumentCount === undefined || !Number.isInteger(instrumentCount) || instrumentCount <= 0) {
-        throw new ValidationError('INSTRUMENT_COUNT_REQUIRED', '新建项目必须提供大于 0 的整数仪器数量（instrumentCount）');
-      }
-      projectService.setTemporaryInstrumentCount(project.id, instrumentCount);
-      projectService.confirmScope(project.id);
-      // ECC 是是否正式进单的唯一依据：携带非空 ECC 一律按正式进单落库（与 intent 无关），
-      // 此时必须补建合同（正式进单前置校验要求）。
-      const ecc = text(input.ecc);
-      if ((input.contractAmount ?? '') !== '' || input.intent === 'formal' || ecc !== '') {
-        projectService.attachContract(project.id);
-        this.financialService().setContractUsdTaxAmount(project.id, parseAmountInput(input.contractAmount));
-      }
-      if (input.serviceOrderNo) {
-        if (!input.engineers?.trim()) throw new Error('填写服务单号时参与工程师必填；项目与开单均未保存');
-        new ServiceOrderService(this.orders, this.projects).recordOrder({ orderType:'relocation', serviceOrderNo:input.serviceOrderNo, engineer:input.engineers, customerName:input.customerName, projectId:project.id, note:input.serviceOrderNote }, actor);
-      }
-      // 保存路径（intent 仅约束无 ECC 场景）：
-      // - 有非空 ECC：必须正式进单（entryAt 有值、formallyEntered=true），并把主状态推进为
-      //   待执行（不得仍为待进单）；即使 intent=pre_entry_execution 也不保留未进单先执行标签；
-      // - 无 ECC：只允许 intent=pre_entry_execution（经理批复原因必填，沿用既有校验），结果
-      //   status=pending_entry、preEntryExecution=true、formallyEntered=false；
-      // - intent=formal 无 ECC：继续报 ECC_REQUIRED；
-      // - intent=draft（或缺失）无 ECC：安全明确错误，不静默创建待进单项目。
-      if (ecc !== '') {
-        projectService.formalEntry(project.id, { ecc, entryAt: businessDate(input.entryAt, '进单日期'), finalConfirmableAmountCents: (input.finalAmount ?? '') === '' ? undefined : parseAmountInput(input.finalAmount) });
-        const advanced = projectService.adjustStatus(project.id, 'pending_execution');
-        if (!advanced.ok) throw new Error(advanced.errors.join('；'));
-      } else if (input.intent === 'formal') {
-        projectService.formalEntry(project.id, { ecc: '', entryAt: businessDate(input.entryAt, '进单日期'), finalConfirmableAmountCents: (input.finalAmount ?? '') === '' ? undefined : parseAmountInput(input.finalAmount) });
-      } else if (input.intent === 'pre_entry_execution') {
-        projectService.setPreEntryExecution(project.id, { reason: input.approvalReason ?? '', missingItems: input.missingItems ?? '' });
+      if (instrumentCount === undefined || instrumentCount === null) {
+        // 未提供：不确认搬迁范围。
+      } else if (!Number.isInteger(instrumentCount) || instrumentCount <= 0) {
+        throw new ValidationError('INSTRUMENT_COUNT_REQUIRED', '仪器数量必须为大于 0 的整数（instrumentCount），或留空表示暂不确定范围');
       } else {
-        throw new ValidationError('DRAFT_NOT_ALLOWED', '普通草稿创建已停用：无 ECC 的项目请选择「未进单先执行」并填写经理批复原因');
+        projectService.setTemporaryInstrumentCount(project.id, instrumentCount);
+        projectService.confirmScope(project.id);
       }
+
+      // intent 决定是否正式进单（不再由 ECC 推断）：
+      // - formal：补建合同、设置合同金额（optional money parser：空字符串保持 null，
+      //   绝不虚构 0）、formalEntry（ECC/合同/客户/进单日期必填，缺任一由领域校验拒绝）；
+      // - draft：仅创建待进单草稿项目（不补建合同、不设置 ECC）；
+      // - pre_entry_execution：待进单 + 未进单先执行（经理批复原因必填，沿用既有校验）。
+      if (input.intent === 'formal') {
+        projectService.attachContract(project.id);
+        const contractAmount = optionalMoney(input.contractAmount);
+        if (contractAmount !== null) {
+          this.financialService().setContractUsdTaxAmount(project.id, contractAmount);
+        }
+        projectService.formalEntry(project.id, {
+          ecc: text(input.ecc),
+          entryAt: businessDate(input.entryAt, '进单日期'),
+        });
+      } else if (input.intent === 'pre_entry_execution') {
+        // 后端拒绝 wizard 的 missingItems（见上方废弃字段检查）：缺失项改经 supplement_project 补齐。
+        projectService.setPreEntryExecution(project.id, { reason: input.approvalReason ?? '', missingItems: '' });
+      }
+      // intent='draft'：仅待进单草稿（无合同、无 ECC、不正式进单）。
       if (input.actualInstallDoneAt) projectService.recordActualInstallDone(project.id, businessDate(input.actualInstallDoneAt, '实际装机完成日期') ?? '');
     });
     return { projectId };
@@ -770,7 +1076,7 @@ export class WorkbenchFacade {
         }
         case 'damage': { const service=this.damageService(); const item=service.registerItem(text(v.instrumentId),{damageReason:optional(v.damageReason),partNumber:text(v.partNumber),partQuantity:Number(v.partQuantity),partAmountCents:parseAmountInput(v.partAmount),partCurrency:text(v.partCurrency) as PartCurrency,partRequestedAt:businessDate(v.partRequestedAt,'备件申请日期') ?? null,partStatus:text(v.partStatus) as PartStatus,repairNote:optional(v.repairNote),registeredAt:businessDate(v.registeredAt,'事项登记日期') ?? ''},actor); const status=text(v.issueStatus) as DamageItemStatus; if(status&&status!=='untreated')service.updateIssueStatus(item.id,status,optional(v.closeReason)??null,actor); if(v.partStatus==='used')service.setPartStatus(item.id,'used',actor); break; }
         case 'core': { const ps=this.projectService(); if(!this.contracts.findByProjectId(projectId)) ps.attachContract(projectId); this.financialService().setContractUsdTaxAmount(projectId,parseAmountInput(v.contractAmount)); ps.formalEntry(projectId,{ecc:text(v.ecc),entryAt:businessDate(v.entryAt,'进单日期') ?? '',finalConfirmableAmountCents:optional(v.finalAmount)?parseAmountInput(v.finalAmount):undefined}); break; }
-        case 'serial_address': new SerialAddressUpdateService(this.serialUpdates,new SqliteInstrumentAddressReader(this.db)).register(text(v.instrumentId),{customerName:text(v.customerName),newSiteAddress:text(v.newSiteAddress),serialNo:text(v.serialNo),accountId:text(v.accountId),updatedAt:businessDate(v.updatedAt,'更新日期') ?? ''},actor); break;
+        case 'serial_address': new SerialAddressUpdateService(this.serialUpdates,new SqliteInstrumentAddressReader(this.db)).register(optional(v.instrumentId),{customerName:text(v.customerName),newSiteAddress:text(v.newSiteAddress),serialNo:text(v.serialNo),accountId:text(v.accountId),updatedAt:businessDate(v.updatedAt,'更新日期') ?? ''},actor); break;
         case 'qr_request': break;
       }
     });
@@ -884,6 +1190,71 @@ export class WorkbenchFacade {
     return { invoiceId, projectId };
   }
 
+  // ---- 受保护删除内部实现（v2Delete 专用；全部在调用方事务内执行） ----
+
+  /** 删除业务行 + 联动导入审计（表名来自固定白名单，无注入面）。 */
+  private deleteBusinessRow(table: string, id: string): void {
+    this.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+    this.db.prepare('DELETE FROM import_record_audit WHERE target_table = ? AND target_id = ?').run(table, id);
+  }
+
+  /** 是否存在匹配行（表名/列名来自固定白名单，无注入面）。 */
+  private existsWhere(table: string, column: string, value: string): boolean {
+    const row = this.db.prepare(`SELECT 1 AS x FROM ${table} WHERE ${column} = ? LIMIT 1`).get(value) as
+      | { x: number }
+      | undefined;
+    return row !== undefined;
+  }
+
+  /** 项目是否存在任何掉票历史（含已撤销）：有则验收报告删除被拒绝。 */
+  private projectInvoiceHistoryExists(projectId: string): boolean {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM invoices WHERE project_id = ?').get(projectId) as {
+      n: number;
+    };
+    return row.n > 0;
+  }
+
+  /** 项目是否已开始执行：任一批次开始运输 或 任一工作事实已开始。 */
+  private projectExecutionStarted(projectId: string): boolean {
+    const batchStarted = this.db
+      .prepare('SELECT 1 AS x FROM batches WHERE project_id = ? AND started_at IS NOT NULL LIMIT 1')
+      .get(projectId);
+    if (batchStarted) return true;
+    const workFact = this.db
+      .prepare(
+        `SELECT 1 AS x FROM work_facts wf
+         JOIN activities a ON a.id = wf.activity_id
+         WHERE a.project_id = ? LIMIT 1`,
+      )
+      .get(projectId);
+    return workFact !== undefined;
+  }
+
+  /** 仪器存在依赖记录时拒绝删除（保护依赖，避免静默级联丢失业务数据）。 */
+  private assertInstrumentDeletable(instrumentId: string): void {
+    const dependents = [
+      ['damage_repair_items', 'instrument_id'],
+      ['work_facts', 'instrument_id'],
+      ['batch_change_history', 'instrument_id'],
+      ['serial_address_updates', 'instrument_id'],
+    ] as const;
+    for (const [table, column] of dependents) {
+      if (this.existsWhere(table, column, instrumentId)) {
+        throw new ValidationError(
+          DELETE_REJECTION_CODES.DEPENDENCIES,
+          `该搬迁仪器存在依赖记录（${table}），无法安全删除；请先处理依赖记录`,
+        );
+      }
+    }
+  }
+
+  private projectOfInstrument(instrumentId: string): string | undefined {
+    const row = this.db.prepare('SELECT project_id FROM instruments WHERE id = ?').get(instrumentId) as
+      | { project_id: string }
+      | undefined;
+    return row ? row.project_id : undefined;
+  }
+
   report(filter:ReportFilterDto):ReportModel { return new ReportingService(new SqliteReportingFactReader(this.db)).buildReport(filter); }
   reportDto(filter:ReportFilterDto):ReportDto { return serializeReport(this.report(filter)); }
   drillDown(metric:string,filter:ReportFilterDto):Array<Record<string,string|number|boolean|null>> { return serializeRows(new ReportingService(new SqliteReportingFactReader(this.db)).getMetricDetails(metric as ReportMetricKey,filter)); }
@@ -896,6 +1267,8 @@ export class WorkbenchFacade {
   private shipToService(){return this.injected?.shipToService ?? new ShipToService(new SqliteShipToRepository(this.db),this.shipRequests,new SqliteShipToAddressReader(this.db));}
   private damageService(){return new DamageRepairService(this.damageItems,new SqliteActivityDamageLinkRepository(this.db),new SqliteDamageInstrumentReader(this.db),new SqliteRepairActivityReader(this.db),new SqliteContractAmountReader(this.db));}
   private transaction(work:()=>void){this.db.exec('BEGIN');try{work();this.db.exec('COMMIT');}catch(error){try{this.db.exec('ROLLBACK');}catch{}throw error;}}
+  /** BEGIN IMMEDIATE 事务（v2Delete 等防并发/TOCTOU 的写路径专用）。 */
+  private transactionImmediate(work:()=>void){this.db.exec('BEGIN IMMEDIATE');try{work();this.db.exec('COMMIT');}catch(error){try{this.db.exec('ROLLBACK');}catch{}throw error;}}
 }
 
 /**

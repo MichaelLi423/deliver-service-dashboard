@@ -90,7 +90,6 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
         customerName: '未进单先执行客户',
         region: '华南',
         approvalReason: '客户进度紧急，经理已批复优先执行',
-        missingItems: '合同尚未签署',
       }),
     });
     const projectId = projectIdOf(created);
@@ -127,8 +126,8 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     detail = facade.v2ProjectDetail(projectId).project!;
     expect(detail.formallyEntered).toBe(true);
     expect(detail.ecc).toBe('ECC-PRE-001');
-    // 未进单先执行期间已发生首次工作事实 → 正式进单后不自动跳转，由负责人人工确定
-    expect(detail.status).toBe('pending_entry');
+    // 正式进单后基线待执行（无实际装机完成/验收等自动触发事实）
+    expect(detail.status).toBe('pending_execution');
 
     // 负责人人工确定主状态：待执行 → 执行中（经 lifecycle 校验）
     facade.v2Mutate({ op: 'adjust_status', projectId, status: 'executing' });
@@ -149,7 +148,6 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
         ecc: 'ECC-AUTO-001',
         instrumentCount: 1,
         contractAmount: '100000',
-        finalAmount: '100000',
         planVisitAt: '2026-08-09',
         planTransportAt: '2026-08-10',
         siteConfirmed: true,
@@ -166,7 +164,6 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
         ecc: 'ECC-AUTO-002',
         instrumentCount: 1,
         contractAmount: '100000',
-        finalAmount: '100000',
         actualInstallDoneAt: '2026-08-08',
       }),
     });
@@ -190,7 +187,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     // 正式进单项目：创建结果主状态为待执行；待执行 → 执行中 经 lifecycle 校验通过
     const formal = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '状态校验正式客户', ecc: 'ECC-ADJ-001', region: '华北', contractAmount: '100000', finalAmount: '100000' }),
+      payload: wizard({ customerName: '状态校验正式客户', ecc: 'ECC-ADJ-001', region: '华北', contractAmount: '100000' }),
     });
     const formalId = projectIdOf(formal);
     expect(facade.v2ProjectDetail(formalId).project!.status).toBe('pending_execution');
@@ -208,7 +205,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     // 项目 A：无任何掉票历史 → 可取消
     const a = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '可取消客户', ecc: 'ECC-CANCEL-01', region: '西南', contractAmount: '50000', finalAmount: '50000', instrumentCount: 1 }),
+      payload: wizard({ customerName: '可取消客户', ecc: 'ECC-CANCEL-01', region: '西南', contractAmount: '50000', instrumentCount: 1 }),
     });
     const projectIdA = projectIdOf(a);
     facade.v2Mutate({ op: 'cancel_project', projectId: projectIdA, time: '2026-08-12', reason: '客户业务调整取消' });
@@ -221,7 +218,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     // 项目 B：登记掉票后 → 存在掉票历史 → 禁止取消
     const b = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '有掉票历史客户', ecc: 'ECC-CANCEL-02', region: '西南', contractAmount: '50000', finalAmount: '50000', instrumentCount: 1 }),
+      payload: wizard({ customerName: '有掉票历史客户', ecc: 'ECC-CANCEL-02', region: '西南', contractAmount: '50000', instrumentCount: 1 }),
     });
     const projectIdB = projectIdOf(b);
     facade.v2Mutate({ op: 'submit_action', projectId: projectIdB, action: { type: 'invoice', projectId: projectIdB, values: { invoicedAt: '2026-08-11', amount: '10000' } } });
@@ -239,7 +236,6 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
         customerName: '金额闭环客户',
         ecc: 'ECC-CLOSURE-01',
         contractAmount: '100000',
-        finalAmount: '100000',
         actualInstallDoneAt: '2026-08-08',
       }),
     });
@@ -271,23 +267,26 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     expect(invoiceSection?.rows).toHaveLength(1);
   });
 
-  it('6. 合同金额为 0 时：正式进单最终可确认金额必须大于 0；维修被限制', async () => {
+  it('6. 合同金额为 0 时：正式进单 final 保持 null；维修备件标记已使用被限制', async () => {
     const ctx = makeContext();
     dirs.push(ctx.dir);
     const facade = await ctx.init();
 
-    // 合同金额为 0 → 正式进单时最终可确认金额必须另行录入大于 0
-    expect(() =>
-      facade.v2Mutate({
-        op: 'create_project',
-        payload: wizard({ customerName: '零合同客户', ecc: 'ECC-ZERO-01', contractAmount: '0' }),
-      }),
-    ).toThrow(/最终可确认金额/);
+    // 合同金额为 0 → 正式进单成功、final 保持 null（不再强制另行录入）
+    const zeroCreated = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ customerName: '零合同客户', ecc: 'ECC-ZERO-01', contractAmount: '0', instrumentCount: 1 }),
+    });
+    const zeroProjectId = projectIdOf(zeroCreated);
+    const zeroDetail = facade.v2ProjectDetail(zeroProjectId).project!;
+    expect(zeroDetail.formallyEntered).toBe(true);
+    expect(zeroDetail.status).toBe('pending_execution');
+    expect(zeroDetail.finalAmount).toBeNull();
 
     // 合同金额 0 且已登记仪器：可登记损坏，但禁止标记备件已使用（TBD-15）
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '零合同维修客户', ecc: 'ECC-ZERO-02', contractAmount: '0', finalAmount: '5000', instrumentCount: 1 }),
+      payload: wizard({ customerName: '零合同维修客户', ecc: 'ECC-ZERO-02', contractAmount: '0', instrumentCount: 1 }),
     });
     const projectId = projectIdOf(created);
     facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'instrument', projectId, values: { name: '待修仪器', ups: false, qrRequested: false } } });
@@ -398,7 +397,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     const facade = await ctx.init();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '序列号地址客户', ecc: 'ECC-SERIAL-001', region: '华北', contractAmount: '30000', finalAmount: '30000', instrumentCount: 1 }),
+      payload: wizard({ customerName: '序列号地址客户', ecc: 'ECC-SERIAL-001', region: '华北', contractAmount: '30000', instrumentCount: 1 }),
     });
     const projectId = projectIdOf(created);
     // 登记带序列号的搬迁仪器（向导创建的仪器无序列号，需先补登序列号仪器）
@@ -475,7 +474,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     const facade = await ctx.init();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '报表客户', ecc: 'ECC-REPORT-001', contractAmount: '100000', finalAmount: '100000' }),
+      payload: wizard({ customerName: '报表客户', ecc: 'ECC-REPORT-001', contractAmount: '100000' }),
     });
     const projectId = projectIdOf(created);
     facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '40000' } } });

@@ -13,7 +13,11 @@ import type { BusinessDate } from '../../core/time';
 
 export interface SerialAddressUpdate {
   id: string;
-  instrumentId: string;
+  /**
+   * 关联搬迁仪器；独立保存（未传 instrumentId 的历史导入/手工登记）时为 null。
+   * 绝不输出字符串 "null"。
+   */
+  instrumentId: string | null;
   customerName: string;
   newSiteAddress: string;
   serialNo: string;
@@ -31,7 +35,7 @@ export interface SerialAddressUpdate {
 export interface SerialAddressUpdateInput {
   customerName: string;
   newSiteAddress: string;
-  /** 非空且与登记的搬迁仪器序列号一致。 */
+  /** 非空；传 instrumentId 时须与登记搬迁仪器序列号一致（独立保存时不校验）。 */
   serialNo: string;
   /** Account ID（非空）。 */
   accountId: string;
