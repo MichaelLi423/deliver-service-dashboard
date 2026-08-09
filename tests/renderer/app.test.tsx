@@ -215,6 +215,58 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(within(dialog).getByLabelText(/型号/)).toHaveValue('');
   });
 
+  it('新建向导补齐联系人和开单信息，并在第四步汇总后提交所选保存路径', async () => {
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    await screen.findByRole('heading', { name: /高密项目队列/ });
+    fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
+    const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
+
+    expect(within(dialog).getByLabelText(/进单时间/)).not.toHaveValue('');
+    fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '向导客户' } });
+    fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: '华东' } });
+    fireEvent.change(within(dialog).getByLabelText(/进单时间/), { target: { value: '2026-08-09T09:30' } });
+    fireEvent.change(within(dialog).getByLabelText(/旧址联系人/), { target: { value: '旧址王工' } });
+    fireEvent.change(within(dialog).getByLabelText(/新址联系人/), { target: { value: '新址李工' } });
+    fireEvent.change(within(dialog).getByLabelText(/合同 USD 含税金额/), { target: { value: '120000' } });
+    fireEvent.change(within(dialog).getByLabelText(/合同开始日期/), { target: { value: '2026-08-01' } });
+    fireEvent.change(within(dialog).getByLabelText(/合同截止日期/), { target: { value: '2027-07-31' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '下一步' }));
+
+    fireEvent.change(within(dialog).getByLabelText(/旧址地址/), { target: { value: '旧址 A' } });
+    fireEvent.change(within(dialog).getByLabelText(/新址地址/), { target: { value: '新址 B' } });
+    fireEvent.change(within(dialog).getByLabelText(/仪器名称/), { target: { value: '质谱仪' } });
+    fireEvent.change(within(dialog).getByLabelText(/型号/), { target: { value: 'MS-9' } });
+    fireEvent.change(within(dialog).getByLabelText('UPS'), { target: { value: 'true' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '下一步' }));
+
+    const orderNo = within(dialog).getByLabelText(/服务单号/);
+    const engineers = within(dialog).getByLabelText(/参与工程师/);
+    expect(orderNo).toHaveAccessibleDescription(/同次创建/);
+    expect(engineers).toHaveAccessibleDescription(/必须补齐/);
+    fireEvent.change(orderNo, { target: { value: 'SO-WIZ-001' } });
+    fireEvent.change(engineers, { target: { value: '工程师甲、乙' } });
+    fireEvent.change(within(dialog).getByLabelText(/开单备注/), { target: { value: '现场提前联系' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '下一步' }));
+
+    expect(within(dialog).getByRole('heading', { name: '录入摘要' })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('向导客户 / 华东');
+    expect(dialog).toHaveTextContent('旧址王工 / 新址李工');
+    expect(dialog).toHaveTextContent('SO-WIZ-001 · 工程师甲、乙');
+    expect(within(dialog).getByRole('button', { name: /保存为待进单.*项目保持待进单/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /未进单先执行.*经理批复/ })).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/^ECC/), { target: { value: 'ECC-WIZ-001' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /正式进单.*校验 ECC/ }));
+
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({
+      op: 'create_project',
+      payload: expect.objectContaining({
+        intent: 'formal', customerName: '向导客户', entryAt: '2026-08-09T09:30',
+        oldSiteContact: '旧址王工', newSiteContact: '新址李工', serviceOrderNo: 'SO-WIZ-001',
+        engineers: '工程师甲、乙', serviceOrderNote: '现场提前联系', ecc: 'ECC-WIZ-001',
+      }),
+    })));
+  });
+
   it('快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单', async () => {
     render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
     const labels = ['搬迁批次', '搬迁仪器', '上门活动', '开单记录', '实际物流费用', '验收报告', '掉票', 'Ship-to 申请', '损坏/维修事项', '补齐进单核心资料'];

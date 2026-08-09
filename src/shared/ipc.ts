@@ -753,6 +753,7 @@ export interface ProjectWizardPayload {
   actualInstallDoneAt?: string;
   serviceOrderNo?: string;
   engineers?: string;
+  serviceOrderNote?: string;
   approvalReason?: string;
   missingItems?: string;
 }

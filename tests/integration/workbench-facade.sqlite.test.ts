@@ -69,12 +69,19 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         instrumentName: '质谱仪',
         model: 'MS-1',
         ups: true,
+        oldSiteContact: '旧址王工',
+        newSiteContact: '新址李工',
+        serviceOrderNo: 'SO-WIZ-001',
+        engineers: '工程师甲、乙',
+        serviceOrderNote: '现场提前联系',
       }),
     });
     const projectId = projectIdOf(created);
     let detail = facade.v2ProjectDetail(projectId).project!;
     expect(detail.formallyEntered).toBe(true);
     expect(detail.ecc).toBe('ECC-UI-001');
+    expect(facade.v2ProjectDetail(projectId).detail).toMatchObject({ oldSiteContact: '旧址王工', newSiteContact: '新址李工' });
+    expect(facade.v2SectionPage({ projectId, kind: 'orders' }).rows[0]).toMatchObject({ serviceOrderNo: 'SO-WIZ-001', engineer: '工程师甲、乙', note: '现场提前联系' });
     facade.v2Mutate({ op: 'set_reminder', projectId, reminderAt: '2026-08-09T09:00:00+08:00', reminderNote: '确认运输安排' });
     expect(facade.v2ProjectDetail(projectId).project!.reminderNote).toBe('确认运输安排');
     facade.v2Mutate({

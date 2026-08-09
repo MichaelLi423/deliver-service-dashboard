@@ -256,7 +256,7 @@ export class WorkbenchFacade {
       }
       if (input.serviceOrderNo) {
         if (!input.engineers?.trim()) throw new Error('填写服务单号时参与工程师必填；项目与开单均未保存');
-        new ServiceOrderService(this.orders, this.projects).recordOrder({ orderType:'relocation', serviceOrderNo:input.serviceOrderNo, engineer:input.engineers, customerName:input.customerName, projectId:project.id }, actor);
+        new ServiceOrderService(this.orders, this.projects).recordOrder({ orderType:'relocation', serviceOrderNo:input.serviceOrderNo, engineer:input.engineers, customerName:input.customerName, projectId:project.id, note:input.serviceOrderNote }, actor);
       }
       if (input.intent === 'pre_entry_execution') projectService.setPreEntryExecution(project.id, { reason:input.approvalReason ?? '', missingItems:input.missingItems ?? '' });
       if (input.intent === 'formal') projectService.formalEntry(project.id, { ecc:input.ecc ?? '', entryAt:input.entryAt ? new Date(input.entryAt).toISOString() : undefined, finalConfirmableAmountCents: (input.finalAmount ?? '') === '' ? undefined : parseAmountInput(input.finalAmount) });

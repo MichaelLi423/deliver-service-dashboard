@@ -2518,7 +2518,9 @@ function ProjectCreateForm({
   onSave: (payload: ProjectWizardPayload) => Promise<void>;
 }): JSX.Element {
   const [step, setStep] = useState(1);
-  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [draft, setDraft] = useState<Record<string, string>>(() => ({
+    entryAt: localDateTime(new Date().toISOString()),
+  }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   function collect(form: HTMLFormElement): Record<string, string> {
@@ -2538,6 +2540,10 @@ function ProjectCreateForm({
     }
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const intent = (submitter?.value || "formal") as ProjectWizardPayload["intent"];
+    if (values.serviceOrderNo?.trim() && !values.engineers?.trim()) {
+      setError("已填写服务单号，请先补齐参与工程师；项目与开单均未保存。");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -2547,6 +2553,8 @@ function ProjectCreateForm({
         ecc: values.ecc,
         entryAt: values.entryAt,
         region: values.region || "",
+        oldSiteContact: values.oldSiteContact,
+        newSiteContact: values.newSiteContact,
         contractStartDate: values.contractStartDate || "",
         contractEndDate: values.contractEndDate || "",
         oldSiteAddress: values.oldSiteAddress || "",
@@ -2560,6 +2568,9 @@ function ProjectCreateForm({
         planTransportAt: values.planTransportAt,
         siteConfirmed: values.siteConfirmed === "on",
         actualInstallDoneAt: values.actualInstallDoneAt,
+        serviceOrderNo: values.serviceOrderNo,
+        engineers: values.engineers,
+        serviceOrderNote: values.serviceOrderNote,
         approvalReason: values.approvalReason,
         missingItems: values.missingItems,
       });
@@ -2603,6 +2614,16 @@ function ProjectCreateForm({
               defaultValue={draft.region}
               required
             />
+            <Field
+              name="entryAt"
+              label="进单时间"
+              type="datetime-local"
+              defaultValue={draft.entryAt}
+              optional
+              help="正式进单统计口径；默认当前时间，可补录或修正，待进单时可留空。"
+            />
+            <Field name="oldSiteContact" label="旧址联系人" defaultValue={draft.oldSiteContact} optional />
+            <Field name="newSiteContact" label="新址联系人" defaultValue={draft.newSiteContact} optional />
             <Field
               name="contractAmount"
               label="合同 USD 含税金额"
@@ -2689,39 +2710,77 @@ function ProjectCreateForm({
               />
               现场条件已确认
             </label>
+            <Field
+              name="serviceOrderNo"
+              label="服务单号"
+              defaultValue={draft.serviceOrderNo}
+              optional
+              help="填写后参与工程师必填；项目与搬迁开单将同次创建。"
+            />
+            <Field
+              name="engineers"
+              label="参与工程师"
+              defaultValue={draft.engineers}
+              optional
+              help="填写服务单号时必须补齐，可填写多名工程师。"
+            />
+            <TextArea
+              name="serviceOrderNote"
+              label="开单备注"
+              defaultValue={draft.serviceOrderNote}
+              optional
+              help="可后补；开单时间默认当前时间。"
+            />
           </>
         ) : (
-          <>
-            <Field name="ecc" label="ECC" defaultValue={draft.ecc} optional help="正式进单前必须补齐 ECC。" />
-            <Field
-              name="entryAt"
-              label="进单时间"
-              type="datetime-local"
-              defaultValue={draft.entryAt}
-              optional
-              help="正式进单时未填写则由系统取当前时间。"
-            />
-            <Field
-              name="finalAmount"
-              label="最终可确认金额（USD）"
-              type="number"
-              step="0.01"
-              defaultValue={draft.finalAmount}
-              optional
-            />
-            <Field
-              name="approvalReason"
-              label="经理批复原因"
-              defaultValue={draft.approvalReason}
-              optional
-            />
-            <Field
-              name="missingItems"
-              label="缺失资料"
-              defaultValue={draft.missingItems}
-              optional
-            />
-          </>
+          <div className="wizard-review full">
+            <div className="wizard-section-head">
+              <div>
+                <h3 id="wizard-summary-title">录入摘要</h3>
+                <p>提交前核对本次项目、执行准备与开单信息。</p>
+              </div>
+              <span>第 4 步 / 共 4 步</span>
+            </div>
+            <dl className="summary-grid" aria-labelledby="wizard-summary-title">
+              {[
+                ["客户 / 区域", `${draft.customerName || "待补"} / ${draft.region || "待补"}`],
+                ["进单时间", draft.entryAt || "待进单时可留空"],
+                ["旧址 / 新址联系人", `${draft.oldSiteContact || "待补"} / ${draft.newSiteContact || "待补"}`],
+                ["合同日期", `${draft.contractStartDate || "待补"} 至 ${draft.contractEndDate || "待补"}`],
+                ["搬迁地址", `${draft.oldSiteAddress || "待补"} → ${draft.newSiteAddress || "待补"}`],
+                ["搬迁仪器", `${draft.instrumentName || "待补"}${draft.model ? ` · ${draft.model}` : ""} · UPS ${draft.ups === "true" ? "是" : "否"}`],
+                ["计划安排", `上门 ${draft.planVisitAt || "待补"} · 运输 ${draft.planTransportAt || "待补"}`],
+                ["实际装机完成", draft.actualInstallDoneAt || "未记录"],
+                ["场地确认", draft.siteConfirmed === "on" ? "已确认" : "未确认"],
+                ["服务单", draft.serviceOrderNo ? `${draft.serviceOrderNo} · ${draft.engineers || "缺工程师"}` : "未填写，不创建开单"],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="confirm-fields form-grid" aria-label="确认方式补充资料">
+              <Field name="ecc" label="ECC" defaultValue={draft.ecc} optional help="正式进单前必须补齐 ECC。" />
+              <Field name="finalAmount" label="最终可确认金额（USD）" type="number" step="0.01" defaultValue={draft.finalAmount} optional />
+              <Field name="approvalReason" label="经理批复原因" defaultValue={draft.approvalReason} optional />
+              <Field name="missingItems" label="缺失资料" defaultValue={draft.missingItems} optional />
+            </div>
+            <div className="save-paths" aria-label="保存路径">
+              <button name="intent" value="draft" disabled={busy}>
+                <strong>保存为待进单</strong>
+                <span>保存当前资料，项目保持待进单。</span>
+              </button>
+              <button name="intent" value="pre_entry_execution" disabled={busy}>
+                <strong>未进单先执行</strong>
+                <span>记录经理批复，主状态仍保持待进单。</span>
+              </button>
+              <button className="primary-path" name="intent" value="formal" disabled={busy}>
+                <strong>正式进单</strong>
+                <span>校验 ECC、进单时间、合同与搬迁范围。</span>
+              </button>
+            </div>
+          </div>
         )}
       </div>
       {error && (
@@ -2741,11 +2800,7 @@ function ProjectCreateForm({
         {step < 4 ? (
           <button className="button primary" disabled={busy}>下一步</button>
         ) : (
-          <div className="row-actions">
-            <button className="button" name="intent" value="draft" disabled={busy}>保存为待进单</button>
-            <button className="button" name="intent" value="pre_entry_execution" disabled={busy}>未进单先执行</button>
-            <button className="button primary" name="intent" value="formal" disabled={busy}>正式进单</button>
-          </div>
+          <span>选择上方一种保存路径；提交时继续执行现有业务校验。</span>
         )}
       </div>
     </form>
@@ -3181,6 +3236,27 @@ function Select({
           </option>
         ))}
       </select>
+      {help && <small id={helpId}>{help}</small>}
+    </div>
+  );
+}
+function TextArea({
+  name,
+  label,
+  optional = false,
+  help,
+  ...props
+}: {
+  name: string;
+  label: string;
+  optional?: boolean;
+  help?: string;
+} & React.TextareaHTMLAttributes<HTMLTextAreaElement>): JSX.Element {
+  const helpId = help ? `v2-${name}-help` : undefined;
+  return (
+    <div className="field full">
+      <label htmlFor={`v2-${name}`}>{label} {optional ? <em>可后补</em> : null}</label>
+      <textarea id={`v2-${name}`} name={name} aria-describedby={helpId} {...props} />
       {help && <small id={helpId}>{help}</small>}
     </div>
   );
