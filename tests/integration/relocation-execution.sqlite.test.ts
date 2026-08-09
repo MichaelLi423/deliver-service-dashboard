@@ -262,7 +262,7 @@ describe('relocation-execution SQLite 集成（3.11）', () => {
       expect(() =>
         ctx.db.prepare(
           'INSERT INTO logistics_fees (id, batch_id, applied_at, budget_price_cents, deal_price_cents, logistics_cost_cents, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
-        ).run('f-dup', batch.id, '2026-08-07T00:00:00+08:00', 10000, 12000, 11000, 't', 't'),
+        ).run('f-dup', batch.id, '2026-08-07', 10000, 12000, 11000, 't', 't'),
       ).toThrow();
       closeDatabase(ctx.db);
     } finally {

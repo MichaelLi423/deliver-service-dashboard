@@ -115,18 +115,18 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
       // 已发生的上门活动与物流费用记录
       db.prepare(
         'INSERT INTO activities (id, project_id, visit_at, created_at, updated_at) VALUES (?,?,?,?,?)',
-      ).run('act-1', projectId, '2026-07-20T09:00:00+08:00', 't', 't');
+      ).run('act-1', projectId, '2026-07-20', 't', 't');
       db.prepare(
         'INSERT INTO batches (id, project_id, plan_transport_date, created_at, updated_at) VALUES (?,?,?,?,?)',
       ).run('batch-1', projectId, '2026-07-21', 't', 't');
       db.prepare(
         'INSERT INTO logistics_fees (id, batch_id, applied_at, budget_price_cents, deal_price_cents, logistics_cost_cents, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
-      ).run('fee-1', 'batch-1', '2026-07-21T00:00:00+08:00', 10000, 11000, 10500, 't', 't');
+      ).run('fee-1', 'batch-1', '2026-07-21', 10000, 11000, 10500, 't', 't');
 
       // 存在掉票记录 → 禁止取消
       db.prepare(
         'INSERT INTO invoices (id, project_id, amount_cents, invoiced_at, last_modified_at, created_at) VALUES (?,?,?,?,?,?)',
-      ).run('inv-1', projectId, 500000, '2026-08-01T00:00:00+08:00', 't', 't');
+      ).run('inv-1', projectId, 500000, '2026-08-01', 't', 't');
       expect(() =>
         service.cancelProject(projectId, {
           time: '2026-08-07',
@@ -136,7 +136,7 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
 
       // 撤销掉票（终态）后仍存在掉票历史 → 仍禁止取消（含已撤销）
       db.prepare('UPDATE invoices SET revoked_at = ?, revoke_reason = ? WHERE id = ?').run(
-        '2026-08-02T00:00:00+08:00',
+        '2026-08-02',
         '撤销',
         'inv-1',
       );

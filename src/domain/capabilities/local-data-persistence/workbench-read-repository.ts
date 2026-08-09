@@ -36,7 +36,7 @@ import { toBigInt } from './repositories';
  * - 禁止全量 listAll 与 JS P×C：计数经 IN(页内 id) 的有界聚合，金额经 BigInt 读取。
  *
  * 提醒到期分类与现有纯函数 classifyReminder 完全同口径：每条仅 O(1) 计算，
- * 过滤/排序在 SQL 中按 substr(reminder_at,1,10)（本地偏移 ISO 的日历日期）完成。
+ * 过滤/排序在 SQL 中按 reminder_at 的日期部分（业务日期 yyyy-mm-dd，D30）完成。
  */
 
 const STAGE_STATUSES: ProjectStatus[] = [

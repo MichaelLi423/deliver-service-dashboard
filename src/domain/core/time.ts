@@ -85,7 +85,7 @@ export function monthOfIso(iso: IsoDateTime): MonthKey {
   return toMonthKey(toBusinessDate(iso));
 }
 
-/** 校验 ISO 时间非空且格式合法（业务时间必填校验辅助）。 */
+/** 校验审计/技术 ISO 时间非空且格式合法（审计时间、系统记录时间校验辅助；业务日期见 assertValidBusinessDate）。 */
 export function assertValidIso(iso: string | null | undefined, fieldName: string): void {
   if (iso === null || iso === undefined || iso === '') {
     throw new ValidationError('REQUIRED_FIELD', `${fieldName} 必填`);

@@ -75,19 +75,19 @@ describe('初始 schema（tasks 1.9）：覆盖 14 能力核心表/事实表与�
       const { db } = bootstrapDatabase({ dataDir: dir });
       db.prepare(
         'INSERT INTO service_orders (id, order_type, service_order_no, ordered_at, engineer, customer_name, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
-      ).run('o1', 'relocation', 'ORD-001', '2026-08-07T10:00:00+08:00', '工程师甲', '华东医药', 't', 't');
+      ).run('o1', 'relocation', 'ORD-001', '2026-08-07', '工程师甲', '华东医药', 't', 't');
       // 另一业务类型共用同一唯一空间
       expect(() =>
         db
           .prepare(
             'INSERT INTO service_orders (id, order_type, service_order_no, ordered_at, engineer, customer_name, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
           )
-          .run('o2', 'pm', 'ORD-001', '2026-08-07T10:00:00+08:00', '工程师乙', '华北医药', 't', 't'),
+          .run('o2', 'pm', 'ORD-001', '2026-08-07', '工程师乙', '华北医药', 't', 't'),
       ).toThrow();
       // 多个空服务单号允许
       db.prepare(
         'INSERT INTO service_orders (id, order_type, service_order_no, ordered_at, engineer, customer_name, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
-      ).run('o3', 'pm', null, '2026-08-07T10:00:00+08:00', '工程师乙', '华北医药', 't', 't');
+      ).run('o3', 'pm', null, '2026-08-07', '工程师乙', '华北医药', 't', 't');
       closeDatabase(db);
     } finally {
       cleanupTempDir(dir);
@@ -171,13 +171,13 @@ describe('初始 schema（tasks 1.9）：覆盖 14 能力核心表/事实表与�
       ).run('b1', 'p1', 't', 't');
       db.prepare(
         'INSERT INTO logistics_fees (id, batch_id, applied_at, budget_price_cents, deal_price_cents, logistics_cost_cents, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
-      ).run('f1', 'b1', '2026-07-15T00:00:00+08:00', 10000, 12000, 11000, 't', 't');
+      ).run('f1', 'b1', '2026-07-15', 10000, 12000, 11000, 't', 't');
       expect(() =>
         db
           .prepare(
             'INSERT INTO logistics_fees (id, batch_id, applied_at, budget_price_cents, deal_price_cents, logistics_cost_cents, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
           )
-          .run('f2', 'b1', '2026-08-01T00:00:00+08:00', 10000, 12000, 11000, 't', 't'),
+          .run('f2', 'b1', '2026-08-01', 10000, 12000, 11000, 't', 't'),
       ).toThrow();
       closeDatabase(db);
     } finally {

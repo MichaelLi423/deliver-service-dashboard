@@ -18,7 +18,7 @@ function project(index: number): WorkbenchProjectRow {
     id: `p-${index}`, tempNo: `TMP-${String(index).padStart(6, '0')}`, ecc: `ECC-${String(index).padStart(6, '0')}`,
     customerName: `客户 ${index}`, status: index % 2 ? 'executing' : 'pending_entry', formallyEntered: index % 2 === 1,
     preEntryExecution: index % 2 === 0, region: index % 2 ? '华东' : '华北', entryAt: null,
-    reminderAt: index < 3 ? '2026-08-08T09:00:00+08:00' : null, reminderNote: index < 3 ? `提醒 ${index}` : null,
+    reminderAt: index < 3 ? '2026-08-08' : null, reminderNote: index < 3 ? `提醒 ${index}` : null,
     reminderDueClass: index < 3 ? 'today' : null, finalAmount: '100000.00', invoicedAmount: '40000.00', contractAmount: '110000.00',
     counts: { batches: 1, instruments: 1, activities: 1, orders: 1, repairs: 0 }, nonBlocking: { pendingShipTo: 0, qrUnmarked: 0, repairs: 0 },
     updatedAt: '2026-08-08T08:00:00+08:00',
@@ -52,7 +52,7 @@ function section(kind: WorkbenchV2SectionPageDto['kind'], projectId = 'p-1'): Wo
     : kind === 'batches'
       ? [{ kind: 'batches' as const, id: 'batch-1', projectId, planTransportDate: '2026-08-18', transportCompany: '华东运输', originalPrice: '1000.00', discountedPrice: '900.00', startedAt: null, createdAt: '2026-08-08T00:00:00Z' }]
       : kind === 'invoices'
-        ? [{ kind: 'invoices' as const, id: 'inv-1', projectId, amount: '40000.00', invoicedAt: '2026-08-08T00:00:00Z', active: true, revokedAt: null, revokeReason: null, lastModifiedAt: '2026-08-08T00:00:00Z', createdAt: '2026-08-08T00:00:00Z' }]
+        ? [{ kind: 'invoices' as const, id: 'inv-1', projectId, amount: '40000.00', invoicedAt: '2026-08-08', active: true, revokedAt: null, revokeReason: null, lastModifiedAt: '2026-08-08T00:00:00Z', createdAt: '2026-08-08T00:00:00Z' }]
         : [];
   return { businessRevision: 1, kind, projectId, rows, total: rows.length, nextCursor: null, limit: 50 };
 }
@@ -450,8 +450,8 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('二维码申请列表展示去重类型与工作量列，重复申请独立保留', async () => {
     const rows: WorkbenchV2IndependentRow[] = [
-      { kind: 'qr_request', id: 'qr-1', applicant: '负责人甲', requestedAt: '2026-08-01T09:00:00+08:00', types: ['A', 'logistics_management'], workload: 2, createdAt: '2026-08-01T09:00:00+08:00' },
-      { kind: 'qr_request', id: 'qr-2', applicant: '负责人乙', requestedAt: '2026-08-02T10:00:00+08:00', types: ['precise_instrument_packing_only', 'oem_equipment', 'temporary_label'], workload: 3, createdAt: '2026-08-02T10:00:00+08:00' },
+      { kind: 'qr_request', id: 'qr-1', applicant: '负责人甲', requestedAt: '2026-08-01', types: ['A', 'logistics_management'], workload: 2, createdAt: '2026-08-01T09:00:00+08:00' },
+      { kind: 'qr_request', id: 'qr-2', applicant: '负责人乙', requestedAt: '2026-08-02', types: ['precise_instrument_packing_only', 'oem_equipment', 'temporary_label'], workload: 3, createdAt: '2026-08-02T10:00:00+08:00' },
     ];
     const api = mockApi({ v2IndependentPage: vi.fn().mockResolvedValue({ businessRevision: 1, kind: 'qr_request', rows, total: 2, nextCursor: null, limit: 50 }) });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
@@ -481,7 +481,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     loaded.detail = {
       ...loaded.detail!, contractStartDate: '2026-01-01', contractEndDate: '2026-12-31',
       oldSiteContact: '旧址王工', newSiteContact: '新址李工', oldSiteAddress: '旧址 A', newSiteAddress: '新址 B',
-      planVisitAt: '2026-08-10T09:00:00+08:00', planTransportAt: '2026-08-11T10:00:00+08:00', siteConfirmed: true,
+      planVisitAt: '2026-08-10', planTransportAt: '2026-08-11', siteConfirmed: true,
     };
     let detailReads = 0;
     let resolveMutation!: (value: { businessRevision: number; invalidated: string[]; changed: { projectId: string } }) => void;
@@ -525,7 +525,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('正式进单项目谨慎更正进单合同资料，预填金额并在错误时保留表单反馈', async () => {
-    const row = { ...project(1), entryAt: '2026-08-01T08:30:00+08:00', contractAmount: '0.00', finalAmount: '125000.50' };
+    const row = { ...project(1), entryAt: '2026-08-01', contractAmount: '0.00', finalAmount: '125000.50' };
     const api = mockApi({
       v2ProjectPage: vi.fn().mockResolvedValue(page([row], null, 1)),
       v2ProjectDetail: vi.fn().mockResolvedValue(detailOf(row)),
@@ -574,7 +574,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
         ...overview,
         reminderPreview: [{
           projectId: 'p-51', customerName: '跨页客户', ecc: 'ECC-000051', tempNo: 'TMP-000051',
-          reminderAt: '2026-08-08T09:00:00+08:00', reminderNote: '跨页提醒', reminderDueClass: 'today' as const,
+          reminderAt: '2026-08-08', reminderNote: '跨页提醒', reminderDueClass: 'today' as const,
         }],
       }),
       // 新筛选（ECC-000051）下项目不在当前页，用于复现 detail 为空且 selectedId 不在页内时面板消失。

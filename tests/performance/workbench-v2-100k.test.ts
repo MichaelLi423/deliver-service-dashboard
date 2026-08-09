@@ -45,6 +45,8 @@ function makeCtx(): Ctx {
 async function seedBulk(db: DatabaseSync, projectCount = 100_000): Promise<void> {
   const stamp = (day: number, hour: number, minute = 0, second = 0): string =>
     `2026-08-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}+08:00`;
+  // 业务日期（yyyy-mm-dd）：业务时间字段一律业务日期（design D30），审计/技术字段保持 stamp 精确 ISO。
+  const bday = (day: number): string => `2026-08-${String(day).padStart(2, '0')}`;
 
   db.exec('BEGIN');
   const insertProject = db.prepare(
@@ -97,7 +99,7 @@ async function seedBulk(db: DatabaseSync, projectCount = 100_000): Promise<void>
     `INSERT INTO activities (id, project_id, visit_at, created_at, updated_at) VALUES (?,?,?,?,?)`,
   );
   for (let i = 0; i < 5_000; i++) {
-    insertActivity.run(`bulk-a-${i}`, `bulk-p-${(i * 7) % projectCount}`, stamp((i % 28) + 1, i % 24), stamp(1, 1), stamp(1, 1));
+    insertActivity.run(`bulk-a-${i}`, `bulk-p-${(i * 7) % projectCount}`, bday((i % 28) + 1), stamp(1, 1), stamp(1, 1));
   }
 
   const insertInvoice = db.prepare(
@@ -109,8 +111,8 @@ async function seedBulk(db: DatabaseSync, projectCount = 100_000): Promise<void>
       `bulk-inv-${i}`,
       `bulk-p-${(i * 3) % projectCount}`,
       String((i % 1000) + 1),
-      stamp((i % 28) + 1, i % 24),
-      i % 5 === 0 ? stamp((i % 28) + 1, 23) : null, // 20% 已撤销（活跃索引路径）
+      bday((i % 28) + 1),
+      i % 5 === 0 ? bday((i % 28) + 1) : null, // 20% 已撤销（活跃索引路径）
       stamp(1, 1),
       stamp(1, 1),
     );
@@ -129,7 +131,7 @@ async function seedBulk(db: DatabaseSync, projectCount = 100_000): Promise<void>
      VALUES (?,?,?,?,?,?,?)`,
   );
   for (let i = 0; i < 5_000; i++) {
-    insertDamage.run(`bulk-d-${i}`, `bulk-i-${i}`, `bulk-p-${i}`, i % 3 === 0 ? 'processing' : 'repaired', stamp(1, 1), stamp(1, 1), stamp(1, 1));
+    insertDamage.run(`bulk-d-${i}`, `bulk-i-${i}`, `bulk-p-${i}`, i % 3 === 0 ? 'processing' : 'repaired', bday((i % 28) + 1), stamp(1, 1), stamp(1, 1));
   }
 
   const insertSerial = db.prepare(
@@ -137,14 +139,14 @@ async function seedBulk(db: DatabaseSync, projectCount = 100_000): Promise<void>
      VALUES (?,?,?,?,?,?,?,?)`,
   );
   for (let i = 0; i < 1_000; i++) {
-    insertSerial.run(`bulk-s-${i}`, `bulk-i-${i * 10}`, `批量客户${i % 100}`, `新址${i % 100}`, `SN-BULK-${i * 10}`, `ACC-BULK-${i}`, stamp(1, 1), stamp(1, 1));
+    insertSerial.run(`bulk-s-${i}`, `bulk-i-${i * 10}`, `批量客户${i % 100}`, `新址${i % 100}`, `SN-BULK-${i * 10}`, `ACC-BULK-${i}`, bday((i % 28) + 1), stamp(1, 1));
   }
 
   const insertQr = db.prepare(
     `INSERT INTO qr_requests (id, applicant, requested_at, created_at) VALUES (?,?,?,?)`,
   );
   for (let i = 0; i < 1_000; i++) {
-    insertQr.run(`bulk-q-${i}`, `申请人${i % 100}`, stamp(1, 1), stamp(1, 1));
+    insertQr.run(`bulk-q-${i}`, `申请人${i % 100}`, bday((i % 28) + 1), stamp(1, 1));
   }
   const insertQrType = db.prepare(
     `INSERT INTO qr_request_types (id, qr_request_id, type_code) VALUES (?,?,?)`,
@@ -316,10 +318,10 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
        VALUES (?,?,?,?,?,?,?,?)`,
     );
     const reminderCases: Array<[string, string | null]> = [
-      ['perf-rem-overdue', '2026-08-07T09:00:00+08:00'],
-      ['perf-rem-today', '2026-08-08T09:00:00+08:00'],
-      ['perf-rem-upcoming', '2026-08-10T09:00:00+08:00'],
-      ['perf-rem-outside', '2026-08-16T09:00:00+08:00'],
+      ['perf-rem-overdue', '2026-08-07'],
+      ['perf-rem-today', '2026-08-08'],
+      ['perf-rem-upcoming', '2026-08-10'],
+      ['perf-rem-outside', '2026-08-16'],
     ];
     for (const [id, at] of reminderCases) {
       insertReminder.run(id, `TP-${id}`, 'pending_entry', '华东', at, '边界提醒', 't', '2026-08-01T00:00:00+08:00');

@@ -262,7 +262,7 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
       // 提交时间取固定时钟（2026-08-07）；归入 7 月口径（首次实际提交时间）
       ctx.db
         .prepare('UPDATE ship_to_requests SET submitted_at = ? WHERE id = ?')
-        .run('2026-07-05T10:00:00+08:00', shipToReq.id);
+        .run('2026-07-05', shipToReq.id);
 
       ctx.qrService.createRequest({ applicant: '负责人甲', requestedAt: '2026-07-08', types: ['A', 'A', 'B'] }, ACTOR);
       ctx.serialService.register(instrumentId, { customerName: '华东医药', newSiteAddress: '新址A', serialNo: 'SN-100', accountId: 'ACC-001', updatedAt: '2026-07-09' }, ACTOR);
@@ -509,8 +509,8 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
       ctx.shipToService.submit(sA.id, ACTOR);
       const sB = ctx.shipToService.createRequest({ customerName: '华北医药', newSiteAddress: '新址B' }, ACTOR_B);
       ctx.shipToService.submit(sB.id, ACTOR_B);
-      ctx.db.prepare('UPDATE ship_to_requests SET submitted_at = ? WHERE id = ?').run('2026-07-05T10:00:00+08:00', sA.id);
-      ctx.db.prepare('UPDATE ship_to_requests SET submitted_at = ? WHERE id = ?').run('2026-07-06T10:00:00+08:00', sB.id);
+      ctx.db.prepare('UPDATE ship_to_requests SET submitted_at = ? WHERE id = ?').run('2026-07-05', sA.id);
+      ctx.db.prepare('UPDATE ship_to_requests SET submitted_at = ? WHERE id = ?').run('2026-07-06', sB.id);
 
       // 二维码：两位责任人各一条
       ctx.qrService.createRequest({ applicant: '负责人甲', requestedAt: '2026-07-08', types: ['A', 'A', 'B'] }, ACTOR);

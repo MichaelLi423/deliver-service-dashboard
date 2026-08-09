@@ -22,7 +22,8 @@ import type { DatabaseSync } from 'node:sqlite';
  * - Account ID 全局唯一（Ship-to 创建后不可修改）：ship_tos.account_id 唯一索引。
  * - 每批次仅一笔实际物流费用：logistics_fees.batch_id UNIQUE。
  *
- * 金额一律以分整数（INTEGER）物理表示；时间以带偏移 ISO 字符串（TEXT）表示。
+ * 金额一律以分整数（INTEGER）物理表示；业务日期字段一律 yyyy-mm-dd（TEXT，design D30），
+ * 审计/技术时间（created_at/updated_at/last_modified_at 等）以带偏移 ISO 字符串（TEXT）表示。
  * 可空的外键在导入/占位场景（如迁移导入、账号归属缺失）允许为 NULL。
  */
 export function applyInitialSchema(db: DatabaseSync): void {

@@ -116,7 +116,7 @@ describe('schema v12：查询计划实际使用索引（Oracle #10 有界读取�
         `TP-${String(i).padStart(4, '0')}`,
         i % 3 === 0 ? 'pending_execution' : i % 3 === 1 ? 'executing' : 'pending_acceptance',
         i % 2 === 0 ? '华东' : '华北',
-        i % 5 === 0 ? `2026-08-${String((i % 28) + 1).padStart(2, '0')}T09:00:00+08:00` : null,
+        i % 5 === 0 ? `2026-08-${String((i % 28) + 1).padStart(2, '0')}` : null,
         `2026-01-01T00:00:00+08:00`,
         `2026-08-${String((i % 28) + 1).padStart(2, '0')}T${String((i % 24)).padStart(2, '0')}:00:00+08:00`,
       );
@@ -140,7 +140,7 @@ describe('schema v12：查询计划实际使用索引（Oracle #10 有界读取�
        VALUES (?,?,?,?,?,?)`,
     );
     for (let i = 0; i < 40; i++) {
-      insertInvoice.run(`inv-${i}`, 'p-multi', 100000, '2026-08-01T00:00:00+08:00', '2026-08-01T00:00:00+08:00', `2026-08-${String((i % 28) + 1).padStart(2, '0')}T00:00:00+08:00`);
+      insertInvoice.run(`inv-${i}`, 'p-multi', 100000, '2026-08-01', '2026-08-01T00:00:00+08:00', `2026-08-${String((i % 28) + 1).padStart(2, '0')}T00:00:00+08:00`);
     }
     db.exec('COMMIT');
   }

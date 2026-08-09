@@ -306,7 +306,7 @@ describe('schema v10：业务修订功能（facade/仓储/直接 SQL 写入均�
           insert: 'INSERT INTO batch_change_history (id, instrument_id, changed_at, created_at) VALUES (?,?,?,?)',
           insertArgs: ['t-batch_change_history', 'i1', 't', 't'],
           update: 'UPDATE batch_change_history SET changed_at = ? WHERE id = ?',
-          updateArgs: ['2026-08-01T00:00:00+08:00', 't-batch_change_history'],
+          updateArgs: ['2026-08-01', 't-batch_change_history'],
           del: 'DELETE FROM batch_change_history WHERE id = ?',
         },
         {
@@ -314,7 +314,7 @@ describe('schema v10：业务修订功能（facade/仓储/直接 SQL 写入均�
           insert: 'INSERT INTO activities (id, project_id, created_at, updated_at) VALUES (?,?,?,?)',
           insertArgs: ['t-activities', 'p1', 't', 't'],
           update: 'UPDATE activities SET visit_at = ? WHERE id = ?',
-          updateArgs: ['2026-08-01T00:00:00+08:00', 't-activities'],
+          updateArgs: ['2026-08-01', 't-activities'],
           del: 'DELETE FROM activities WHERE id = ?',
         },
         {
@@ -354,7 +354,7 @@ describe('schema v10：业务修订功能（facade/仓储/直接 SQL 写入均�
           insert: 'INSERT INTO ship_to_requests (id, customer_name, new_site_address, status, created_at, updated_at) VALUES (?,?,?,?,?,?)',
           insertArgs: ['t-ship_to_requests', '申请客户T', '申请新址T', 'pending_submit', 't', 't'],
           update: 'UPDATE ship_to_requests SET submitted_at = ? WHERE id = ?',
-          updateArgs: ['2026-08-01T00:00:00+08:00', 't-ship_to_requests'],
+          updateArgs: ['2026-08-01', 't-ship_to_requests'],
           del: 'DELETE FROM ship_to_requests WHERE id = ?',
         },
         {
@@ -402,7 +402,7 @@ describe('schema v10：业务修订功能（facade/仓储/直接 SQL 写入均�
           insert: 'INSERT INTO logistics_fees (id, batch_id, applied_at, budget_price_cents, deal_price_cents, logistics_cost_cents, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)',
           insertArgs: ['t-logistics_fees', 'b1', 't', 10000, 12000, 11000, 't', 't'],
           update: 'UPDATE logistics_fees SET applied_at = ? WHERE id = ?',
-          updateArgs: ['2026-08-01T00:00:00+08:00', 't-logistics_fees'],
+          updateArgs: ['2026-08-01', 't-logistics_fees'],
           del: 'DELETE FROM logistics_fees WHERE id = ?',
         },
         {

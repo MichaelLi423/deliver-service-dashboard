@@ -9,10 +9,10 @@
 | 指标 | 数量 |
 | --- | --- |
 | 能力 spec 数 | 15 |
-| ADDED Requirements 场景总数 | 449 |
-| 有有效测试证据（✅） | 447 |
+| ADDED Requirements 场景总数 | 450 |
+| 有有效测试证据（✅） | 386 |
 | 待验证（⏳，真实源迁移 / Windows 验证） | 2 |
-| 缺证据 / 证据无效（❌） | 0 |
+| 缺证据 / 证据无效（❌） | 62 |
 
 ### 待验证与阻塞项（诚实边界）
 
@@ -30,9 +30,9 @@
 | 损坏/维修事项与单备件约束 | 多个备件多条事项 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「多个备件多条事项：每条事项只含一个备件」 |  |
 | 事项字段与处理状态 | 字段完整记录 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「字段完整记录并保存」 |  |
 | 事项字段与处理状态 | 已关闭未修复必须记录原因 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「已关闭未修复必须记录原因」 |  |
-| 备件申请时间与备件处理状态 | 记录备件申请时间 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「记录备件申请时间到事项内，不建立独立备件申请对象」 |  |
-| 备件申请时间与备件处理状态 | 备件处理状态流转 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「备件处理状态仅限四值流转」 |  |
-| 备件申请时间与备件处理状态 | 仅已使用备件计入维修费用 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「仅已使用备件计入维修费用」<br>`tests/domain/operational-reporting.test.ts`「记录数量按事项计数，仅已使用备件金额计入维修费用」 |  |
+| 备件申请日期与备件处理状态 | 记录备件申请日期 | ❌ | — |  |
+| 备件申请日期与备件处理状态 | 备件处理状态流转 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「备件处理状态仅限四值流转」 |  |
+| 备件申请日期与备件处理状态 | 仅已使用备件计入维修费用 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「仅已使用备件计入维修费用」<br>`tests/domain/operational-reporting.test.ts`「记录数量按事项计数，仅已使用备件金额计入维修费用」 |  |
 | 数量与金额必填且大于零 | 数量与金额大于零才能保存 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「数量或金额为空、为 0 或为负数拒绝保存」 |  |
 | 备件金额币种与固定汇率折算 | RMB 按固定汇率折算 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「RMB 按固定汇率 1 USD = 7.2 RMB 折算为 USD」 |  |
 | 备件金额币种与固定汇率折算 | 币种边界 | ✅ | `tests/domain/damage-repair-tracking.test.ts`「币种边界：仅限 USD 与 RMB」 |  |
@@ -65,7 +65,7 @@
 | 错误冲突与警告分级 | 允许的价格异常仅警告 | ✅ | `tests/domain/import-validation.test.ts`「成交价格高于预算价格仅警告」 | 成交>预算为 warning，不阻断提交 |
 | 错误冲突与警告分级 | 不允许忽略阻断项 | ✅ | `tests/domain/import-validation.test.ts`「错误或未解决冲突不得生成提交资格」 | error/conflict 阻断提交资格 |
 | 关键字段和关联规则 | 缺少 ECC 阻止项目导入 | ✅ | `tests/domain/import-validation.test.ts`「缺 ECC 报必填错误并阻止导入」 | 项目缺 ECC 报必填错误 |
-| 关键字段和关联规则 | 物流登记时间不可由月份推断 | ✅ | `tests/domain/import-validation.test.ts`「物流费用申请（登记）时间为目标必填」 | 仅月份无法推断具体登记时间，缺失为阻断错误 |
+| 关键字段和关联规则 | 物流登记日期不可由月份推断 | ❌ | — |  |
 | 关键字段和关联规则 | 重复服务单号阻止导入 | ✅ | `tests/domain/import-validation.test.ts`「重复非空服务单号 → 冲突清单」 | 重复非空服务单号进入冲突清单 |
 | 关键字段和关联规则 | 独立申请不强制关联 ECC | ✅ | `tests/domain/import-validation.test.ts`「二维码申请与 Ship-to 申请不强制关联 ECC」 | QR/Ship-to 申请无 ECC 字段不产生关联错误 |
 | 关键字段和关联规则 | 二维码类型不得由数量猜测 | ✅ | `tests/domain/import-validation.test.ts`「二维码类型不得由数量猜测」 | 仅类型数量无具体类型 → 冲突 |
@@ -83,9 +83,9 @@
 | 幂等重跑与安全修正 | 安全 forward-fix 更新目标 | ✅ | `tests/domain/import-commit.test.ts`「安全 forward-fix：同来源键修正更新目标字段」 | 同来源键 forward-fix 只更新同 source key 记录 |
 | 幂等重跑与安全修正 | 人工修改目标时阻止覆盖 | ✅ | `tests/domain/import-commit.test.ts`「人工修改目标阻塞覆盖」 | 人工修改目标阻止覆盖且人工值保留 |
 | 幂等重跑与安全修正 | 缺少旧目标快照时阻止覆盖 | ✅ | `tests/domain/import-commit.test.ts`「旧记录缺少可信基线阻塞覆盖」 | v9 快照缺失阻止覆盖 |
-| 状态与业务时间确定性重建 | 状态由事实重建 | ✅ | `tests/integration/import-seven-category-flow.sqlite.test.ts`「主状态由导入事实确定性重建」<br>`tests/domain/historical-data-import.test.ts`「项目状态由事实推导重建」 | 主状态由导入事实确定性重建 |
-| 状态与业务时间确定性重建 | 导入时间不改变统计月份 | ✅ | `tests/integration/import-seven-category-flow.sqlite.test.ts`「导入时间只进审计且不改变报表月份」 | 报表月份按源业务时间，不因导入时间改变 |
-| 状态与业务时间确定性重建 | 可选源时间缺失保持为空 | ✅ | `tests/domain/historical-data-import.test.ts`「源业务时间缺失（可选）时保留为空」 | 可选源业务时间缺失保留为空，不用导入时间填充 |
+| 状态与业务日期确定性重建 | 状态由事实重建 | ✅ | `tests/integration/import-seven-category-flow.sqlite.test.ts`「主状态由导入事实确定性重建」<br>`tests/domain/historical-data-import.test.ts`「项目状态由事实推导重建」 | 主状态由导入事实确定性重建 |
+| 状态与业务日期确定性重建 | 导入时间不改变统计月份 | ✅ | `tests/integration/import-seven-category-flow.sqlite.test.ts`「导入时间只进审计且不改变报表月份」 | 报表月份按源业务时间，不因导入时间改变 |
+| 状态与业务日期确定性重建 | 可选源业务日期缺失保持为空 | ❌ | — |  |
 | 登录账号审计与历史事实归属分离 | 提交审计归属登录账号 | ✅ | `tests/domain/import-commit.test.ts`「账号审计与业务工作量分离」<br>`tests/integration/import-seven-category-flow.sqlite.test.ts`「草稿创建人与最终提交人分列审计」 | import_run 记录提交账号内部 ID 与用户名快照 |
 | 登录账号审计与历史事实归属分离 | 导入事实不计作手工工作量 | ✅ | `tests/domain/import-commit.test.ts`「业务事实 source=history_import」 | 业务事实 source=history_import、不计 actor 手工工作量 |
 | 登录账号审计与历史事实归属分离 | 会话在提交前失效 | ✅ | `tests/main/import-wizard-ipc.test.ts`「登出/恢复清空会话后 seal 失效」 | 会话失效取消活动读取并 invalidate seal |
@@ -177,7 +177,7 @@
 | --- | --- | --- | --- | --- |
 | Windows 桌面运行且不依赖远程服务 | 离线启动并完成核心操作 | ✅ | `tests/persistence/runtime-boundary.test.ts`「离线可用：无任何远程服务时本机 SQLite 全流程（写入→备份→关闭→重开）正常」 |  |
 | Windows 桌面运行且不依赖远程服务 | 无网络时业务不中断 | ✅ | `tests/persistence/runtime-boundary.test.ts`「离线无远程依赖：领域与持久化源码不导入任何网络模块」 |  |
-| 本机 SQLite 持久化 | 关闭重开后数据保留 | ✅ | `tests/persistence/connection.test.ts`「关闭并重开应用后数据保留（真实临时 SQLite）」<br>`tests/integration/relocation-project-lifecycle.sqlite.test.ts`「正式进单全流程落库（ECC/进单时间/快照/最终金额），关闭重开保留」<br>`tests/integration/runtime-lifecycle.sqlite.test.ts`「启动自动备份 → 初始化 → 录入 → 关闭重开登录 → 手动备份 → 恢复 → 恢复码重置」<br>`e2e/electron-smoke.spec.ts`「关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录」 |  |
+| 本机 SQLite 持久化 | 关闭重开后数据保留 | ❌ | `tests/persistence/connection.test.ts`「关闭并重开应用后数据保留（真实临时 SQLite）」<br>`tests/integration/relocation-project-lifecycle.sqlite.test.ts`「正式进单全流程落库（ECC/进单时间/快照/最终金额），关闭重开保留」<br>`tests/integration/runtime-lifecycle.sqlite.test.ts`「启动自动备份 → 初始化 → 录入 → 关闭重开登录 → 手动备份 → 恢复 → 恢复码重置」<br>`e2e/electron-smoke.spec.ts`「关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录」 |  |
 | 本机 SQLite 持久化 | 数据保存于本机数据库 | ✅ | `tests/persistence/connection.test.ts`「数据库位于本机数据目录（不依赖远程存储）」 |  |
 | 不向远程发送业务数据 | 日常使用不自动外发 | ✅ | `tests/persistence/runtime-boundary.test.ts`「离线无远程依赖：领域与持久化源码不导入任何网络模块」 |  |
 | 本地账号不加密 SQLite | 数据库文件不因本地账号加密 | ✅ | `tests/persistence/account-persistence.test.ts`「本地账号不加密 SQLite：数据库文件为普通 SQLite 且账号数据直接可读」 |  |
@@ -199,7 +199,7 @@
 | Requirement | Scenario | 状态 | 测试证据 | 备注 |
 | --- | --- | --- | --- | --- |
 | 各区域新项目进单金额 | 按进单月份与区域汇总进单金额 | ✅ | `tests/domain/operational-reporting.test.ts`「按进单月份与区域汇总进单金额，每个项目只计一次，不因合同变更改变」 |  |
-| 各区域新项目进单金额 | 按已记录进单时间归属 | ✅ | `tests/domain/operational-reporting.test.ts`「按已记录进单时间归属；补录或修正进单时间后归属实时变化」 |  |
+| 各区域新项目进单金额 | 按已记录进单日期归属 | ❌ | — |  |
 | 月度掉票金额与掉票次数 | 同一项目跨月分次掉票分别归属 | ✅ | `tests/domain/operational-reporting.test.ts`「同一项目跨月分次掉票分别归属，金额与次数分开统计」 |  |
 | 月度开单量 | 同一服务单号只计一次 | ✅ | `tests/domain/operational-reporting.test.ts`「同一服务单号关联多名工程师仍只计一次」 |  |
 | 月度开单量 | PM 作为开单业务类型分组 | ✅ | `tests/domain/operational-reporting.test.ts`「按唯一服务单号计一次并按四类业务分组，PM 为并列类型」 |  |
@@ -208,16 +208,17 @@
 | 损坏维修统计 | RMB 按固定汇率折算参与统计 | ✅ | `tests/domain/operational-reporting.test.ts`「RMB 按固定汇率折算参与统计，原币金额与币种保留用于展示」 |  |
 | 损坏维修统计 | 计算单条事项合同占比 | ✅ | `tests/domain/operational-reporting.test.ts`「计算单条事项合同占比；合同金额为空或 0 时不可计算并明确提示」 |  |
 | 损坏维修统计 | 事项数量与金额按登记月份归属并取责任人 | ✅ | `tests/domain/operational-reporting.test.ts`「事项数量与金额按登记月份归属并取责任人快照」 |  |
-| 月度物流费用汇总、物流费用合同占比与待补实际费用清单 | 按运输公司与月份汇总物流费用 | ✅ | `tests/domain/operational-reporting.test.ts`「按运输公司与月份汇总，展示批次数、预算/成交/实际合计与差异」 |  |
-| 月度物流费用汇总、物流费用合同占比与待补实际费用清单 | 成交高于预算提示计数 | ✅ | `tests/domain/relocation-execution.test.ts`「成交价格大于预算价格仅警告，仍允许保存且不自动创建项目提醒」 |  |
-| 月度物流费用汇总、物流费用合同占比与待补实际费用清单 | 计算物流费用合同占比 | ✅ | `tests/domain/operational-reporting.test.ts`「物流费用合同占比：RMB 按固定汇率折算 USD ÷ 最新合同金额，空/0 不可算」 |  |
-| 月度物流费用汇总、物流费用合同占比与待补实际费用清单 | 待补实际费用批次进入清单 | ✅ | `tests/domain/operational-reporting.test.ts`「待补实际费用批次进入清单，补录后按申请（登记）月份纳入报表」 |  |
+| 月度物流费用汇总与物流费用合同占比 | 按运输公司与月份汇总物流费用 | ❌ | `tests/domain/operational-reporting.test.ts`「按运输公司与月份汇总，展示批次数、预算/成交/实际合计与差异」 |  |
+| 月度物流费用汇总与物流费用合同占比 | 物流成交价高于合同预算价提示计数 | ❌ | — |  |
+| 月度物流费用汇总与物流费用合同占比 | 计算物流费用合同占比 | ❌ | `tests/domain/operational-reporting.test.ts`「物流费用合同占比：RMB 按固定汇率折算 USD ÷ 最新合同金额，空/0 不可算」 |  |
+| 月度物流费用汇总与物流费用合同占比 | 报表导出仅展示合同预算价与物流成交价 | ❌ | — |  |
+| 月度物流费用汇总与物流费用合同占比 | 历史批次缺费用视为异常数据 | ❌ | — |  |
 | Ship-to 申请工作量 | 首次提交与后续状态更新不重复计数 | ✅ | `tests/domain/operational-reporting.test.ts`「Ship-to 首次提交计一次，后续状态更新不重复计数，待提交草稿不计」 |  |
 | Ship-to 申请工作量 | 按首次提交月份归属并取责任人 | ✅ | `tests/domain/operational-reporting.test.ts`「Ship-to 首次提交计一次，后续状态更新不重复计数，待提交草稿不计」 |  |
 | 二维码申请工作量 | 每条记录每个去重选中类型各计一次 | ✅ | `tests/domain/operational-reporting.test.ts`「二维码申请按去重类型计数，不同申请中的同类型分别计数」 |  |
 | 二维码申请工作量 | 不同申请中的同类型分别计数 | ✅ | `tests/domain/operational-reporting.test.ts`「二维码申请按去重类型计数，不同申请中的同类型分别计数」 |  |
-| 二维码申请工作量 | 按申请时间归属并取申请人 | ✅ | `tests/domain/operational-reporting.test.ts`「二维码申请按去重类型计数，不同申请中的同类型分别计数」 |  |
-| 序列号地址更新记录数 | 按更新时间与客户统计记录数 | ✅ | `tests/domain/operational-reporting.test.ts`「序列号地址更新按更新记录计数、按月份与客户分组，同一仪器多次更新分别计数」 |  |
+| 二维码申请工作量 | 按申请日期归属并取申请人 | ❌ | — |  |
+| 序列号地址更新记录数 | 按更新日期与客户统计记录数 | ❌ | — |  |
 | 序列号地址更新记录数 | 同一仪器多次更新分别计数 | ✅ | `tests/domain/operational-reporting.test.ts`「序列号地址更新按更新记录计数、按月份与客户分组，同一仪器多次更新分别计数」 |  |
 | 区域维度与责任人归属 | 区域按去除空格后的精确值分组 | ✅ | `tests/domain/operational-reporting.test.ts`「区域按去除首尾空白后的精确值分组（7.8）」 |  |
 | 区域维度与责任人归属 | 区域修改后报表实时重算 | ✅ | `tests/domain/operational-reporting.test.ts`「区域修改后历史报表实时重算（7.8）」<br>`tests/integration/operational-reporting.sqlite.test.ts`「区域修改实时重算；账号改名后历史统计仍按动作记录快照归属」 |  |
@@ -273,7 +274,7 @@
 
 | Requirement | Scenario | 状态 | 测试证据 | 备注 |
 | --- | --- | --- | --- | --- |
-| 独立二维码申请模块与申请记录 | 保存申请人与申请时间 | ✅ | `tests/domain/qr-request-tracking.test.ts`「保存申请人与申请时间并选择申请类型」 |  |
+| 独立二维码申请模块与申请记录 | 保存申请人与申请日期 | ❌ | — |  |
 | 独立二维码申请模块与申请记录 | 申请不关联仪器与项目 | ✅ | `tests/domain/qr-request-tracking.test.ts`「申请不关联仪器与项目」 |  |
 | 独立二维码申请模块与申请记录 | 申请不设状态流转 | ✅ | `tests/domain/qr-request-tracking.test.ts`「申请不设状态流转：一经保存即为一条完整记录」 |  |
 | 申请类型固定代码与多选 | 一条申请多选多个类型 | ✅ | `tests/domain/qr-request-tracking.test.ts`「一条申请多选多个类型，允许从九类固定类型中选择」 |  |
@@ -299,23 +300,23 @@
 | 批次归属与改批 | 运输开始后禁止改批 | ✅ | `tests/domain/relocation-execution.test.ts`「运输开始后禁止直接改批」 |  |
 | 批次归属与改批 | 空批次不能开始运输 | ✅ | `tests/domain/relocation-execution.test.ts`「空批次不能开始运输：至少需要一台归属仪器」 |  |
 | 批次归属与改批 | 运输仪器均归属该批次 | ✅ | `tests/domain/relocation-execution.test.ts`「运输仪器均归属该批次：开始运输确认运输集合与批次归属一致」 |  |
-| 上门活动与工作事实 | 一次活动多类型多仪器同页记录 | ✅ | `tests/domain/relocation-execution.test.ts`「一次活动多类型多仪器同页记录」<br>`e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
-| 上门活动与工作事实 | 拆机事实记录拆机状态及开始/完成时间 | ✅ | `tests/domain/relocation-execution.test.ts`「拆机事实记录拆机状态及拆机开始/完成时间」 |  |
-| 上门活动与工作事实 | 其他工作类型记录各自状态与时间 | ✅ | `tests/domain/relocation-execution.test.ts`「其他工作类型记录各自状态与时间（装机/维修/其他）」 |  |
+| 上门活动与工作事实 | 一次活动多类型多仪器同页记录 | ❌ | `tests/domain/relocation-execution.test.ts`「一次活动多类型多仪器同页记录」<br>`e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 上门活动与工作事实 | 拆机事实记录拆机状态及开始/完成日期 | ❌ | — |  |
+| 上门活动与工作事实 | 其他工作类型记录各自状态与日期 | ❌ | — |  |
 | 上门活动与工作事实 | 多名工程师参与同一活动 | ✅ | `tests/domain/relocation-execution.test.ts`「多名工程师参与同一活动：保存全部参与工程师」 |  |
 | 拆装进度推导 | 不存在工作事实即进度未开始 | ✅ | `tests/domain/relocation-execution.test.ts`「不存在工作事实即进度未开始」 |  |
 | 拆装进度推导 | 进行中的拆机事实不算完成 | ✅ | `tests/domain/relocation-execution.test.ts`「进行中的拆机事实不算完成」 |  |
 | 拆装进度推导 | 已完成的拆机事实判定拆机完成 | ✅ | `tests/domain/relocation-execution.test.ts`「已完成的拆机事实判定拆机完成、装机未完成」 |  |
 | 拆装进度推导 | 装机工作事实完成后进度更新 | ✅ | `tests/domain/relocation-execution.test.ts`「装机工作事实完成后进度更新」 |  |
-| 物流报价记录 | 记录原价与折后价 | ✅ | `tests/domain/relocation-execution.test.ts`「记录原价与折后价：报价阶段不作为客户侧物流收入（仅记录）」 |  |
-| 物流报价记录 | 不同批次不同运输公司 | ✅ | `tests/domain/relocation-execution.test.ts`「不同批次不同运输公司」 |  |
-| 实际物流费用记录 | 每批次仅一笔实际费用记录 | ✅ | `tests/domain/relocation-execution.test.ts`「每批次仅一笔实际费用记录」<br>`tests/persistence/schema.test.ts`「每批次仅一笔实际物流费用记录」 |  |
-| 实际物流费用记录 | 申请（登记）时间必填默认当天 | ✅ | `tests/domain/relocation-execution.test.ts`「申请（登记）时间必填默认当天，归属月份按该时间计算」 |  |
-| 实际物流费用记录 | 三项金额必填且大于 0 | ✅ | `tests/domain/relocation-execution.test.ts`「三项金额必填且大于 0：未填写/0/负数拒绝」 |  |
-| 实际物流费用记录 | 成交价格大于预算价格仅警告 | ✅ | `tests/domain/relocation-execution.test.ts`「成交价格大于预算价格仅警告，仍允许保存且不自动创建项目提醒」 |  |
-| 实际物流费用记录 | 修改金额不改归属月份 | ✅ | `tests/domain/relocation-execution.test.ts`「修改金额不改申请（登记）时间与归属月份」 |  |
-| 实际物流费用记录 | 展示成交价格与实际费用差异 | ✅ | `tests/domain/relocation-execution.test.ts`「展示成交价格与实际物流费用的差异」 |  |
-| 实际物流费用记录 | 迁移缺申请（登记）时间 dry-run 报错 | ✅ | `tests/domain/historical-data-import.test.ts`「物流费用申请（登记）时间为目标必填字段，缺失时 dry-run 报错（TBD-14）」 |  |
+| 批次与物流费用合并记录 | 每批次仅一笔合并记录 | ❌ | — |  |
+| 批次与物流费用合并记录 | 费用登记日期必填默认当天 | ❌ | — |  |
+| 批次与物流费用合并记录 | 合同预算价与物流成交价必填且大于 0 | ❌ | — |  |
+| 批次与物流费用合并记录 | 运输公司可选 | ❌ | — |  |
+| 批次与物流费用合并记录 | 物流成交价大于合同预算价仅警告 | ❌ | — |  |
+| 批次与物流费用合并记录 | 物流成交价即最终实际物流费用 | ❌ | — |  |
+| 批次与物流费用合并记录 | 从批次编辑修改运输信息与两价不改归属月份 | ❌ | — |  |
+| 批次与物流费用合并记录 | 迁移缺费用登记日期 dry-run 报错 | ❌ | — |  |
+| 批次与物流费用合并记录 | 历史批次缺费用视为异常数据 | ❌ | — |  |
 
 ### relocation-project-lifecycle
 
@@ -335,21 +336,21 @@
 | 主状态与标签 | 取消项目进入已取消 | ✅ | `tests/domain/relocation-status.test.ts`「取消项目进入已取消」<br>`tests/domain/relocation-cancel.test.ts`「任一未取消主状态且无掉票历史可取消，并记录取消时间与原因」 |  |
 | 主状态人工调整与系统校验 | 负责人直接调整主状态 | ✅ | `tests/domain/relocation-status.test.ts`「负责人直接调整主状态：待执行 → 执行中 校验通过」 |  |
 | 主状态人工调整与系统校验 | 非法状态调整被拒 | ✅ | `tests/domain/relocation-status.test.ts`「非法状态调整被拒：待执行 → 已完成（尚无掉票闭环依据）」 |  |
-| 主状态人工调整与系统校验 | 实际装机完成时间自动进入待验收 | ✅ | `tests/domain/lifecycle.test.ts`「自动触发 1：实际装机完成时间自动置为待验收，且优先于人工选择」<br>`tests/domain/relocation-status.test.ts`「录入实际装机完成时间自动进入待验收（TBD-07）」 |  |
+| 主状态人工调整与系统校验 | 实际装机完成日期自动进入待验收 | ❌ | — |  |
 | 主状态人工调整与系统校验 | 验收报告自动进入待掉票 | ✅ | `tests/domain/lifecycle.test.ts`「自动触发 2：标记验收报告并填写报告形成日期自动置为待掉票（不要求客户确认）」 |  |
 | 主状态人工调整与系统校验 | 金额闭环自动重算 | ✅ | `tests/domain/lifecycle.test.ts`「自动触发 3：金额闭环在待掉票/已完成之间自动重算（优先于人工值）」 |  |
-| 正式进单 | 填写进单时间保持填写值 | ✅ | `tests/domain/relocation-entry.test.ts`「填写进单时间保持填写值，不以当前时间覆盖」 |  |
-| 正式进单 | 进单时间默认当前且可补录 | ✅ | `tests/domain/relocation-entry.test.ts`「进单时间未填写默认取当前时间，并允许进单后补录或修正」 |  |
-| 正式进单 | 待进单进单时间可空 | ✅ | `tests/domain/relocation-entry.test.ts`「待进单阶段进单时间可空」 |  |
+| 正式进单 | 填写进单日期保持填写值 | ❌ | — |  |
+| 正式进单 | 进单日期默认当天且可补录 | ❌ | — |  |
+| 正式进单 | 待进单进单日期可空 | ❌ | — |  |
 | 正式进单 | 核心信息缺失拒绝进单 | ✅ | `tests/domain/relocation-entry.test.ts`「核心信息缺失拒绝进单并就地提示缺失项」 |  |
 | 正式进单 | 缺合同拒绝进单 | ✅ | `tests/domain/relocation-entry.test.ts`「缺合同拒绝进单并提示先补齐合同」 |  |
 | 未进单先执行 | 批复后优先安排上门 | ✅ | `tests/domain/relocation-status.test.ts`「未进单先执行标签与主状态并存：记录批复/原因/缺失项，主状态保持待进单」<br>`tests/integration/critical-paths.sqlite.test.ts`「1. 未进单先执行全链路」 |  |
 | 未进单先执行 | 先执行后进单由负责人确定主状态 | ✅ | `tests/domain/relocation-status.test.ts`「先执行后进单：正式进单不按已发生事实自动跳转，主状态由负责人人工确定」<br>`tests/domain/lifecycle.test.ts`「标签清除后主状态由负责人人工确定，且明确自动触发仍生效」 |  |
-| 未进单先执行 | 先录入实际装机完成时间后进单自动待验收 | ✅ | `tests/domain/relocation-status.test.ts`「先录入实际装机完成时间后进单自动待验收（TBD-07）」<br>`tests/integration/relocation-project-lifecycle.sqlite.test.ts`「未进单先执行 → 正式进单在原项目上完成，自动触发待验收」 |  |
-| 执行准备与待验收触发 | 计划上门时间与运输时间分开记录 | ✅ | `tests/domain/relocation-status.test.ts`「计划上门时间与计划运输时间分开记录」 |  |
+| 未进单先执行 | 先录入实际装机完成日期后进单自动待验收 | ❌ | — |  |
+| 执行准备与待验收触发 | 计划上门日期与运输日期分开记录 | ❌ | — |  |
 | 执行准备与待验收触发 | 场地确认不影响状态流转 | ✅ | `tests/domain/relocation-status.test.ts`「场地确认不影响状态流转」 |  |
-| 执行准备与待验收触发 | 计划时间不自动流转 | ✅ | `tests/domain/relocation-status.test.ts`「计划时间到期不自动流转（计划时间与场地确认均不触发主状态）」 |  |
-| 执行准备与待验收触发 | 录入实际装机完成时间自动进入待验收 | ✅ | `tests/domain/relocation-status.test.ts`「录入实际装机完成时间自动进入待验收（TBD-07）」 |  |
+| 执行准备与待验收触发 | 计划日期不自动流转 | ❌ | — |  |
+| 执行准备与待验收触发 | 录入实际装机完成日期自动进入待验收 | ❌ | — |  |
 | 项目验收 | 标记验收报告进入待掉票 | ✅ | `tests/domain/relocation-status.test.ts`「标记验收报告并填写报告形成日期 → 自动进入待掉票（不要求客户确认）」 |  |
 | 项目验收 | 验收后继续报修/维修不影响状态 | ✅ | `tests/domain/relocation-status.test.ts`「验收后继续报修/维修不影响验收、待掉票或完成状态」<br>`tests/domain/damage-repair-tracking.test.ts`「验收后仍允许登记与继续维修，不影响验收/待掉票/完成状态」 |  |
 | 取消 | 无掉票历史可取消并保留已发生工作量 | ✅ | `tests/domain/relocation-cancel.test.ts`「任一未取消主状态且无掉票历史可取消，并记录取消时间与原因」<br>`tests/domain/relocation-cancel.test.ts`「取消保留已发生的上门活动、物流与费用记录（取消只改变项目状态）」<br>`tests/integration/critical-paths.sqlite.test.ts`「4. 取消」 |  |
@@ -373,10 +374,10 @@
 | 项目新址为默认计划、更新事实表达实际关联 | 更新事实表达实际关联 | ✅ | `tests/domain/serial-address-update.test.ts`「更新事实表达实际关联：以最近一条更新事实的新址为准」 |  |
 | 项目新址为默认计划、更新事实表达实际关联 | 未登记更新事实不视为已关联 | ✅ | `tests/domain/serial-address-update.test.ts`「未登记更新事实不视为已关联新址」 |  |
 | 不修改不可变 Ship-to | 更新事实不修改 Ship-to | ✅ | `tests/domain/serial-address-update.test.ts`「更新事实不创建、不修改也不删除任何 Ship-to 主数据」 |  |
-| 更新时间必填、默认当前、可补录 | 创建时默认当前时间 | ✅ | `tests/domain/serial-address-update.test.ts`「创建时默认当前时间」 |  |
-| 更新时间必填、默认当前、可补录 | 补录历史时间 | ✅ | `tests/domain/serial-address-update.test.ts`「补录历史时间：按所填历史时间保存并归属该月份」 |  |
-| 更新事实列表、筛选与按更新时间计数 | 列表展示与筛选 | ✅ | `tests/domain/serial-address-update.test.ts`「列表展示与筛选：按客户、新址地址、序列号、Account ID 或更新时间」 |  |
-| 更新事实列表、筛选与按更新时间计数 | 按更新时间所属月份计数 | ✅ | `tests/domain/serial-address-update.test.ts`「按更新时间所属月份计数」 |  |
+| 更新日期必填、默认当天、可补录 | 创建时默认当天 | ❌ | — |  |
+| 更新日期必填、默认当天、可补录 | 补录历史日期 | ❌ | — |  |
+| 更新事实列表、筛选与按更新日期计数 | 列表展示与筛选 | ✅ | `tests/domain/serial-address-update.test.ts`「列表展示与筛选：按客户、新址地址、序列号、Account ID 或更新时间」 |  |
+| 更新事实列表、筛选与按更新日期计数 | 按更新日期所属月份计数 | ❌ | — |  |
 | 非空字段与序列号校验 | 非空字段缺失拒绝保存 | ✅ | `tests/domain/serial-address-update.test.ts`「非空字段缺失拒绝保存」 |  |
 | 非空字段与序列号校验 | 序列号与登记仪器一致 | ✅ | `tests/domain/serial-address-update.test.ts`「序列号与登记仪器一致：不一致拒绝保存」 |  |
 | 非空字段与序列号校验 | 不引入未确认序列号格式 | ✅ | `tests/domain/serial-address-update.test.ts`「不引入未确认的序列号格式约束：仅非空与仪器一致」 |  |
@@ -393,13 +394,13 @@
 | 服务单号全局唯一 | 不同业务类型共用唯一空间 | ✅ | `tests/domain/service-order-recording.test.ts`「不同业务类型共用唯一空间：搬迁单号被认证开单占用拒绝」 |  |
 | 认证、单寄备件与 PM 开单最小字段 | 最小字段校验 | ✅ | `tests/domain/service-order-recording.test.ts`「缺少服务单号、工程师或客户单位之一拒绝保存」 |  |
 | 认证、单寄备件与 PM 开单最小字段 | 记录全部最小字段 | ✅ | `tests/domain/service-order-recording.test.ts`「记录全部最小字段后保存，且不关联搬迁项目生命周期」 |  |
-| 认证、单寄备件与 PM 开单最小字段 | 开单时间未填默认当前时间 | ✅ | `tests/domain/service-order-recording.test.ts`「开单时间未填默认当前时间」 |  |
+| 认证、单寄备件与 PM 开单最小字段 | 开单日期未填默认当天 | ❌ | — |  |
 | 认证、单寄备件与 PM 开单最小字段 | 后补备注 | ✅ | `tests/domain/service-order-recording.test.ts`「后补备注：备注缺失不影响保存，可后补填写」 |  |
 | 开单与进单独立 | 开单不影响进单与主状态 | ✅ | `tests/domain/service-order-recording.test.ts`「开单不影响项目进单状态与主状态」 |  |
 | 开单与进单独立 | 一个项目多条开单 | ✅ | `tests/domain/service-order-recording.test.ts`「一个项目可关联多条开单」 |  |
 | 项目向导选填单号自动创建开单记录（与项目同次保存） | 填写选填单号且已选工程师，项目与开单同次保存 | ✅ | `tests/domain/service-order-recording.test.ts`「填写选填单号且已选工程师：项目与开单同次保存，开单关联该项目」<br>`tests/integration/service-order-recording.sqlite.test.ts`「向导原子保存：填写单号且已选工程师，项目与搬迁开单同次落库（事务）」 |  |
 | 项目向导选填单号自动创建开单记录（与项目同次保存） | 填写单号但未选定工程师拒绝保存整个向导 | ✅ | `tests/domain/service-order-recording.test.ts`「填写单号但未选定工程师：拒绝保存整个向导（项目与开单均不产生）」<br>`tests/integration/service-order-recording.sqlite.test.ts`「向导填写单号但未选定工程师：拒绝保存，项目与开单均不落库」 |  |
-| 项目向导选填单号自动创建开单记录（与项目同次保存） | 开单时间默认当前时间 | ✅ | `tests/domain/service-order-recording.test.ts`「开单时间默认当前时间，备注可空并在后补」 |  |
+| 项目向导选填单号自动创建开单记录（与项目同次保存） | 开单日期默认当天 | ❌ | — |  |
 | 项目向导选填单号自动创建开单记录（与项目同次保存） | 不填写选填单号不创建 | ✅ | `tests/domain/service-order-recording.test.ts`「不填写选填单号不创建任何开单记录」<br>`tests/integration/service-order-recording.sqlite.test.ts`「向导未填单号：只保存项目，不创建任何开单记录」 |  |
 | 项目向导选填单号自动创建开单记录（与项目同次保存） | 同项目仍可多条开单 | ✅ | `tests/domain/service-order-recording.test.ts`「同项目仍可手工关联多条开单」 |  |
 | 开单工作量计数 | 同一服务单只计一次 | ✅ | `tests/domain/service-order-recording.test.ts`「同一服务单只计一次（服务单号唯一，关联多名工程师/多次上门仍只计一次）」 |  |
@@ -434,8 +435,8 @@
 | 后续启动需登录本地账号 | 无远程认证与账号同步 | ✅ | `tests/domain/access.test.ts`「无远程认证、外部身份源与账号同步：服务不暴露任何同步/导入账号能力」 |  |
 | 密码与恢复码安全存储 | 密码与恢复码不以明文存储 | ✅ | `tests/domain/access.test.ts`「密码与恢复码不以明文存储：落库为 scrypt 派生值 + 独立随机盐」<br>`tests/persistence/account-persistence.test.ts`「密码与恢复码不以明文落库：数据库行只有 scrypt 派生值（十六进制）与盐」 |  |
 | 密码与恢复码安全存储 | 校验使用恒定时间比较 | ✅ | `tests/domain/access.test.ts`「校验使用恒定时间比较：正确口令通过、错误口令恒定返回 false」 |  |
-| 一次性恢复码重置密码 | 恢复码仅展示一次 | ✅ | `tests/domain/access.test.ts`「恢复码仅展示一次：初始化返回明文一次，此后无任何途径再次读取明文」<br>`e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
-| 一次性恢复码重置密码 | 凭恢复码重置密码 | ✅ | `tests/domain/access.test.ts`「凭恢复码重置密码：旧密码失效、新密码可用，原恢复码失效并生成新恢复码」<br>`tests/persistence/account-persistence.test.ts`「持久化重置密码全流程：重开后新密码可登录、旧密码与原恢复码失效、新恢复码可用」<br>`tests/integration/runtime-lifecycle.sqlite.test.ts`「启动自动备份 → 初始化 → 录入 → 关闭重开登录 → 手动备份 → 恢复 → 恢复码重置」<br>`e2e/electron-smoke.spec.ts`「关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录」 |  |
+| 一次性恢复码重置密码 | 恢复码仅展示一次 | ❌ | `tests/domain/access.test.ts`「恢复码仅展示一次：初始化返回明文一次，此后无任何途径再次读取明文」<br>`e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 一次性恢复码重置密码 | 凭恢复码重置密码 | ❌ | `tests/domain/access.test.ts`「凭恢复码重置密码：旧密码失效、新密码可用，原恢复码失效并生成新恢复码」<br>`tests/persistence/account-persistence.test.ts`「持久化重置密码全流程：重开后新密码可登录、旧密码与原恢复码失效、新恢复码可用」<br>`tests/integration/runtime-lifecycle.sqlite.test.ts`「启动自动备份 → 初始化 → 录入 → 关闭重开登录 → 手动备份 → 恢复 → 恢复码重置」<br>`e2e/electron-smoke.spec.ts`「关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录」 |  |
 | 一次性恢复码重置密码 | 恢复码校验失败拒绝重置 | ✅ | `tests/domain/access.test.ts`「恢复码校验失败拒绝重置：密码保持不变，不泄露有效性信息」 |  |
 | 无多账号、角色与权限管理 | 无多账号与角色账号 | ✅ | `tests/domain/access.test.ts`「不提供注册/自助新增用户/角色与权限管理 API」<br>`tests/persistence/account-persistence.test.ts`「账号表不设角色/权限列（无角色与权限管理）」 |  |
 | 无多账号、角色与权限管理 | 拒绝外部账号同步 | ✅ | `tests/domain/access.test.ts`「无远程认证、外部身份源与账号同步：服务不暴露任何同步/导入账号能力」 |  |
@@ -457,9 +458,9 @@
 | 任务优先的主工作台 | 进入工作台先处理项目提醒 | ✅ | `tests/renderer/app.test.tsx`「任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈」 |  |
 | 任务优先的主工作台 | 提醒与项目队列不被其他板块取代 | ✅ | `tests/renderer/app.test.tsx`「任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈」 |  |
 | 任务优先的主工作台 | 顶部任务入口与运营指标 | ✅ | `tests/renderer/app.test.tsx`「任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈」 |  |
-| 首次初始化与登录入口仅作为访问门 | 首次启动展示初始化界面 | ✅ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
-| 首次初始化与登录入口仅作为访问门 | 后续启动展示登录界面 | ✅ | `e2e/electron-smoke.spec.ts`「关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录」 |  |
-| 首次初始化与登录入口仅作为访问门 | 访问门不改变主结构 | ✅ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 首次初始化与登录入口仅作为访问门 | 首次启动展示初始化界面 | ❌ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 首次初始化与登录入口仅作为访问门 | 后续启动展示登录界面 | ❌ | `e2e/electron-smoke.spec.ts`「关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录」 |  |
+| 首次初始化与登录入口仅作为访问门 | 访问门不改变主结构 | ❌ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
 | 未进单与已进单视觉区分 | 项目队列中颜色区分 | ✅ | `tests/renderer/app.test.tsx`「任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈」 |  |
 | 未进单与已进单视觉区分 | 当前上下文与吞吐板块一致区分 | ✅ | `tests/renderer/app.test.tsx`「任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈」 |  |
 | 生命周期吞吐 | 六阶段展示项目数与节奏信息 | ✅ | `tests/renderer/app.test.tsx`「任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈」 |  |
@@ -473,32 +474,32 @@
 | 项目与提醒联动 | 点击项目提醒联动所属项目 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
 | 项目与提醒联动 | 点击阶段筛选并选中项目 | ✅ | `tests/renderer/app.test.tsx`「阶段、提醒、区域和查询筛选下推并重置到首页 cursor」 |  |
 | 四步新建搬迁项目向导 | 四步顺序展示与对应字段 | ✅ | `tests/renderer/app.test.tsx`「向导明确必填、可后补和合同为 0 的反馈，弹层首字段聚焦且 Escape 可关闭」 |  |
-| 四步新建搬迁项目向导 | 搬迁范围步骤字段 | ✅ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 四步新建搬迁项目向导 | 搬迁范围步骤字段 | ❌ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
 | 四步新建搬迁项目向导 | 执行准备步骤字段 | ✅ | `e2e/electron-smoke.spec.ts`「未进单先执行 → 实际装机完成自动待验收 → 验收进入待掉票（核心动作补充闭环）」 |  |
 | 四步新建搬迁项目向导 | 保存为待进单 | ✅ | `tests/integration/workbench-facade.sqlite.test.ts`「真实保存项目、项目提醒、十类动作中的核心记录及独立二维码申请」 | 向导「保存为待进单」（intent=draft）经 WorkbenchFacade（Electron 主进程入口）真实落库；正式进单/未进单先执行两个保存路径由 electron-smoke E2E 覆盖 |
-| 四步新建搬迁项目向导 | 正式进单 | ✅ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 四步新建搬迁项目向导 | 正式进单 | ❌ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
 | 四步新建搬迁项目向导 | 未进单先执行 | ✅ | `e2e/electron-smoke.spec.ts`「未进单先执行 → 实际装机完成自动待验收 → 验收进入待掉票（核心动作补充闭环）」 |  |
-| 四步新建搬迁项目向导 | 填写服务单号要求工程师并同次创建开单 | ✅ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」 | 向导内「服务单号必填工程师并同次保存」由领域测试 service-order-recording 3.10 覆盖，界面透传 |
+| 四步新建搬迁项目向导 | 填写服务单号要求工程师并同次创建开单 | ❌ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」 | 向导内「服务单号必填工程师并同次保存」由领域测试 service-order-recording 3.10 覆盖，界面透传 |
 | 四步新建搬迁项目向导 | 可后补字段不无提示丢失且不自动生成提醒 | ✅ | `tests/renderer/app.test.tsx`「向导明确必填、可后补和合同为 0 的反馈，弹层首字段聚焦且 Escape 可关闭」 |  |
-| 项目主状态人工选择与校验反馈 | 人工选择主状态并就地反馈 | ✅ | `tests/integration/workbench-facade.sqlite.test.ts`「人工主状态必须经过 lifecycle 校验并将拒绝原因返回界面层」<br>`e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 项目主状态人工选择与校验反馈 | 人工选择主状态并就地反馈 | ❌ | `tests/integration/workbench-facade.sqlite.test.ts`「人工主状态必须经过 lifecycle 校验并将拒绝原因返回界面层」<br>`e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
 | 项目主状态人工选择与校验反馈 | 自动触发结果如实反映 | ✅ | `e2e/electron-smoke.spec.ts`「未进单先执行 → 实际装机完成自动待验收 → 验收进入待掉票（核心动作补充闭环）」 |  |
-| 快速记录入口与动作表单 | 覆盖十类业务动作 | ✅ | `tests/renderer/app.test.tsx`「快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单」 |  |
-| 快速记录入口与动作表单 | 备件申请并入损坏/维修事项 | ✅ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
-| 快速记录入口与动作表单 | 二维码申请不在项目快速记录 | ✅ | `tests/renderer/app.test.tsx`「快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单」 |  |
-| 快速记录入口与动作表单 | 批次表单字段 | ✅ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
-| 快速记录入口与动作表单 | 物流费用表单字段 | ✅ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」 |  |
-| 快速记录入口与动作表单 | 上门活动表单同页记录拆机与各工作类型 | ✅ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
-| 快速记录入口与动作表单 | 开单表单字段 | ✅ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」 |  |
-| 快速记录入口与动作表单 | 搬迁仪器表单二维码是否申请手工字段 | ✅ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」 |  |
-| 快速记录入口与动作表单 | 损坏/维修表单合同金额 0 就地反馈 | ✅ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」 |  |
-| 快速记录入口与动作表单 | 序列号地址更新与二维码申请独立模块入口 | ✅ | `tests/renderer/app.test.tsx`「独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型」 |  |
-| 快速记录入口与动作表单 | 不用通用空表单 | ✅ | `tests/renderer/app.test.tsx`「快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单」 |  |
+| 快速记录入口与动作表单 | 覆盖九类业务动作 | ❌ | — |  |
+| 快速记录入口与动作表单 | 备件申请并入损坏/维修事项 | ❌ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 快速记录入口与动作表单 | 二维码申请不在项目快速记录 | ❌ | `tests/renderer/app.test.tsx`「快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单」 |  |
+| 快速记录入口与动作表单 | 批次表单字段 | ❌ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 快速记录入口与动作表单 | 物流费用并入批次表单 | ❌ | — |  |
+| 快速记录入口与动作表单 | 上门活动表单同页记录拆机与各工作类型 | ❌ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 快速记录入口与动作表单 | 开单表单字段 | ❌ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」 |  |
+| 快速记录入口与动作表单 | 搬迁仪器表单二维码是否申请手工字段 | ❌ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」 |  |
+| 快速记录入口与动作表单 | 损坏/维修表单合同金额 0 就地反馈 | ❌ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」 |  |
+| 快速记录入口与动作表单 | 序列号地址更新与二维码申请独立模块入口 | ❌ | `tests/renderer/app.test.tsx`「独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型」 |  |
+| 快速记录入口与动作表单 | 不用通用空表单 | ❌ | `tests/renderer/app.test.tsx`「快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单」 |  |
 | 就近录入与提醒直达 | 项目队列行内记录入口 | ✅ | `tests/renderer/app.test.tsx`「队列行、上下文和详情 Tab 都提供绑定当前项目的就近录入入口」 |  |
 | 就近录入与提醒直达 | 当前上下文就近入口 | ✅ | `tests/renderer/app.test.tsx`「队列行、上下文和详情 Tab 都提供绑定当前项目的就近录入入口」 |  |
 | 就近录入与提醒直达 | 详情 tab 就近入口 | ✅ | `tests/renderer/app.test.tsx`「队列行、上下文和详情 Tab 都提供绑定当前项目的就近录入入口」 |  |
 | 就近录入与提醒直达 | 项目提醒直达所属项目 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
 | 表单行为与提交反馈 | 必填与可选标识及帮助 | ✅ | `tests/renderer/app.test.tsx`「向导明确必填、可后补和合同为 0 的反馈，弹层首字段聚焦且 Escape 可关闭」 |  |
-| 表单行为与提交反馈 | 校验失败就地提示 | ✅ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」<br>`tests/integration/workbench-facade.sqlite.test.ts`「人工主状态必须经过 lifecycle 校验并将拒绝原因返回界面层」 |  |
+| 表单行为与提交反馈 | 校验失败就地提示 | ❌ | `tests/renderer/app.test.tsx`「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」<br>`tests/integration/workbench-facade.sqlite.test.ts`「人工主状态必须经过 lifecycle 校验并将拒绝原因返回界面层」 |  |
 | 表单行为与提交反馈 | 主状态校验失败就地反馈 | ✅ | `tests/integration/workbench-facade.sqlite.test.ts`「人工主状态必须经过 lifecycle 校验并将拒绝原因返回界面层」 |  |
 | 表单行为与提交反馈 | 提交中禁用防止重复 | ✅ | `tests/renderer/app.test.tsx`「提交期间禁用并拦截重复保存，成功后显示 toast 且同步刷新失效数据」 |  |
 | 表单行为与提交反馈 | 成功 Toast 并同步更新 | ✅ | `tests/renderer/app.test.tsx`「提交期间禁用并拦截重复保存，成功后显示 toast 且同步刷新失效数据」 |  |
@@ -513,10 +514,10 @@
 | 视觉可读性与层级 | 层级与对比 | ✅ | `tests/interface/layout.test.ts`「正文与表格保持 14px 基线，辅助信息保持 12px」 |  |
 | 视觉可读性与层级 | 多行文本行高可读 | ✅ | `tests/interface/layout.test.ts`「正文与表格保持 14px 基线，辅助信息保持 12px」 |  |
 | 详情 tab 按需展开与独立模块 | 详情 tab 可切换展开 | ✅ | `tests/renderer/app.test.tsx`「详情 tab 按需加载，项目总览不读取 section」 |  |
-| 详情 tab 按需展开与独立模块 | 扩展 tab 或独立导航模块提供新增能力 | ✅ | `tests/renderer/app.test.tsx`「独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型」 |  |
-| 详情 tab 按需展开与独立模块 | 二维码申请模块表单多选类型 | ✅ | `tests/renderer/app.test.tsx`「独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型」 |  |
+| 详情 tab 按需展开与独立模块 | 扩展 tab 或独立导航模块提供新增能力 | ❌ | `tests/renderer/app.test.tsx`「独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型」 |  |
+| 详情 tab 按需展开与独立模块 | 二维码申请模块表单多选类型 | ❌ | `tests/renderer/app.test.tsx`「独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型」 |  |
 | 详情 tab 按需展开与独立模块 | 项目总览展示关键事实 | ✅ | `tests/renderer/app.test.tsx`「详情 tab 按需加载，项目总览不读取 section」 |  |
-| 详情 tab 按需展开与独立模块 | 费用与掉票 tab 展示金额与掉票记录 | ✅ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
+| 详情 tab 按需展开与独立模块 | 费用与掉票 tab 展示金额与掉票记录 | ❌ | `e2e/electron-smoke.spec.ts`「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」 |  |
 | 信息层级与主操作流保持 | 吞吐板块不复制项目看板 | ✅ | `tests/renderer/app.test.tsx`「任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈」 |  |
 | 信息层级与主操作流保持 | 当前上下文不挤占主队列 | ✅ | `tests/interface/layout.test.ts`「1440 为主布局基准且上下文不遮挡队列」 |  |
 | 桌面可用性 | 1024px 宽下核心区域可操作 | ✅ | `tests/interface/layout.test.ts`「1024 附近不产生页面级横向溢出，宽表格在容器内滚动」 |  |
@@ -545,3 +546,70 @@
 | 不自动创建提醒的场景 | 成交高于预算不自动创建提醒 | ✅ | `tests/domain/workbench-todos.test.ts`「无关事实变动（区域、执行准备等）不改变项目提醒字段」<br>`tests/integration/workbench-todos.sqlite.test.ts`「二维码申请、Ship-to 申请与成交高于预算物流费用均不自动创建项目提醒」 |  |
 | 不自动创建提醒的场景 | 二维码未标记不自动创建提醒 | ✅ | `tests/integration/workbench-todos.sqlite.test.ts`「二维码申请、Ship-to 申请与成交高于预算物流费用均不自动创建项目提醒」 |  |
 | 不自动创建提醒的场景 | Ship-to 申请未完成不自动创建提醒 | ✅ | `tests/integration/workbench-todos.sqlite.test.ts`「二维码申请、Ship-to 申请与成交高于预算物流费用均不自动创建项目提醒」 |  |
+
+## 缺口清单（缺证据或证据无效的场景）
+
+| 能力 | Scenario | 问题 |
+| --- | --- | --- |
+| damage-repair-tracking | 记录备件申请日期 | 未登记 |
+| historical-data-import | 物流登记日期不可由月份推断 | 未登记 |
+| historical-data-import | 可选源业务日期缺失保持为空 | 未登记 |
+| local-data-persistence | 关闭重开后数据保留 | e2e/electron-smoke.spec.ts（未找到「关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录」） |
+| operational-reporting | 按已记录进单日期归属 | 未登记 |
+| operational-reporting | 按运输公司与月份汇总物流费用 | tests/domain/operational-reporting.test.ts（未找到「按运输公司与月份汇总，展示批次数、预算/成交/实际合计与差异」） |
+| operational-reporting | 物流成交价高于合同预算价提示计数 | 未登记 |
+| operational-reporting | 计算物流费用合同占比 | tests/domain/operational-reporting.test.ts（未找到「物流费用合同占比：RMB 按固定汇率折算 USD ÷ 最新合同金额，空/0 不可算」） |
+| operational-reporting | 报表导出仅展示合同预算价与物流成交价 | 未登记 |
+| operational-reporting | 历史批次缺费用视为异常数据 | 未登记 |
+| operational-reporting | 按申请日期归属并取申请人 | 未登记 |
+| operational-reporting | 按更新日期与客户统计记录数 | 未登记 |
+| qr-request-tracking | 保存申请人与申请日期 | 未登记 |
+| relocation-execution | 一次活动多类型多仪器同页记录 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
+| relocation-execution | 拆机事实记录拆机状态及开始/完成日期 | 未登记 |
+| relocation-execution | 其他工作类型记录各自状态与日期 | 未登记 |
+| relocation-execution | 每批次仅一笔合并记录 | 未登记 |
+| relocation-execution | 费用登记日期必填默认当天 | 未登记 |
+| relocation-execution | 合同预算价与物流成交价必填且大于 0 | 未登记 |
+| relocation-execution | 运输公司可选 | 未登记 |
+| relocation-execution | 物流成交价大于合同预算价仅警告 | 未登记 |
+| relocation-execution | 物流成交价即最终实际物流费用 | 未登记 |
+| relocation-execution | 从批次编辑修改运输信息与两价不改归属月份 | 未登记 |
+| relocation-execution | 迁移缺费用登记日期 dry-run 报错 | 未登记 |
+| relocation-execution | 历史批次缺费用视为异常数据 | 未登记 |
+| relocation-project-lifecycle | 实际装机完成日期自动进入待验收 | 未登记 |
+| relocation-project-lifecycle | 填写进单日期保持填写值 | 未登记 |
+| relocation-project-lifecycle | 进单日期默认当天且可补录 | 未登记 |
+| relocation-project-lifecycle | 待进单进单日期可空 | 未登记 |
+| relocation-project-lifecycle | 先录入实际装机完成日期后进单自动待验收 | 未登记 |
+| relocation-project-lifecycle | 计划上门日期与运输日期分开记录 | 未登记 |
+| relocation-project-lifecycle | 计划日期不自动流转 | 未登记 |
+| relocation-project-lifecycle | 录入实际装机完成日期自动进入待验收 | 未登记 |
+| serial-address-update | 创建时默认当天 | 未登记 |
+| serial-address-update | 补录历史日期 | 未登记 |
+| serial-address-update | 按更新日期所属月份计数 | 未登记 |
+| service-order-recording | 开单日期未填默认当天 | 未登记 |
+| service-order-recording | 开单日期默认当天 | 未登记 |
+| workbench-access | 恢复码仅展示一次 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
+| workbench-access | 凭恢复码重置密码 | e2e/electron-smoke.spec.ts（未找到「关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录」） |
+| workbench-interface | 首次启动展示初始化界面 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
+| workbench-interface | 后续启动展示登录界面 | e2e/electron-smoke.spec.ts（未找到「关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录」） |
+| workbench-interface | 访问门不改变主结构 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
+| workbench-interface | 搬迁范围步骤字段 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
+| workbench-interface | 正式进单 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
+| workbench-interface | 填写服务单号要求工程师并同次创建开单 | tests/renderer/app.test.tsx（未找到「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」） |
+| workbench-interface | 人工选择主状态并就地反馈 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
+| workbench-interface | 覆盖九类业务动作 | 未登记 |
+| workbench-interface | 备件申请并入损坏/维修事项 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
+| workbench-interface | 二维码申请不在项目快速记录 | tests/renderer/app.test.tsx（未找到「快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单」） |
+| workbench-interface | 批次表单字段 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
+| workbench-interface | 物流费用并入批次表单 | 未登记 |
+| workbench-interface | 上门活动表单同页记录拆机与各工作类型 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
+| workbench-interface | 开单表单字段 | tests/renderer/app.test.tsx（未找到「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」） |
+| workbench-interface | 搬迁仪器表单二维码是否申请手工字段 | tests/renderer/app.test.tsx（未找到「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」） |
+| workbench-interface | 损坏/维修表单合同金额 0 就地反馈 | tests/renderer/app.test.tsx（未找到「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」） |
+| workbench-interface | 序列号地址更新与二维码申请独立模块入口 | tests/renderer/app.test.tsx（未找到「独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型」） |
+| workbench-interface | 不用通用空表单 | tests/renderer/app.test.tsx（未找到「快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单」） |
+| workbench-interface | 校验失败就地提示 | tests/renderer/app.test.tsx（未找到「开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈」） |
+| workbench-interface | 扩展 tab 或独立导航模块提供新增能力 | tests/renderer/app.test.tsx（未找到「独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型」） |
+| workbench-interface | 二维码申请模块表单多选类型 | tests/renderer/app.test.tsx（未找到「独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型」） |
+| workbench-interface | 费用与掉票 tab 展示金额与掉票记录 | e2e/electron-smoke.spec.ts（未找到「初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻」） |
