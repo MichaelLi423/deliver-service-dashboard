@@ -230,6 +230,8 @@ export function WorkbenchV2({
   const requests = useRef({ projects: 0, detail: 0, section: 0, overview: 0 });
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const importTrigger = useRef<HTMLButtonElement>(null);
+  /** 提醒跳转/新建成功后钉住的目标项目：即使不在当前页也不被 loadProjects 重置选中。 */
+  const selectionPin = useRef("");
 
   const currentPageIndex = cursorStack.length - 1;
   const currentSectionIndex = sectionCursors.length - 1;
@@ -268,6 +270,7 @@ export function WorkbenchV2({
     cursor: string | null,
     pageIndex: number,
     focusId?: string,
+    filterOverride?: Filters,
   ): Promise<void> {
     const id = ++requests.current.projects;
     setLoading((old) => ({ ...old, projects: true }));
@@ -275,16 +278,17 @@ export function WorkbenchV2({
     try {
       const api = bridge();
       if (!api) throw new Error("当前环境未连接主进程");
+      const effective = filterOverride ?? filters;
       const next = await requireV2(
         api,
         "v2ProjectPage",
       )({
         limit: PAGE_SIZE,
         cursor,
-        status: filters.status || null,
-        reminder: filters.reminder || null,
-        region: filters.region.trim() || null,
-        query: filters.query.trim() || null,
+        status: effective.status || null,
+        reminder: effective.reminder || null,
+        region: effective.region.trim() || null,
+        query: effective.query.trim() || null,
       });
       if (
         id !== requests.current.projects ||
@@ -292,11 +296,15 @@ export function WorkbenchV2({
       )
         return;
       setProjectPage(next);
-      setSelectedId((current) =>
-        next.projects.some((project) => project.id === current)
-          ? current
-          : (next.projects[0]?.id ?? ""),
-      );
+      setSelectedId((current) => {
+        if (next.projects.some((project) => project.id === current)) {
+          // 目标已在当前页，解除钉住（提醒/新建跳转已完成定位）。
+          if (selectionPin.current === current) selectionPin.current = "";
+          return current;
+        }
+        if (selectionPin.current) return selectionPin.current;
+        return next.projects[0]?.id ?? "";
+      });
       setNotice(
         next.total
           ? `已显示第 ${pageIndex * next.limit + 1} 至 ${Math.min((pageIndex + 1) * next.limit, next.total)} 项，共 ${next.total} 项`
@@ -390,15 +398,17 @@ export function WorkbenchV2({
   async function refreshInvalidated(
     tags: readonly WorkbenchV2InvalidateTag[],
     changedProjectId?: string,
+    filterOverride?: Filters,
   ): Promise<void> {
     const jobs: Promise<void>[] = [];
     if (tags.includes("overview")) jobs.push(loadOverview());
     if (tags.includes("projects"))
       jobs.push(
         loadProjects(
-          cursorStack.at(-1) ?? null,
-          currentPageIndex,
+          filterOverride ? null : (cursorStack.at(-1) ?? null),
+          filterOverride ? 0 : currentPageIndex,
           changedProjectId ?? selectedId,
+          filterOverride,
         ),
       );
     if (selectedId && tags.includes(`project:${selectedId}`))
@@ -432,7 +442,21 @@ export function WorkbenchV2({
       if (!api) throw new Error("当前环境未连接主进程");
       const result = await requireV2(api, "v2Mutate")(request);
       revision.current = Math.max(revision.current, result.businessRevision);
-      await refreshInvalidated(result.invalidated, result.changed?.projectId);
+      let cleared: Filters | undefined;
+      if (
+        request.op === "create_project" &&
+        result.changed?.created &&
+        result.changed.projectId
+      ) {
+        // 新建成功：清除可能隐藏新项目的筛选、回到首屏，并钉住返回的项目 id 自动选中。
+        cleared = { status: "", reminder: "", region: "", query: "" };
+        selectionPin.current = result.changed.projectId;
+        setDraftFilters(cleared);
+        setFilters(cleared);
+        setCursorStack([null]);
+        setSelectedId(result.changed.projectId);
+      }
+      await refreshInvalidated(result.invalidated, result.changed?.projectId, cleared);
       setLayer(null);
       setToast(success);
       window.setTimeout(() => setToast(""), 2800);
@@ -443,10 +467,12 @@ export function WorkbenchV2({
 
   function applyFilters(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
+    selectionPin.current = "";
     setFilters({ ...draftFilters });
   }
   function resetFilters(): void {
     const next: Filters = { status: "", reminder: "", region: "", query: "" };
+    selectionPin.current = "";
     setDraftFilters(next);
     setFilters(next);
   }
@@ -454,6 +480,8 @@ export function WorkbenchV2({
     item: WorkbenchV2OverviewDto["reminderPreview"][number],
   ): void {
     const query = item.ecc ?? item.tempNo ?? item.customerName;
+    // 钉住提醒目标：即使新筛选下不在当前页，也保持选中并继续按 id 读取详情。
+    selectionPin.current = item.projectId;
     setFilters({ status: "", reminder: "any", region: "", query });
     setDraftFilters({ status: "", reminder: "any", region: "", query });
     setSelectedId(item.projectId);
@@ -464,6 +492,7 @@ export function WorkbenchV2({
     event: KeyboardEvent<HTMLTableRowElement>,
     index: number,
   ): void {
+    selectionPin.current = "";
     const rows = projectPage?.projects ?? [];
     if (!rows.length) return;
     let target = index;
@@ -493,6 +522,7 @@ export function WorkbenchV2({
 
   async function nextProjectPage(focus = false): Promise<void> {
     if (!projectPage?.nextCursor) return;
+    selectionPin.current = "";
     const stack = [...cursorStack, projectPage.nextCursor];
     setCursorStack(stack);
     await loadProjects(
@@ -503,6 +533,7 @@ export function WorkbenchV2({
   }
   async function previousProjectPage(focus = false): Promise<void> {
     if (cursorStack.length <= 1) return;
+    selectionPin.current = "";
     const stack = cursorStack.slice(0, -1);
     const cursor = stack.at(-1) ?? null;
     setCursorStack(stack);
@@ -715,6 +746,7 @@ export function WorkbenchV2({
             <button
               className="text-action"
               onClick={() => {
+                selectionPin.current = "";
                 setDraftFilters((old) => ({ ...old, status: "" }));
                 setFilters((old) => ({ ...old, status: "" }));
               }}
@@ -730,6 +762,7 @@ export function WorkbenchV2({
                 className={`stage ${item.status === "pending_entry" ? "not-entered" : ""} ${filters.status === item.status ? "active" : ""}`}
                 aria-pressed={filters.status === item.status}
                 onClick={() => {
+                  selectionPin.current = "";
                   setDraftFilters((old) => ({ ...old, status: item.status }));
                   setFilters((old) => ({ ...old, status: item.status }));
                 }}
@@ -764,6 +797,7 @@ export function WorkbenchV2({
               <button
                 className="text-action"
                 onClick={() => {
+                  selectionPin.current = "";
                   setDraftFilters((old) => ({ ...old, reminder: "any" }));
                   setFilters((old) => ({ ...old, reminder: "any" }));
                 }}
@@ -906,6 +940,7 @@ export function WorkbenchV2({
                   <th>累计掉票</th>
                   <th>更新时间</th>
                   <th>就近录入</th>
+                  <th>详情</th>
                 </tr>
               </thead>
               <tbody>
@@ -919,8 +954,14 @@ export function WorkbenchV2({
                     className={`project-status-${project.status.replaceAll("_", "-")}`}
                     tabIndex={project.id === selectedId ? 0 : -1}
                     aria-selected={project.id === selectedId}
-                    onFocus={() => setSelectedId(project.id)}
-                    onClick={() => setSelectedId(project.id)}
+                    onFocus={() => {
+                      selectionPin.current = "";
+                      setSelectedId(project.id);
+                    }}
+                    onClick={() => {
+                      selectionPin.current = "";
+                      setSelectedId(project.id);
+                    }}
                     onKeyDown={(event) => queueKey(event, index)}
                   >
                     <td>
@@ -958,6 +999,19 @@ export function WorkbenchV2({
                         }}
                       >
                         记录
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        className="text-action row-quick-action"
+                        aria-label={`查看${project.customerName}详情`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          selectionPin.current = "";
+                          setSelectedId(project.id);
+                        }}
+                      >
+                        查看详情
                       </button>
                     </td>
                   </tr>
@@ -1323,9 +1377,8 @@ function ProjectDetails({
   onInvoiceRevoke: (
     invoice: Extract<WorkbenchV2SectionRow, { kind: "invoices" }>,
   ) => void;
-}): JSX.Element | null {
+}): JSX.Element {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  if (!project) return null;
   const action: Partial<Record<DetailTab, WorkbenchActionType>> = {
     搬迁仪器: "instrument",
     搬迁批次: "batch",
@@ -1342,78 +1395,91 @@ function ProjectDetails({
       <div className="detail-head">
         <div>
           <p className="overline">项目详情</p>
-          <h2 id="detail-title">{project.customerName}</h2>
+          <h2 id="detail-title">
+            {project?.customerName || "未选择项目"}
+          </h2>
           <span>
-            {project.ecc || project.tempNo} · {project.region || "区域待补"}
+            {project
+              ? `${project.ecc || project.tempNo} · ${project.region || "区域待补"}`
+              : "从项目队列选择一行，或点击项目提醒跳转对应项目"}
           </span>
         </div>
-        <div className="detail-money">
-          <div>
-            <span>合同 USD 含税金额</span>
-            <strong>{money(project.contractAmount)}</strong>
+        {project && (
+          <div className="detail-money">
+            <div>
+              <span>合同 USD 含税金额</span>
+              <strong>{money(project.contractAmount)}</strong>
+            </div>
+            <div>
+              <span>最终可确认金额</span>
+              <strong>{money(project.finalAmount)}</strong>
+            </div>
+            <div>
+              <span>累计掉票</span>
+              <strong>{money(project.invoicedAmount)}</strong>
+            </div>
           </div>
-          <div>
-            <span>最终可确认金额</span>
-            <strong>{money(project.finalAmount)}</strong>
-          </div>
-          <div>
-            <span>累计掉票</span>
-            <strong>{money(project.invoicedAmount)}</strong>
-          </div>
-        </div>
-      </div>
-      <div className="tabbar">
-        <div role="tablist" aria-label="项目详情">
-          {TABS.map((item, index) => (
-            <button
-              ref={(node) => {
-                tabRefs.current[index] = node;
-              }}
-              role="tab"
-              aria-selected={tab === item}
-              aria-controls="project-detail-panel"
-              tabIndex={tab === item ? 0 : -1}
-              key={item}
-              onClick={() => onTab(item)}
-              onKeyDown={(event) => {
-                if (
-                  !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
-                    event.key,
-                  )
-                )
-                  return;
-                event.preventDefault();
-                const next =
-                  event.key === "Home"
-                    ? 0
-                    : event.key === "End"
-                      ? TABS.length - 1
-                      : event.key === "ArrowRight"
-                        ? (index + 1) % TABS.length
-                        : (index - 1 + TABS.length) % TABS.length;
-                onTab(TABS[next]!);
-                tabRefs.current[next]?.focus();
-              }}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-        {action[tab] && (
-          <button
-            className="button small"
-            onClick={() => onAction(action[tab]!)}
-          >
-            就近记录
-          </button>
         )}
       </div>
+      {project && (
+        <div className="tabbar">
+          <div role="tablist" aria-label="项目详情">
+            {TABS.map((item, index) => (
+              <button
+                ref={(node) => {
+                  tabRefs.current[index] = node;
+                }}
+                role="tab"
+                aria-selected={tab === item}
+                aria-controls="project-detail-panel"
+                tabIndex={tab === item ? 0 : -1}
+                key={item}
+                onClick={() => onTab(item)}
+                onKeyDown={(event) => {
+                  if (
+                    !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                      event.key,
+                    )
+                  )
+                    return;
+                  event.preventDefault();
+                  const next =
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? TABS.length - 1
+                        : event.key === "ArrowRight"
+                          ? (index + 1) % TABS.length
+                          : (index - 1 + TABS.length) % TABS.length;
+                  onTab(TABS[next]!);
+                  tabRefs.current[next]?.focus();
+                }}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+          {action[tab] && (
+            <button
+              className="button small"
+              onClick={() => onAction(action[tab]!)}
+            >
+              就近记录
+            </button>
+          )}
+        </div>
+      )}
       <div id="project-detail-panel" className="detail-body" role="tabpanel">
         {error ? (
           <div className="page-error" role="alert">
             {error}
             <button onClick={onRetry}>重试详情</button>
           </div>
+        ) : !project ? (
+          <Empty
+            title="未选择项目"
+            copy="从项目队列选择一行，或点击项目提醒跳转对应项目。"
+          />
         ) : loading ? (
           <div className="detail-loading" role="status">
             正在读取当前项目数据…
@@ -1449,7 +1515,7 @@ function ProjectDetails({
           />
         )}
       </div>
-      {tab !== "项目总览" && (
+      {project && tab !== "项目总览" && (
         <div className="section-pagination">
           <button
             className="button"
