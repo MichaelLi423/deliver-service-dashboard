@@ -92,30 +92,30 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openContext(dir);
-      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
+      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
       // 推进到待掉票：实际装机完成 → 待验收；验收报告 → 待掉票
-      ctx.projectService.recordActualInstallDone(p1, '2026-07-10T18:00:00+08:00');
+      ctx.projectService.recordActualInstallDone(p1, '2026-07-10');
       ctx.projectService.markAcceptance(p1, '2026-07-12');
       expect(ctx.projects.findById(p1)!.status).toBe('pending_invoice');
 
       // 项目提醒（workbench-todos 消费提醒字段）
-      ctx.reminder.setReminder(p1, { at: '2026-08-20T09:00:00+08:00', note: '跟踪回款资料' }, ACTOR);
+      ctx.reminder.setReminder(p1, { at: '2026-08-20', note: '跟踪回款资料' }, ACTOR);
 
       // 掉票 6000 → 达到最终可确认金额 10000 的 60%，状态仍待掉票
-      const inv = ctx.financial.recordInvoice(p1, { amountCents: 600000n, invoicedAt: '2026-07-15T10:00:00+08:00' }, ACTOR);
+      const inv = ctx.financial.recordInvoice(p1, { amountCents: 600000n, invoicedAt: '2026-07-15' }, ACTOR);
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
       expect(ctx.projects.findById(p1)!.status).toBe('pending_invoice');
       expect(ctx.reporting.buildReport(month).monthlyInvoices[0].amountCents).toBe(600000n);
 
       // 编辑掉票 → 报表实时更新；主状态与项目提醒不受影响
-      ctx.financial.editInvoice(inv.id, { amountCents: 1000000n, invoicedAt: '2026-07-16T10:00:00+08:00' }, ACTOR);
+      ctx.financial.editInvoice(inv.id, { amountCents: 1000000n, invoicedAt: '2026-07-16' }, ACTOR);
       // 累计 10000 = 最终可确认 10000 → 金额闭环自动进入已完成（经 lifecycle 校验入口）
       expect(ctx.projects.findById(p1)!.status).toBe('completed');
       expect(ctx.reporting.buildReport(month).monthlyInvoices[0].amountCents).toBe(1000000n);
       expect(ctx.projects.findById(p1)!.reminderNote).toBe('跟踪回款资料'); // 项目提醒不因金额/状态变化改变
 
       // 撤销掉票（终态）→ 金额闭环回到待掉票；报表排除；项目提醒仍不变
-      ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-07-20T10:00:00+08:00', revokeReason: '重复登记' }, ACTOR);
+      ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-07-20', revokeReason: '重复登记' }, ACTOR);
       expect(ctx.projects.findById(p1)!.status).toBe('pending_invoice');
       expect(ctx.reporting.buildReport(month).monthlyInvoices).toHaveLength(0);
       expect(ctx.projects.findById(p1)!.reminderNote).toBe('跟踪回款资料');
@@ -130,7 +130,7 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openContext(dir);
-      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
+      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
       expect(ctx.reporting.buildReport(month).entryAmountByRegion[0].region).toBe('华东');
       // 区域为项目事实，修改后按去除首尾空白后的精确值实时重算，不保存快照
@@ -147,9 +147,9 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openContext(dir);
-      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
+      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
       // 已录入实际装机完成时间：自动触发待验收
-      ctx.projectService.recordActualInstallDone(p1, '2026-07-10T18:00:00+08:00');
+      ctx.projectService.recordActualInstallDone(p1, '2026-07-10');
       expect(ctx.projects.findById(p1)!.status).toBe('pending_acceptance');
 
       // 人工提交相同/其他状态 → 自动触发优先（实际装机完成 → 待验收）
@@ -176,9 +176,9 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openContext(dir);
-      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
-      ctx.financial.recordInvoice(p1, { amountCents: 500000n, invoicedAt: '2026-07-15T10:00:00+08:00' }, ACTOR);
-      ctx.reminder.setReminder(p1, { at: '2026-08-01T09:00:00+08:00', note: '提醒A' }, ACTOR);
+      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      ctx.financial.recordInvoice(p1, { amountCents: 500000n, invoicedAt: '2026-07-15' }, ACTOR);
+      ctx.reminder.setReminder(p1, { at: '2026-08-01', note: '提醒A' }, ACTOR);
 
       // 动作记录持久化用户名快照「负责人甲」
       const snapshotBefore = ctx.db.prepare('SELECT username_snapshot FROM invoices').get() as { username_snapshot: string | null };
@@ -198,12 +198,12 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openContext(dir);
-      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
+      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
       const before = ctx.projects.findById(p1)!.status;
       const beforeUpdatedAt = ctx.projects.findById(p1)!.updatedAt;
 
       // workbench-todos 只消费提醒字段：维护提醒不改变主状态（也不触发 lifecycle）
-      ctx.reminder.setReminder(p1, { at: '2026-08-01T09:00:00+08:00', note: '仅提醒' }, ACTOR);
+      ctx.reminder.setReminder(p1, { at: '2026-08-01', note: '仅提醒' }, ACTOR);
       expect(ctx.projects.findById(p1)!.status).toBe(before);
 
       // operational-reporting 只读：构建报表不产生任何事实/状态副作用
@@ -212,14 +212,14 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
       expect(ctx.projects.findById(p1)!.updatedAt).toBe(beforeUpdatedAt);
 
       // 主状态转换唯一经 lifecycle 校验入口：非法人工调整（无闭环依据直接已完成）被拒且状态不变
-      ctx.reminder.setReminder(p1, { at: '2026-08-01T09:00:00+08:00', note: '仅提醒' }, ACTOR);
+      ctx.reminder.setReminder(p1, { at: '2026-08-01', note: '仅提醒' }, ACTOR);
       const rejected = ctx.projectService.adjustStatus(p1, 'completed');
       expect(rejected.ok).toBe(false);
       expect(ctx.projects.findById(p1)!.status).toBe('pending_entry');
 
       // financial 仅消费 lifecycle 校验结果：取消有掉票历史的项目被 lifecycle 拒绝
-      ctx.financial.recordInvoice(p1, { amountCents: 100000n, invoicedAt: '2026-07-15T10:00:00+08:00' }, ACTOR);
-      expect(() => ctx.projectService.cancelProject(p1, { time: '2026-07-20T10:00:00+08:00', reason: '尝试取消' })).toThrow(/掉票/);
+      ctx.financial.recordInvoice(p1, { amountCents: 100000n, invoicedAt: '2026-07-15' }, ACTOR);
+      expect(() => ctx.projectService.cancelProject(p1, { time: '2026-07-20', reason: '尝试取消' })).toThrow(/掉票/);
       closeDatabase(ctx.db);
     } finally {
       cleanupTempDir(dir);

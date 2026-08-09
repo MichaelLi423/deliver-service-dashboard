@@ -15,6 +15,22 @@ describe('事实来源与归属（tasks 1.5 / D4 / workbench-access）', () => {
     expect(meta.businessAt).not.toBe(meta.auditAt);
   });
 
+  it('业务时间为 yyyy-mm-dd 且必须是真实日历日期，审计时间仍为带偏移 ISO', () => {
+    expect(() =>
+      createFactMeta({ source: 'manual', businessAt: '2026-07-15T10:30:00+08:00', actor: makeAccount() }),
+    ).toThrow(ValidationError);
+    expect(() =>
+      createFactMeta({ source: 'manual', businessAt: '2026-02-30', actor: makeAccount() }),
+    ).toThrow(ValidationError);
+    expect(() =>
+      createFactMeta({ source: 'manual', businessAt: '2026-13-01', actor: makeAccount() }),
+    ).toThrow(ValidationError);
+    // 审计时间必须为带偏移 ISO（不允许业务日期）
+    expect(() =>
+      createFactMeta({ source: 'manual', businessAt: '2026-07-15', auditAt: '2026-07-15', actor: makeAccount() }),
+    ).toThrow(ValidationError);
+  });
+
   it('手工录入事实必须携带当前登录账号的内部 ID 与用户名快照', () => {
     const meta = manualFact({ businessAt: EXAMPLE_BUSINESS_TIME });
     expect(meta.source).toBe('manual');
@@ -32,7 +48,7 @@ describe('事实来源与归属（tasks 1.5 / D4 / workbench-access）', () => {
   });
 
   it('迁移导入事实不归属本地账号（迁移不计手工录入）', () => {
-    const meta = importFact({ businessAt: '2026-05-10T09:00:00+08:00' });
+    const meta = importFact({ businessAt: '2026-05-10' });
     expect(meta.source).toBe('import');
     expect(meta.actor).toBeNull();
     expect(isManual(meta)).toBe(false);

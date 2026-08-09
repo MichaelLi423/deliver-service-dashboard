@@ -9,19 +9,22 @@
  * - 合同金额直接覆盖、不保存正式合同变更对象/历史、不要求记录原因（TBD-20）。
  * - 掉票记录为手工录入事实，携带账号归属快照（design D12）。
  * 规则实现见 tasks 5.x。
+ * 业务时间字段（掉票/撤销日期）为 yyyy-mm-dd；lastModifiedAt、createdAt 仍为带偏移 ISO。
  */
+import type { BusinessDate, IsoDateTime } from '../../core/time';
+
 export interface InvoiceRecord {
   id: string;
   projectId: string;
   /** 掉票金额（分整数，必须 > 0）。 */
   amountCents: bigint;
-  /** 掉票时间（业务时间，按该月份归属）。 */
-  invoicedAt: string;
-  /** 撤销时间与原因（撤销后为终态）。 */
-  revokedAt: string | null;
+  /** 掉票日期（业务日期，按该月份归属）。 */
+  invoicedAt: BusinessDate;
+  /** 撤销日期与原因（业务日期；撤销后为终态）。 */
+  revokedAt: BusinessDate | null;
   revokeReason: string | null;
-  /** 最后修改时间（掉票直接覆盖编辑时自动记录）。 */
-  lastModifiedAt: string;
+  /** 最后修改时间（审计时间，掉票直接覆盖编辑时自动记录，带偏移 ISO）。 */
+  lastModifiedAt: IsoDateTime;
   /** 操作账号归属快照。 */
   operatorAccountId: string | null;
   operatorUsername: string | null;
@@ -54,13 +57,13 @@ export function hasAnyInvoiceHistory(invoices: InvoiceRecord[]): boolean {
 export interface InvoiceInput {
   /** 掉票金额（分整数，必须 > 0）。 */
   amountCents: bigint;
-  /** 掉票时间（业务时间；缺省默认当前时间）。 */
-  invoicedAt?: string;
+  /** 掉票日期（业务日期；缺省默认当天）。 */
+  invoicedAt?: BusinessDate;
 }
 
-/** 掉票撤销输入（5.9）：撤销时间与原因均必填。 */
+/** 掉票撤销输入（5.9）：撤销日期与原因均必填。 */
 export interface InvoiceRevokeInput {
-  revokedAt: string;
+  revokedAt: BusinessDate;
   revokeReason: string;
 }
 

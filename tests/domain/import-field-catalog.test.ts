@@ -51,14 +51,42 @@ describe('8.17 七类固定目标字段目录', () => {
     expect(budget.currency).toBe('RMB');
 
     const appliedAt = findFieldByTarget('logistics_fee', 'logistics_fee.applied_at')!;
-    expect(appliedAt.type).toBe('datetime');
-    expect(appliedAt.dateSemantics).toBe('datetime');
-    expect(appliedAt.required).toBe(true); // 目标必填：物流费用申请（登记）时间
+    expect(appliedAt.type).toBe('date');
+    expect(appliedAt.dateSemantics).toBe('date');
+    expect(appliedAt.required).toBe(true); // 目标必填：物流费用申请（登记）日期
 
     const contractStart = findFieldByTarget('project', 'project.contract_start_date')!;
     expect(contractStart.type).toBe('date');
     expect(contractStart.dateSemantics).toBe('date');
     expect(contractStart.required).toBe(false);
+  });
+
+  it('全部业务时间字段统一为 date 语义（design D30：业务时间仅记录业务日期 yyyy-mm-dd）', () => {
+    // 目标业务时间字段（进单/开单/掉票/申请/更新等）一律为 date，输出 yyyy-mm-dd。
+    for (const field of CATEGORY_FIELDS.project) {
+      if (['project.entry_at', 'project.actual_install_done_at', 'project.cancelled_at'].includes(field.field)) {
+        expect(field.type, field.field).toBe('date');
+        expect(field.dateSemantics, field.field).toBe('date');
+      }
+    }
+    for (const field of [
+      'service_order.ordered_at',
+      'invoice.invoiced_at',
+      'logistics_fee.applied_at',
+      'serial_address_update.updated_at',
+      'qr_request.requested_at',
+      'ship_to_request.requested_at',
+    ]) {
+      const def = findFieldByTarget(field.split('.')[0] as 'service_order' | 'invoice' | 'logistics_fee' | 'serial_address_update' | 'qr_request' | 'ship_to_request', field)!;
+      expect(def.type, field).toBe('date');
+      expect(def.dateSemantics, field).toBe('date');
+    }
+    // 审计/技术时间仍精确：目录中不再有 datetime 类型字段（审计时间由系统生成）。
+    for (const category of IMPORT_CATEGORIES) {
+      for (const f of fieldCatalogFor(category)) {
+        expect(f.type, `${f.field} 不应为 datetime`).not.toBe('datetime');
+      }
+    }
   });
 
   it('业务键字段覆盖 ECC / 服务单号 / Account ID / 序列号', () => {

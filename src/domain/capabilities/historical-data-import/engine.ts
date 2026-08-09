@@ -1,6 +1,7 @@
 import { parseDecimalToCents } from '../../core/money';
 import { createHash } from 'node:crypto';
 import type { ProjectStatusOrCancelled } from '../relocation-project-lifecycle/states';
+import { normalizeDateValue } from './excel-date';
 import {
   MAPPING_V1,
   fileRouteByFileName,
@@ -215,13 +216,47 @@ export interface BuildPlanOptions {
   mapping?: MigrationMapping;
 }
 
-/** 目标项目字段赋值辅助（空串视为清除为 null）。 */
+/**
+ * 目标业务日期字段（design D30：业务时间统一为 yyyy-mm-dd）。
+ * 引擎路径与向导规范化路径同口径：接受 Excel serial / 纯日期 / 显式偏移 ISO /
+ * 无偏移本地 datetime，输出 yyyy-mm-dd；非法值保留原文（校验阶段定位，不猜测）。
+ * 日期系统按模板工作簿 1900 系统（旧五份来源 Excel 日期单元格已在读取层转为
+ * 本地墙钟文本，serial 文本按 1900 系统解释，确定性可复现）。
+ */
+const BUSINESS_DATE_TARGETS = new Set<string>([
+  'project.entry_at',
+  'project.contract_start_date',
+  'project.contract_end_date',
+  'project.actual_install_done_at',
+  'project.acceptance_report_date',
+  'project.cancelled_at',
+  'service_order.ordered_at',
+  'invoice.invoiced_at',
+  'logistics_fee.applied_at',
+  'serial_address_update.updated_at',
+  'qr_request.requested_at',
+  'ship_to_request.requested_at',
+]);
+
+/** 业务日期字段规范化：→ yyyy-mm-dd；非法/无法解释保留原文由校验定位。 */
+function normalizeBusinessDateValue(value: string): string {
+  const canonical = normalizeDateValue(value, '1900', 'date');
+  return canonical ?? value;
+}
+
+/** 目标项目字段赋值辅助（空串视为清除为 null；业务日期字段统一为 yyyy-mm-dd）。 */
 function applyProjectField(
   project: ImportedProject,
   target: string,
   value: string,
 ): void {
-  const v = value === '' ? null : value;
+  const cleared = value === '' ? null : value;
+  const v =
+    cleared === null
+      ? null
+      : BUSINESS_DATE_TARGETS.has(target)
+        ? normalizeBusinessDateValue(cleared)
+        : cleared;
   switch (target) {
     case 'contract.customer_name':
       project.customerName = v;
@@ -538,7 +573,7 @@ export function buildImportPlan(
             sourceHash: contentHash(row),
             serviceOrderNo,
             orderType: mappedValue(row, 'service_order.order_type', mapping) ?? '',
-            orderedAt: mappedValue(row, 'service_order.ordered_at', mapping) ?? '',
+            orderedAt: normalizeBusinessDateValue(mappedValue(row, 'service_order.ordered_at', mapping) ?? ''),
             engineer: mappedValue(row, 'service_order.engineer', mapping) ?? '',
             customerName: mappedValue(row, 'service_order.customer_name', mapping) ?? '',
             note: mappedValue(row, 'service_order.note', mapping),
@@ -571,7 +606,7 @@ export function buildImportPlan(
           sourceHash: contentHash(row),
           ecc,
           amountCents: amountCents ?? 0n,
-          invoicedAt: mappedValue(row, 'invoice.invoiced_at', mapping) ?? '',
+          invoicedAt: normalizeBusinessDateValue(mappedValue(row, 'invoice.invoiced_at', mapping) ?? ''),
           region: mappedValue(row, 'invoice.region', mapping),
           customerName: mappedValue(row, 'invoice.customer_name', mapping),
         });
@@ -593,7 +628,7 @@ export function buildImportPlan(
           importSourceKey: makeImportSourceKey(row, 'lf'),
           sourceHash: contentHash(row),
           ecc: mappedValue(row, 'invoice.ecc', mapping),
-          appliedAt: mappedValue(row, 'logistics_fee.applied_at', mapping) ?? '',
+          appliedAt: normalizeBusinessDateValue(mappedValue(row, 'logistics_fee.applied_at', mapping) ?? ''),
           budgetPriceCents: parseAmount('logistics_fee.budget_price_cents'),
           dealPriceCents: parseAmount('logistics_fee.deal_price_cents'),
           logisticsCostCents: parseAmount('logistics_fee.logistics_cost_cents'),
@@ -611,7 +646,7 @@ export function buildImportPlan(
           newSiteAddress: mappedValue(row, 'serial_address_update.new_site_address', mapping) ?? '',
           serialNo: mappedValue(row, 'serial_address_update.serial_no', mapping) ?? '',
           accountId: mappedValue(row, 'serial_address_update.account_id', mapping) ?? '',
-          updatedAt: mappedValue(row, 'serial_address_update.updated_at', mapping) ?? '',
+          updatedAt: normalizeBusinessDateValue(mappedValue(row, 'serial_address_update.updated_at', mapping) ?? ''),
         });
         addRecord('serial_address_update');
         break;
@@ -635,7 +670,7 @@ export function buildImportPlan(
           importSourceKey: makeImportSourceKey(row, 'qr'),
           sourceHash: contentHash(row),
           applicant: mappedValue(row, 'qr_request.applicant', mapping) ?? '',
-          requestedAt: mappedValue(row, 'qr_request.requested_at', mapping) ?? '',
+          requestedAt: normalizeBusinessDateValue(mappedValue(row, 'qr_request.requested_at', mapping) ?? ''),
           typeCodes,
         });
         addRecord('qr_request');
@@ -649,7 +684,10 @@ export function buildImportPlan(
           customerName: mappedValue(row, 'ship_to_request.customer_name', mapping) ?? '',
           newSiteAddress: mappedValue(row, 'ship_to_request.new_site_address', mapping) ?? '',
           accountId: mappedValue(row, 'ship_to_request.account_id', mapping),
-          requestedAt: mappedValue(row, 'ship_to_request.requested_at', mapping),
+          requestedAt:
+            mappedValue(row, 'ship_to_request.requested_at', mapping) === null
+              ? null
+              : normalizeBusinessDateValue(mappedValue(row, 'ship_to_request.requested_at', mapping)!),
         });
         addRecord('ship_to_request');
         break;

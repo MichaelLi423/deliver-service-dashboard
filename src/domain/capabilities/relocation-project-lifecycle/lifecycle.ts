@@ -1,4 +1,5 @@
 import { ValidationError } from '../../core/errors';
+import type { BusinessDate } from '../../core/time';
 import {
   ALL_STATUSES,
   CANCELLED_STATUS,
@@ -44,10 +45,10 @@ export interface CancelFacts {
 export interface TransitionContext {
   currentStatus: ProjectStatusOrCancelled;
   requestedStatus: ProjectStatusOrCancelled;
-  /** 实际装机完成时间（业务时间）；null = 未录入。 */
-  actualInstallDoneAt: string | null;
-  /** 验收报告形成日期（业务时间）；null = 尚未验收。 */
-  acceptanceReportDate: string | null;
+  /** 实际装机完成日期（业务日期）；null = 未录入。 */
+  actualInstallDoneAt: BusinessDate | null;
+  /** 验收报告形成日期（业务日期）；null = 尚未验收。 */
+  acceptanceReportDate: BusinessDate | null;
   amounts: AmountClosureFacts;
   cancel: CancelFacts;
   /** 未进单先执行标签是否生效（存在时主状态保持待进单，TBD-08）。 */

@@ -50,7 +50,7 @@ function preparePendingInvoice(ctx: ReturnType<typeof setup>, amount = '10000'):
   eccSeq += 1;
   ctx.projectService.formalEntry(projectId, { ecc: `ECC-FIN-${eccSeq}` });
   ctx.projectService.adjustStatus(projectId, 'executing');
-  ctx.projectService.recordActualInstallDone(projectId, '2026-08-05T18:00:00+08:00');
+  ctx.projectService.recordActualInstallDone(projectId, '2026-08-05');
   ctx.projectService.markAcceptance(projectId, '2026-08-06');
   expect(ctx.projects.findById(projectId)!.status).toBe('pending_invoice');
   return projectId;
@@ -160,7 +160,7 @@ describe('最终可确认金额（5.4 / TBD-20）', () => {
   it('最终可确认金额不得低于累计掉票金额', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '10000');
-    ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
+    ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-08-01' }, ACTOR);
     expect(() => ctx.financial.setFinalConfirmableAmount(projectId, 400000n)).toThrow(/不得低于累计/);
     expect(ctx.contracts.findByProjectId(projectId)!.finalConfirmableAmountCents).toBe(1000000n); // 保持原值
   });
@@ -170,12 +170,12 @@ describe('分次掉票记录（5.5）', () => {
   it('同一项目可多次掉票，各自记录时间与金额并分别计数', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '10000');
-    const inv1 = ctx.financial.recordInvoice(projectId, { amountCents: 300000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-    const inv2 = ctx.financial.recordInvoice(projectId, { amountCents: 400000n, invoicedAt: '2026-08-10T00:00:00+08:00' }, ACTOR);
+    const inv1 = ctx.financial.recordInvoice(projectId, { amountCents: 300000n, invoicedAt: '2026-08-01' }, ACTOR);
+    const inv2 = ctx.financial.recordInvoice(projectId, { amountCents: 400000n, invoicedAt: '2026-08-10' }, ACTOR);
     expect(ctx.financial.listInvoices(projectId)).toHaveLength(2);
     expect(ctx.financial.sumActiveAmounts(projectId)).toBe(700000n);
     expect(ctx.financial.countActiveInvoices(projectId)).toBe(2);
-    expect(inv1.invoicedAt).toBe('2026-08-01T00:00:00+08:00');
+    expect(inv1.invoicedAt).toBe('2026-08-01');
     expect(inv2.amountCents).toBe(400000n);
   });
 });
@@ -200,8 +200,8 @@ describe('金额精度与录入金额正数校验（5.6 / TBD-11）', () => {
     expect(Money.parse('1234.567').cents).toBe(123457n);
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '10000');
-    ctx.financial.recordInvoice(projectId, { amountCents: Money.parse('999.999').cents, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-    ctx.financial.recordInvoice(projectId, { amountCents: Money.parse('0.005').cents, invoicedAt: '2026-08-02T00:00:00+08:00' }, ACTOR);
+    ctx.financial.recordInvoice(projectId, { amountCents: Money.parse('999.999').cents, invoicedAt: '2026-08-01' }, ACTOR);
+    ctx.financial.recordInvoice(projectId, { amountCents: Money.parse('0.005').cents, invoicedAt: '2026-08-02' }, ACTOR);
     // 1000.00 + 0.01 = 1000.01（定点求和，无浮点误差）
     expect(ctx.financial.sumActiveAmounts(projectId)).toBe(100001n);
   });
@@ -211,8 +211,8 @@ describe('超额保护（5.7）', () => {
   it('新增掉票导致累计超额被拒绝，提示先调整最终可确认金额', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '10000'); // final 1000000
-    ctx.financial.recordInvoice(projectId, { amountCents: 900000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-    expect(() => ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02T00:00:00+08:00' }, ACTOR)).toThrow(
+    ctx.financial.recordInvoice(projectId, { amountCents: 900000n, invoicedAt: '2026-08-01' }, ACTOR);
+    expect(() => ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02' }, ACTOR)).toThrow(
       /调整最终可确认金额/,
     );
     expect(ctx.financial.sumActiveAmounts(projectId)).toBe(900000n); // 未写入
@@ -221,9 +221,9 @@ describe('超额保护（5.7）', () => {
   it('先调整最终可确认金额后再掉票', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '10000');
-    ctx.financial.recordInvoice(projectId, { amountCents: 900000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
+    ctx.financial.recordInvoice(projectId, { amountCents: 900000n, invoicedAt: '2026-08-01' }, ACTOR);
     ctx.financial.setFinalConfirmableAmount(projectId, 1200000n);
-    ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02T00:00:00+08:00' }, ACTOR);
+    ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02' }, ACTOR);
     expect(ctx.financial.sumActiveAmounts(projectId)).toBe(1100000n);
   });
 });
@@ -232,15 +232,15 @@ describe('掉票直接编辑并记录最后修改时间（5.8）', () => {
   it('覆盖修改掉票金额与日期，不保留旧值，自动记录最后修改时间并重算', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '10000');
-    const inv = ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-07-01T00:00:00+08:00' }, ACTOR);
+    const inv = ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-07-01' }, ACTOR);
 
     const edited = ctx.financial.editInvoice(
       inv.id,
-      { amountCents: 600000n, invoicedAt: '2026-08-02T00:00:00+08:00' },
+      { amountCents: 600000n, invoicedAt: '2026-08-02' },
       ACTOR,
     );
     expect(edited.amountCents).toBe(600000n);
-    expect(edited.invoicedAt).toBe('2026-08-02T00:00:00+08:00');
+    expect(edited.invoicedAt).toBe('2026-08-02');
     expect(edited.lastModifiedAt).toBe('2026-08-07T10:00:00+08:00');
     expect(ctx.financial.sumActiveAmounts(projectId)).toBe(600000n); // 重算
   });
@@ -248,8 +248,8 @@ describe('掉票直接编辑并记录最后修改时间（5.8）', () => {
   it('已撤销掉票禁止编辑', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '10000');
-    const inv = ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-    ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-03T00:00:00+08:00', revokeReason: '误登记' }, ACTOR);
+    const inv = ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-08-01' }, ACTOR);
+    ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-03', revokeReason: '误登记' }, ACTOR);
     expect(() =>
       ctx.financial.editInvoice(inv.id, { amountCents: 600000n }, ACTOR),
     ).toThrow(/终态/);
@@ -258,11 +258,11 @@ describe('掉票直接编辑并记录最后修改时间（5.8）', () => {
   it('编辑后重算项目状态：累计达到最终可确认金额进入已完成', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '8000'); // final 800000
-    ctx.financial.recordInvoice(projectId, { amountCents: 600000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-    const inv2 = ctx.financial.recordInvoice(projectId, { amountCents: 100000n, invoicedAt: '2026-08-02T00:00:00+08:00' }, ACTOR);
+    ctx.financial.recordInvoice(projectId, { amountCents: 600000n, invoicedAt: '2026-08-01' }, ACTOR);
+    const inv2 = ctx.financial.recordInvoice(projectId, { amountCents: 100000n, invoicedAt: '2026-08-02' }, ACTOR);
     expect(ctx.projects.findById(projectId)!.status).toBe('pending_invoice');
     // 编辑第二笔金额 100000 → 200000：累计 800000 = final → 已完成
-    ctx.financial.editInvoice(inv2.id, { amountCents: 200000n, invoicedAt: '2026-08-03T00:00:00+08:00' }, ACTOR);
+    ctx.financial.editInvoice(inv2.id, { amountCents: 200000n, invoicedAt: '2026-08-03' }, ACTOR);
     expect(ctx.projects.findById(projectId)!.status).toBe('completed');
   });
 });
@@ -271,10 +271,10 @@ describe('掉票撤销终态而非删除（5.9 / TBD-19）', () => {
   it('撤销一条掉票记录：保留记录但标记已撤销，不再计入金额与次数并重算状态', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '8000');
-    const inv = ctx.financial.recordInvoice(projectId, { amountCents: 800000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
+    const inv = ctx.financial.recordInvoice(projectId, { amountCents: 800000n, invoicedAt: '2026-08-01' }, ACTOR);
     expect(ctx.projects.findById(projectId)!.status).toBe('completed');
 
-    ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-04T00:00:00+08:00', revokeReason: '客户修正' }, ACTOR);
+    ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-04', revokeReason: '客户修正' }, ACTOR);
     // 记录保留但已撤销
     expect(ctx.financial.listInvoices(projectId)).toHaveLength(1);
     expect(ctx.financial.sumActiveAmounts(projectId)).toBe(0n);
@@ -294,22 +294,22 @@ describe('掉票撤销终态而非删除（5.9 / TBD-19）', () => {
   it('已撤销掉票禁止重复撤销', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '8000');
-    const inv = ctx.financial.recordInvoice(projectId, { amountCents: 800000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-    ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-04T00:00:00+08:00', revokeReason: '撤销' }, ACTOR);
+    const inv = ctx.financial.recordInvoice(projectId, { amountCents: 800000n, invoicedAt: '2026-08-01' }, ACTOR);
+    ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-04', revokeReason: '撤销' }, ACTOR);
     expect(() =>
-      ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-05T00:00:00+08:00', revokeReason: '再撤销' }, ACTOR),
+      ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-05', revokeReason: '再撤销' }, ACTOR),
     ).toThrow(/终态/);
   });
 
   it('已撤销掉票禁止重新激活，更正需新增有效掉票', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '10000');
-    const inv = ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-    ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-04T00:00:00+08:00', revokeReason: '撤销' }, ACTOR);
+    const inv = ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-08-01' }, ACTOR);
+    ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-04', revokeReason: '撤销' }, ACTOR);
     // 无重新激活方法（终态）；更正 = 新增有效掉票
     const proto = Object.getPrototypeOf(ctx.financial) as Record<string, unknown>;
     expect('reactivateInvoice' in proto).toBe(false);
-    const correction = ctx.financial.recordInvoice(projectId, { amountCents: 400000n, invoicedAt: '2026-08-05T00:00:00+08:00' }, ACTOR);
+    const correction = ctx.financial.recordInvoice(projectId, { amountCents: 400000n, invoicedAt: '2026-08-05' }, ACTOR);
     expect(correction.amountCents).toBe(400000n);
     expect(ctx.financial.sumActiveAmounts(projectId)).toBe(400000n);
   });
@@ -319,9 +319,9 @@ describe('待掉票与已完成状态按金额闭环重算（5.10 / TBD-11）', 
   it('累计掉票达到最终可确认金额进入已完成', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '8000'); // final 800000
-    ctx.financial.recordInvoice(projectId, { amountCents: 600000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
+    ctx.financial.recordInvoice(projectId, { amountCents: 600000n, invoicedAt: '2026-08-01' }, ACTOR);
     expect(ctx.projects.findById(projectId)!.status).toBe('pending_invoice');
-    ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02T00:00:00+08:00' }, ACTOR);
+    ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02' }, ACTOR);
     expect(ctx.projects.findById(projectId)!.status).toBe('completed');
     expect(ctx.financial.countActiveInvoices(projectId)).toBe(2);
   });
@@ -329,10 +329,10 @@ describe('待掉票与已完成状态按金额闭环重算（5.10 / TBD-11）', 
   it('已完成项目因撤销掉票回到待掉票', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '8000');
-    ctx.financial.recordInvoice(projectId, { amountCents: 800000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
+    ctx.financial.recordInvoice(projectId, { amountCents: 800000n, invoicedAt: '2026-08-01' }, ACTOR);
     expect(ctx.projects.findById(projectId)!.status).toBe('completed');
     const inv = ctx.financial.listInvoices(projectId)[0];
-    ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-03T00:00:00+08:00', revokeReason: '撤销' }, ACTOR);
+    ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-03', revokeReason: '撤销' }, ACTOR);
     expect(ctx.projects.findById(projectId)!.status).toBe('pending_invoice');
   });
 
@@ -359,7 +359,7 @@ describe('已取消状态金额与掉票修改被拒绝（5.11）', () => {
     const projectId = preparePendingInvoice(ctx, '10000');
     // 取消要求无任何掉票历史 → 此处尚无掉票
     ctx.projectService.cancelProject(projectId, {
-      time: '2026-08-06T00:00:00+08:00',
+      time: '2026-08-06',
       reason: '客户取消搬迁计划',
     });
     expect(ctx.projects.findById(projectId)!.status).toBe('cancelled');
@@ -383,9 +383,9 @@ describe('已取消状态金额与掉票修改被拒绝（5.11）', () => {
     // 取消前已登记掉票 → 无法取消（取消约束），故直接验证已取消项目编辑/撤销被拒
     const other = setup();
     const pid2 = preparePendingInvoice(other, '10000');
-    other.financial.recordInvoice(pid2, { amountCents: 100000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
+    other.financial.recordInvoice(pid2, { amountCents: 100000n, invoicedAt: '2026-08-01' }, ACTOR);
     expect(() =>
-      other.projectService.cancelProject(pid2, { time: '2026-08-06T00:00:00+08:00', reason: '取消' }),
+      other.projectService.cancelProject(pid2, { time: '2026-08-06', reason: '取消' }),
     ).toThrow(/掉票历史/);
 
     // 用原始 ctx 验证已取消项目上编辑/撤销掉票被拒（构造已撤销前的掉票在取消前不存在）
@@ -397,7 +397,7 @@ describe('已取消状态金额与掉票修改被拒绝（5.11）', () => {
     ctx2.projectService.linkCustomer(pid3, 'c');
     ctx2.projectService.confirmScope(pid3);
     ctx2.projectService.formalEntry(pid3, { ecc: 'ECC-CANCEL2' });
-    ctx2.projectService.cancelProject(pid3, { time: '2026-08-06T00:00:00+08:00', reason: '取消' });
+    ctx2.projectService.cancelProject(pid3, { time: '2026-08-06', reason: '取消' });
     // 取消后无法登记掉票，故编辑/撤销也无从谈起——验证服务对所有掉票方法统一拒绝
     expect(() => ctx2.financial.recordInvoice(pid3, { amountCents: 100000n }, ACTOR)).toThrow(/已取消/);
   });

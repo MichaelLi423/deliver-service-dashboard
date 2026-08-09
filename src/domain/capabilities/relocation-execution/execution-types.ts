@@ -6,23 +6,34 @@
  * （拆机状态与开始/完成时间显式记录）、仪器拆装进度推导、物流报价与实际物流
  * 费用（物流费用申请/登记时间）。
  *
+ * 业务时间字段一律为 yyyy-mm-dd 业务日期（用户录入/推导），审计/技术时间
+ * （createdAt/updatedAt 等）仍为带偏移 ISO。
+ *
  * 手工事实统一携带账号归属快照（account_id + username_snapshot，design D12 /
  * tasks 3.x「所有手工事实绑定当前 account attribution」），历史统计按快照归属。
  */
+
+import type { BusinessDate } from '../../core/time';
 
 /** 搬迁批次（tasks 3.3/3.6）。 */
 export interface Batch {
   id: string;
   projectId: string;
-  /** 计划运输日期（yyyy-mm-dd）。 */
-  planTransportDate: string | null;
+  /** 计划运输日期（业务日期 yyyy-mm-dd）。 */
+  planTransportDate: BusinessDate | null;
   transportCompany: string | null;
-  /** 人民币原价（分整数；有值必须 > 0）。 */
+  /**
+   * 合同预算价（分整数；有值必须 > 0）。
+   * 物理字段名 originalPriceCents 沿用历史命名（旧「原价」口径），业务术语为「合同预算价」。
+   */
   originalPriceCents: bigint | null;
-  /** 人民币折后价（分整数；有值必须 > 0）。 */
+  /**
+   * 物流成交价（分整数；有值必须 > 0；即最终实际费用）。
+   * 物理字段名 discountedPriceCents 沿用历史命名（旧「折后价」口径），业务术语为「物流成交价」。
+   */
   discountedPriceCents: bigint | null;
-  /** 开始运输时间（null = 未开始运输）。 */
-  startedAt: string | null;
+  /** 开始运输日期（业务日期；null = 未开始运输）。 */
+  startedAt: BusinessDate | null;
   /** 账号归属快照（负责人手工录入报价/批次时记录）。 */
   accountId: string | null;
   usernameSnapshot: string | null;
@@ -36,8 +47,8 @@ export interface BatchChangeHistory {
   instrumentId: string;
   fromBatchId: string | null;
   toBatchId: string | null;
-  /** 变更时间（业务时间）。 */
-  changedAt: string;
+  /** 变更日期（业务日期）。 */
+  changedAt: BusinessDate;
   /** 登录账号归属（内部 ID + 用户名快照，必填）。 */
   accountId: string | null;
   usernameSnapshot: string | null;
@@ -79,8 +90,8 @@ export type WorkFactStatus = (typeof WORK_FACT_STATUSES)[number];
 export interface Activity {
   id: string;
   projectId: string;
-  /** 到访时间（业务时间）。 */
-  visitAt: string | null;
+  /** 到访日期（业务日期）。 */
+  visitAt: BusinessDate | null;
   /** 账号归属快照。 */
   accountId: string | null;
   usernameSnapshot: string | null;
@@ -102,10 +113,10 @@ export interface WorkFact {
   instrumentId: string;
   workType: WorkType;
   status: WorkFactStatus;
-  /** 开始时间（创建为进行中时记录）。 */
-  startedAt: string;
-  /** 完成时间（转为已完成时记录）。 */
-  completedAt: string | null;
+  /** 开始日期（业务日期；创建为进行中时记录）。 */
+  startedAt: BusinessDate;
+  /** 完成日期（业务日期；转为已完成时记录）。 */
+  completedAt: BusinessDate | null;
   /** 账号归属快照。 */
   accountId: string | null;
   usernameSnapshot: string | null;
@@ -120,31 +131,34 @@ export interface WorkFact {
 export interface InstrumentProgress {
   teardown: 'not_started' | 'in_progress' | 'done';
   install: 'not_started' | 'in_progress' | 'done';
-  /** 拆机开始时间（存在拆机事实时）。 */
-  teardownStartedAt: string | null;
-  /** 拆机完成时间（拆机已完成时）。 */
-  teardownCompletedAt: string | null;
-  /** 装机开始时间（存在装机事实时）。 */
-  installStartedAt: string | null;
-  /** 装机完成时间（装机已完成时）。 */
-  installCompletedAt: string | null;
+  /** 拆机开始日期（业务日期；存在拆机事实时）。 */
+  teardownStartedAt: BusinessDate | null;
+  /** 拆机完成日期（业务日期；拆机已完成时）。 */
+  teardownCompletedAt: BusinessDate | null;
+  /** 装机开始日期（业务日期；存在装机事实时）。 */
+  installStartedAt: BusinessDate | null;
+  /** 装机完成日期（业务日期；装机已完成时）。 */
+  installCompletedAt: BusinessDate | null;
 }
 
 /**
  * 实际物流费用记录（tasks 3.7）：每批次仅一笔；物流费用申请（登记）时间必填
- * 默认当天、首次登记决定归属月份；预算价格、成交价格、实际物流费用均必填、
- * 以人民币记录且 > 0；成交价格 > 预算价格仅警告。
+ * 默认当天、首次登记决定归属月份；合同预算价与物流成交价均必填、以人民币记录且
+ * > 0；物流成交价即最终实际费用；物流成交价 > 合同预算价仅警告。
  */
 export interface LogisticsFee {
   id: string;
   batchId: string;
-  /** 物流费用申请（登记）时间（业务时间；修改金额不改变）。 */
-  appliedAt: string;
-  /** 人民币预算价格（分整数，必填且 > 0）。 */
+  /** 物流费用申请（登记）日期（业务日期；修改金额不改变）。 */
+  appliedAt: BusinessDate;
+  /** 合同预算价（分整数，必填且 > 0）。 */
   budgetPriceCents: bigint;
-  /** 人民币成交价格（分整数，必填且 > 0）。 */
+  /** 物流成交价（分整数，必填且 > 0；即最终实际费用）。 */
   dealPriceCents: bigint;
-  /** 人民币实际物流费用（分整数，必填且 > 0）。 */
+  /**
+   * 历史兼容旧列（旧「实际物流费用」口径）：现行业务与 dealPriceCents 恒同值
+   * （物流成交价即最终实际费用），仅历史数据/导入保留，不新增业务语义。
+   */
   logisticsCostCents: bigint;
   /** 账号归属快照。 */
   accountId: string | null;
@@ -169,31 +183,40 @@ export interface RegisterInstrumentInput {
   batchId?: string | null;
 }
 
-/** 批次报价输入（3.6）：计划运输日期、运输公司、人民币原价/折后价。 */
+/** 批次报价输入（3.6）：计划运输日期、运输公司、合同预算价/物流成交价。 */
 export interface BatchQuoteInput {
-  planTransportDate?: string | null;
+  planTransportDate?: BusinessDate | null;
   transportCompany?: string | null;
-  /** 人民币原价（分整数；有值必须 > 0）。 */
+  /**
+   * 合同预算价（分整数；有值必须 > 0）。
+   * 物理字段名 originalPriceCents 沿用历史命名（旧「原价」口径）。
+   */
   originalPriceCents?: bigint | null;
-  /** 人民币折后价（分整数；有值必须 > 0）。 */
+  /**
+   * 物流成交价（分整数；有值必须 > 0；即最终实际费用）。
+   * 物理字段名 discountedPriceCents 沿用历史命名（旧「折后价」口径）。
+   */
   discountedPriceCents?: bigint | null;
 }
 
 /** 物流费用记录输入（3.7）。 */
 export interface LogisticsFeeInput {
-  /** 物流费用申请（登记）时间（必填，缺省默认当天）。 */
-  appliedAt?: string;
-  /** 人民币预算价格（分整数，必填且 > 0）。 */
+  /** 物流费用申请（登记）日期（必填，缺省默认当天）。 */
+  appliedAt?: BusinessDate;
+  /** 合同预算价（分整数，必填且 > 0）。 */
   budgetPriceCents: bigint;
-  /** 人民币成交价格（分整数，必填且 > 0）。 */
+  /** 物流成交价（分整数，必填且 > 0；即最终实际费用）。 */
   dealPriceCents: bigint;
-  /** 人民币实际物流费用（分整数，必填且 > 0）。 */
+  /**
+   * 历史兼容旧列（旧「实际物流费用」口径）：现行业务与 dealPriceCents 恒同值
+   * （物流成交价即最终实际费用）；仅历史导入需单独提供，新流程调用方传 dealPriceCents。
+   */
   logisticsCostCents: bigint;
 }
 
-/** 物流费用记录结果（含成交 > 预算的警告，警告不阻塞保存）。 */
+/** 物流费用记录结果（含物流成交价 > 合同预算价的警告，警告不阻塞保存）。 */
 export interface LogisticsFeeResult {
   fee: LogisticsFee;
-  /** 成交价格大于预算价格时的警告（否则为 null）。 */
+  /** 物流成交价大于合同预算价时的警告（否则为 null）。 */
   warning: string | null;
 }

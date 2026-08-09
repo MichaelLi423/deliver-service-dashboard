@@ -210,7 +210,7 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     const reminded = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'set_reminder',
       projectId: created.changed.projectId,
-      reminderAt: '2026-08-10T09:00',
+      reminderAt: '2026-08-10',
       reminderNote: '跟进',
     } as WorkbenchV2MutationRequest)) as { businessRevision: number; invalidated: string[] };
     expect(reminded.businessRevision).toBeGreaterThan(r1);
@@ -264,5 +264,111 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     expect(detail.project.region).toBe('华南');
     expect(detail.detail?.oldSiteContact).toBe('旧址王工');
     expect(detail.detail?.siteConfirmed).toBe(false);
+  });
+
+  it('batch 快速记录与 batch_edit 经 IPC：原子创建批次+费用、价格双口径、编辑不改变 appliedAt', async () => {
+    const ctx = await loggedIn();
+    const created = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'create_project',
+      payload: {
+        intent: 'formal',
+        customerName: 'IPC 批次客户',
+        ecc: 'ECC-BATCH-IPC',
+        region: '华东',
+        contractStartDate: '2026-08-01',
+        contractEndDate: '2027-07-31',
+        oldSiteAddress: '旧址',
+        newSiteAddress: '新址',
+        instrumentName: '仪器',
+        ups: false,
+        contractAmount: '1000',
+        finalAmount: '1000',
+        siteConfirmed: false,
+      },
+    } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
+    const projectId = created.changed.projectId;
+    const before = readBusinessRevision(ctx.db());
+
+    // 快速记录搬迁批次：同一事务原子创建批次与物流费用（两个价格口径）
+    const batched = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'submit_action',
+      projectId,
+      action: {
+        type: 'batch',
+        projectId,
+        values: {
+          planTransportDate: '2026-08-10',
+          transportCompany: 'IPC 运输',
+          appliedAt: '2026-08-09',
+          budgetPrice: '12000',
+          dealPrice: '11000',
+        },
+      },
+    } as WorkbenchV2MutationRequest)) as { businessRevision: number; invalidated: string[]; changed: { projectId: string } };
+    expect(batched.businessRevision).toBeGreaterThan(before);
+    expect(batched.invalidated).toEqual(
+      expect.arrayContaining(['overview', 'projects', `project:${projectId}`, `sections:${projectId}`]),
+    );
+
+    const section = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2SectionPage, 100, {
+      projectId,
+      kind: 'batches',
+    } as never)) as { rows: Array<{ id: string; originalPrice: string; discountedPrice: string }> };
+    const batchId = section.rows[0].id;
+    expect(section.rows[0].originalPrice).toBe('12000.00'); // 合同预算价 → batch.originalPriceCents
+    expect(section.rows[0].discountedPrice).toBe('11000.00'); // 物流成交价 → batch.discountedPriceCents
+
+    const feeBefore = ctx
+      .db()
+      .prepare('SELECT applied_at FROM logistics_fees WHERE batch_id = ?')
+      .get(batchId) as { applied_at: string };
+
+    // batch_edit：修改批次字段与两个价格口径，返回 bounded 结果；appliedAt 保持不变
+    const editBefore = readBusinessRevision(ctx.db());
+    const edited = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'batch_edit',
+      payload: {
+        batchId,
+        planTransportDate: '2026-08-12',
+        transportCompany: '新运输',
+        budgetPrice: '13000',
+        dealPrice: '12500',
+      },
+    } as WorkbenchV2MutationRequest)) as {
+      businessRevision: number;
+      invalidated: string[];
+      changed: { projectId: string; batchId: string };
+    };
+    expect(Object.keys(edited).sort()).toEqual(['businessRevision', 'changed', 'invalidated']);
+    expect(edited.businessRevision).toBeGreaterThan(editBefore);
+    expect(edited.changed).toEqual({ projectId, batchId });
+    expect(edited.invalidated).toEqual(
+      expect.arrayContaining(['overview', 'projects', `project:${projectId}`, `sections:${projectId}`]),
+    );
+
+    const editedSection = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2SectionPage, 100, {
+      projectId,
+      kind: 'batches',
+    } as never)) as { rows: Array<{ originalPrice: string; discountedPrice: string }> };
+    expect(editedSection.rows[0].originalPrice).toBe('13000.00');
+    expect(editedSection.rows[0].discountedPrice).toBe('12500.00');
+
+    const feeAfter = ctx
+      .db()
+      .prepare(
+        'SELECT applied_at, budget_price_cents, deal_price_cents, logistics_cost_cents FROM logistics_fees WHERE batch_id = ?',
+      )
+      .get(batchId) as {
+      applied_at: string;
+      budget_price_cents: unknown;
+      deal_price_cents: unknown;
+      logistics_cost_cents: unknown;
+    };
+    // 不允许修改 appliedAt；dealPrice 同时覆盖 dealPriceCents 与 logisticsCostCents
+    expect(feeAfter.applied_at).toBe(feeBefore.applied_at);
+    expect(feeAfter.applied_at).toBe('2026-08-09');
+    expect(String(feeAfter.budget_price_cents)).toBe('1300000');
+    expect(String(feeAfter.deal_price_cents)).toBe('1250000');
+    expect(String(feeAfter.logistics_cost_cents)).toBe('1250000');
   });
 });

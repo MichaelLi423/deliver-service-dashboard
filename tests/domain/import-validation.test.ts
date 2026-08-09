@@ -75,11 +75,11 @@ describe('8.27 领域内核解耦：消费统一规范化行，保留七类记�
   it('NormalizedRow → 七类记录计划（项目按 ECC 聚合），不依赖 CLI 参数', () => {
     const rows: NormalizedRow[] = [
       nrow('project', { 'contract.ecc': 'E-1', 'contract.customer_name': '甲' }, { sourceFile: CONTRACT, sourceSheet: '合同信息' }),
-      nrow('invoice', { 'invoice.ecc': 'E-1', 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05T00:00:00+08:00' }),
-      nrow('logistics_fee', { 'logistics_fee.ecc': 'E-1', 'logistics_fee.applied_at': '2026-01-05T00:00:00+08:00', 'logistics_fee.budget_price_cents': '4000', 'logistics_fee.deal_price_cents': '3500', 'logistics_fee.logistics_cost_cents': '3000', 'logistics_fee.transport_company': '顺丰' }),
-      nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'pm', 'service_order.ordered_at': '2026-01-01T00:00:00+08:00', 'service_order.engineer': '工', 'service_order.customer_name': '甲' }),
-      nrow('serial_address_update', { 'serial_address_update.customer_name': '甲', 'serial_address_update.new_site_address': '新址', 'serial_address_update.serial_no': 'SN-1', 'serial_address_update.account_id': 'ACC-1', 'serial_address_update.updated_at': '2026-01-05T00:00:00+08:00' }),
-      nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05T00:00:00+08:00', 'qr_request.type_code': 'service' }),
+      nrow('invoice', { 'invoice.ecc': 'E-1', 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05' }),
+      nrow('logistics_fee', { 'logistics_fee.ecc': 'E-1', 'logistics_fee.applied_at': '2026-01-05', 'logistics_fee.budget_price_cents': '4000', 'logistics_fee.deal_price_cents': '3500', 'logistics_fee.logistics_cost_cents': '3000', 'logistics_fee.transport_company': '顺丰' }),
+      nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'pm', 'service_order.ordered_at': '2026-01-01', 'service_order.engineer': '工', 'service_order.customer_name': '甲' }),
+      nrow('serial_address_update', { 'serial_address_update.customer_name': '甲', 'serial_address_update.new_site_address': '新址', 'serial_address_update.serial_no': 'SN-1', 'serial_address_update.account_id': 'ACC-1', 'serial_address_update.updated_at': '2026-01-05' }),
+      nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05', 'qr_request.type_code': 'service' }),
       nrow('ship_to_request', { 'ship_to_request.customer_name': '甲', 'ship_to_request.new_site_address': '新址', 'ship_to_request.account_id': 'ACC-2' }),
     ];
     const plan = buildPlanFromRows(rows);
@@ -111,7 +111,7 @@ describe('8.27 领域内核解耦：消费统一规范化行，保留七类记�
   it('相同语义不同物理顺序得到相同计划摘要（内核输出适配现有 ImportPlan 摘要）', () => {
     const a: NormalizedRow[] = [
       nrow('project', { 'contract.ecc': 'E-2', 'contract.customer_name': '甲' }),
-      nrow('invoice', { 'invoice.ecc': 'E-2', 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05T00:00:00+08:00' }),
+      nrow('invoice', { 'invoice.ecc': 'E-2', 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05' }),
       nrow('ship_to_request', { 'ship_to_request.customer_name': '甲', 'ship_to_request.new_site_address': '新址' }),
     ];
     const b = [...a].reverse();
@@ -240,7 +240,7 @@ describe('8.30 必填 / 金额 / 成交>预算警告', () => {
   });
 
   it('缺 ECC 报必填错误并阻止导入', () => {
-    const row = nrow('invoice', { 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05T00:00:00+08:00' });
+    const row = nrow('invoice', { 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05' });
     const result = validatePlan([row], { declared: { invoice: 'data' } });
     expect(hasCode(result.problems, 'MISSING_ECC')).toBe(true);
     expect(result.eligible).toBe(false);
@@ -248,7 +248,7 @@ describe('8.30 必填 / 金额 / 成交>预算警告', () => {
 
   it('合同 USD 含税金额允许为 0；其余金额有值必须大于 0', () => {
     const project = nrow('project', { 'contract.ecc': 'E-0', 'contract.customer_name': '甲', 'contract.usd_tax_amount_cents': '0' });
-    const invoice = nrow('invoice', { 'invoice.ecc': 'E-0', 'invoice.amount_cents': '0', 'invoice.invoiced_at': '2026-01-05T00:00:00+08:00' });
+    const invoice = nrow('invoice', { 'invoice.ecc': 'E-0', 'invoice.amount_cents': '0', 'invoice.invoiced_at': '2026-01-05' });
     const result = validatePlan([project, invoice], { declared: { project: 'data', invoice: 'data' } });
     expect(hasCode(result.problems, 'AMOUNT_NOT_POSITIVE')).toBe(true);
     const projectProblem = result.problems.filter((p) => p.category === 'project' && p.code === 'AMOUNT_NOT_POSITIVE');
@@ -257,7 +257,7 @@ describe('8.30 必填 / 金额 / 成交>预算警告', () => {
   });
 
   it('非法金额报 INVALID_AMOUNT', () => {
-    const row = nrow('invoice', { 'invoice.ecc': 'E-1', 'invoice.amount_cents': 'abc', 'invoice.invoiced_at': '2026-01-05T00:00:00+08:00' });
+    const row = nrow('invoice', { 'invoice.ecc': 'E-1', 'invoice.amount_cents': 'abc', 'invoice.invoiced_at': '2026-01-05' });
     const result = validatePlan([row], { declared: { invoice: 'data' } });
     expect(hasCode(result.problems, 'INVALID_AMOUNT')).toBe(true);
   });
@@ -267,7 +267,7 @@ describe('8.30 必填 / 金额 / 成交>预算警告', () => {
       nrow('project', { 'contract.ecc': 'E-1', 'contract.customer_name': '甲' }),
       nrow('logistics_fee', {
         'logistics_fee.ecc': 'E-1',
-        'logistics_fee.applied_at': '2026-01-05T00:00:00+08:00',
+        'logistics_fee.applied_at': '2026-01-05',
         'logistics_fee.budget_price_cents': '1000',
         'logistics_fee.deal_price_cents': '1200',
         'logistics_fee.logistics_cost_cents': '1100',
@@ -294,7 +294,7 @@ describe('8.30 必填 / 金额 / 成交>预算警告', () => {
   it('成交价格不高于预算时不产生警告', () => {
     const row = nrow('logistics_fee', {
       'logistics_fee.ecc': 'E-1',
-      'logistics_fee.applied_at': '2026-01-05T00:00:00+08:00',
+      'logistics_fee.applied_at': '2026-01-05',
       'logistics_fee.budget_price_cents': '1000',
       'logistics_fee.deal_price_cents': '900',
       'logistics_fee.logistics_cost_cents': '880',
@@ -311,7 +311,7 @@ describe('8.31 跨类 ECC / 服务单号 / Account ID / 序列号', () => {
   it('掉票 ECC 未在计划或目标库中唯一匹配 → 阻断错误', () => {
     const rows = [
       nrow('project', { 'contract.ecc': 'E-1', 'contract.customer_name': '甲' }),
-      nrow('invoice', { 'invoice.ecc': 'E-NOPE', 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05T00:00:00+08:00' }),
+      nrow('invoice', { 'invoice.ecc': 'E-NOPE', 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05' }),
     ];
     const result = validatePlan(rows, { declared: { project: 'data', invoice: 'data' } });
     expect(hasCode(result.problems, 'UNRESOLVED_ECC_REFERENCE')).toBe(true);
@@ -322,7 +322,7 @@ describe('8.31 跨类 ECC / 服务单号 / Account ID / 序列号', () => {
   it('物流费用 ECC 可引用计划或目标库；独立申请不强制 ECC', () => {
     const rows = [
       nrow('project', { 'contract.ecc': 'E-1', 'contract.customer_name': '甲' }),
-      nrow('logistics_fee', { 'logistics_fee.ecc': 'E-1', 'logistics_fee.applied_at': '2026-01-05T00:00:00+08:00', 'logistics_fee.budget_price_cents': '4000', 'logistics_fee.deal_price_cents': '3500', 'logistics_fee.logistics_cost_cents': '3000' }),
+      nrow('logistics_fee', { 'logistics_fee.ecc': 'E-1', 'logistics_fee.applied_at': '2026-01-05', 'logistics_fee.budget_price_cents': '4000', 'logistics_fee.deal_price_cents': '3500', 'logistics_fee.logistics_cost_cents': '3000' }),
     ];
     const result = validatePlan(rows, { declared: { project: 'data', logistics_fee: 'data' } });
     expect(hasCode(result.problems, 'UNRESOLVED_ECC_REFERENCE')).toBe(false);
@@ -330,8 +330,8 @@ describe('8.31 跨类 ECC / 服务单号 / Account ID / 序列号', () => {
 
   it('重复非空服务单号 → 冲突清单（解决前不可提交）', () => {
     const rows = [
-      nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'pm', 'service_order.ordered_at': '2026-01-01T00:00:00+08:00', 'service_order.engineer': '工', 'service_order.customer_name': '甲' }),
-      nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'relocation', 'service_order.ordered_at': '2026-01-02T00:00:00+08:00', 'service_order.engineer': '乙', 'service_order.customer_name': '甲' }),
+      nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'pm', 'service_order.ordered_at': '2026-01-01', 'service_order.engineer': '工', 'service_order.customer_name': '甲' }),
+      nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'relocation', 'service_order.ordered_at': '2026-01-02', 'service_order.engineer': '乙', 'service_order.customer_name': '甲' }),
     ];
     const result = validatePlan(rows, { declared: { service_order: 'data' } });
     const dup = result.problems.filter((p) => p.code === 'DUPLICATE_SERVICE_ORDER');
@@ -353,7 +353,7 @@ describe('8.31 跨类 ECC / 服务单号 / Account ID / 序列号', () => {
   it('序列号必须唯一匹配搬迁仪器；无法唯一匹配阻止提交', () => {
     const rows = [
       nrow('project', { 'contract.ecc': 'E-1', 'contract.customer_name': '甲' }),
-      nrow('serial_address_update', { 'serial_address_update.customer_name': '甲', 'serial_address_update.new_site_address': '新址', 'serial_address_update.serial_no': 'SN-NOPE', 'serial_address_update.account_id': 'ACC-1', 'serial_address_update.updated_at': '2026-01-05T00:00:00+08:00' }),
+      nrow('serial_address_update', { 'serial_address_update.customer_name': '甲', 'serial_address_update.new_site_address': '新址', 'serial_address_update.serial_no': 'SN-NOPE', 'serial_address_update.account_id': 'ACC-1', 'serial_address_update.updated_at': '2026-01-05' }),
     ];
     const result = validatePlan(rows, { declared: { project: 'data', serial_address_update: 'data' } });
     expect(hasCode(result.problems, 'SERIAL_NO_MISMATCH')).toBe(true);
@@ -386,20 +386,20 @@ describe('8.31 跨类 ECC / 服务单号 / Account ID / 序列号', () => {
 // ---------------------------------------------------------------------------
 describe('8.32 二维码 / Ship-to / 序列号地址 / 供应商边界', () => {
   it('二维码类型不得由数量猜测：仅有类型数量无具体类型 → 冲突', () => {
-    const row = nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05T00:00:00+08:00', 'qr_request.type_count': '2' });
+    const row = nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05', 'qr_request.type_count': '2' });
     const result = validatePlan([row], { declared: { qr_request: 'data' } });
     const conflict = result.problems.find((p) => p.code === 'QR_TYPE_MISSING');
     expect(conflict).toBeDefined();
     expect(conflict?.severity).toBe('conflict');
     expect(result.eligible).toBe(false);
     // 明确申请类型后通过
-    const fixed = nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05T00:00:00+08:00', 'qr_request.type_code': 'service', 'qr_request.type_count': '1' });
+    const fixed = nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05', 'qr_request.type_code': 'service', 'qr_request.type_count': '1' });
     expect(hasCode(validatePlan([fixed], { declared: { qr_request: 'data' } }).problems, 'QR_TYPE_MISSING')).toBe(false);
   });
 
   it('二维码申请与 Ship-to 申请不强制关联 ECC（无 ECC 字段不产生关联错误）', () => {
     const rows = [
-      nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05T00:00:00+08:00', 'qr_request.type_code': 'service' }),
+      nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05', 'qr_request.type_code': 'service' }),
       nrow('ship_to_request', { 'ship_to_request.customer_name': '甲', 'ship_to_request.new_site_address': '新址' }),
     ];
     const result = validatePlan(rows, { declared: { qr_request: 'data', ship_to_request: 'data' } });
@@ -414,7 +414,7 @@ describe('8.32 二维码 / Ship-to / 序列号地址 / 供应商边界', () => {
       const reader = new TargetConflictReader(db);
       const rows = [
         nrow('project', { 'contract.ecc': 'E-1', 'contract.customer_name': '甲', 'instrument.serial_no': 'SN-1', 'instrument.name': '色谱仪' }),
-        nrow('serial_address_update', { 'serial_address_update.customer_name': '甲', 'serial_address_update.new_site_address': '新址', 'serial_address_update.serial_no': 'SN-1', 'serial_address_update.account_id': 'ACC-1', 'serial_address_update.updated_at': '2026-01-05T00:00:00+08:00' }),
+        nrow('serial_address_update', { 'serial_address_update.customer_name': '甲', 'serial_address_update.new_site_address': '新址', 'serial_address_update.serial_no': 'SN-1', 'serial_address_update.account_id': 'ACC-1', 'serial_address_update.updated_at': '2026-01-05' }),
       ];
       const before = (db.prepare('SELECT COUNT(*) AS n FROM ship_tos').get() as { n: number }).n;
       const result = validatePlan(rows, { declared: { project: 'data', serial_address_update: 'data' }, target: reader });
@@ -429,7 +429,7 @@ describe('8.32 二维码 / Ship-to / 序列号地址 / 供应商边界', () => {
 
   it('供应商只作物流参考：不构成第八类记录，运输公司并入物流类别', () => {
     const rows = [
-      nrow('logistics_fee', { 'logistics_fee.ecc': 'E-1', 'logistics_fee.applied_at': '2026-01-05T00:00:00+08:00', 'logistics_fee.budget_price_cents': '4000', 'logistics_fee.deal_price_cents': '3500', 'logistics_fee.logistics_cost_cents': '3000', 'logistics_fee.transport_company': '顺丰' }),
+      nrow('logistics_fee', { 'logistics_fee.ecc': 'E-1', 'logistics_fee.applied_at': '2026-01-05', 'logistics_fee.budget_price_cents': '4000', 'logistics_fee.deal_price_cents': '3500', 'logistics_fee.logistics_cost_cents': '3000', 'logistics_fee.transport_company': '顺丰' }),
     ];
     const plan = buildPlanFromRows(rows);
     expect(plan.suppliers).toHaveLength(0);
@@ -489,8 +489,8 @@ describe('8.33 目标库冲突与 v9 快照保护（BigInt 精确）', () => {
       runImport(db, {
         rows: [
           srow(CONTRACT, '合同信息', 2, { 'ECC#': 'E-MOD', 'Account name': '甲', 合同USD含税金额: '100' }),
-          srow(WORKLOAD, '物流费用表', 2, { ECC: 'E-MOD', 物流费用申请登记时间: '2026-01-05T00:00:00+08:00', 预算价格: '40', 成交价格: '35', 实际物流费用: '30', 物流公司: '顺丰' }),
-          srow(WORKLOAD, '服务二维码表', 3, { 申请人: '负责人', 申请时间: '2026-01-05T00:00:00+08:00', 申请类型: 'service' }),
+          srow(WORKLOAD, '物流费用表', 2, { ECC: 'E-MOD', 物流费用申请登记时间: '2026-01-05', 预算价格: '40', 成交价格: '35', 实际物流费用: '30', 物流公司: '顺丰' }),
+          srow(WORKLOAD, '服务二维码表', 3, { 申请人: '负责人', 申请时间: '2026-01-05', 申请类型: 'service' }),
         ],
         mapping: MAPPING_V1,
       });
@@ -502,8 +502,8 @@ describe('8.33 目标库冲突与 v9 快照保护（BigInt 精确）', () => {
       const reader = new TargetConflictReader(db);
       const rows = [
         nrow('project', { 'contract.ecc': 'E-MOD', 'contract.customer_name': '甲', 'project.region': '华东' }),
-        nrow('logistics_fee', { 'logistics_fee.ecc': 'E-MOD', 'logistics_fee.applied_at': '2026-01-05T00:00:00+08:00', 'logistics_fee.budget_price_cents': '4000', 'logistics_fee.deal_price_cents': '3500', 'logistics_fee.logistics_cost_cents': '3000', 'logistics_fee.transport_company': '顺丰' }, { sourceFile: WORKLOAD, sourceSheet: '物流费用表', sourceRow: 2 }),
-        nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05T00:00:00+08:00', 'qr_request.type_code': 'service' }, { sourceFile: WORKLOAD, sourceSheet: '服务二维码表', sourceRow: 3 }),
+        nrow('logistics_fee', { 'logistics_fee.ecc': 'E-MOD', 'logistics_fee.applied_at': '2026-01-05', 'logistics_fee.budget_price_cents': '4000', 'logistics_fee.deal_price_cents': '3500', 'logistics_fee.logistics_cost_cents': '3000', 'logistics_fee.transport_company': '顺丰' }, { sourceFile: WORKLOAD, sourceSheet: '物流费用表', sourceRow: 2 }),
+        nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05', 'qr_request.type_code': 'service' }, { sourceFile: WORKLOAD, sourceSheet: '服务二维码表', sourceRow: 3 }),
       ];
       const result = validatePlan(rows, { declared: { project: 'data', logistics_fee: 'data', qr_request: 'data' }, target: reader });
       const targetConflicts = result.problems.filter((p) => p.code === 'TARGET_CONFLICT');
@@ -573,14 +573,14 @@ describe('8.34 受影响记录/ECC 局部校验与七类完整校验资格', () 
   it('错误或未解决冲突不得生成提交资格；警告不阻断', () => {
     const rows = [
       nrow('project', { 'contract.ecc': 'E-1', 'contract.customer_name': '甲' }),
-      nrow('logistics_fee', { 'logistics_fee.ecc': 'E-1', 'logistics_fee.applied_at': '2026-01-05T00:00:00+08:00', 'logistics_fee.budget_price_cents': '1000', 'logistics_fee.deal_price_cents': '1200', 'logistics_fee.logistics_cost_cents': '1100' }),
+      nrow('logistics_fee', { 'logistics_fee.ecc': 'E-1', 'logistics_fee.applied_at': '2026-01-05', 'logistics_fee.budget_price_cents': '1000', 'logistics_fee.deal_price_cents': '1200', 'logistics_fee.logistics_cost_cents': '1100' }),
     ];
     const ok = validatePlan(rows, { declared: { project: 'data', logistics_fee: 'data', service_order: 'none', invoice: 'none', serial_address_update: 'none', qr_request: 'none', ship_to_request: 'none' } });
     expect(ok.eligible).toBe(true); // 仅警告（DEAL_ABOVE_BUDGET）
     expect(hasCode(ok.problems, 'DEAL_ABOVE_BUDGET')).toBe(true);
 
     const broken = validatePlan(
-      [nrow('invoice', { 'invoice.ecc': 'E-NOPE', 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05T00:00:00+08:00' })],
+      [nrow('invoice', { 'invoice.ecc': 'E-NOPE', 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05' })],
       { declared: { invoice: 'data' } },
     );
     expect(broken.eligible).toBe(false);
@@ -590,9 +590,9 @@ describe('8.34 受影响记录/ECC 局部校验与七类完整校验资格', () 
   it('局部重校验只覆盖受影响记录与 ECC；完整校验覆盖跨类', () => {
     const rows = [
       nrow('project', { 'contract.ecc': 'E-1', 'contract.customer_name': '甲' }),
-      nrow('invoice', { 'invoice.ecc': 'E-1', 'invoice.amount_cents': '0', 'invoice.invoiced_at': '2026-01-05T00:00:00+08:00' }),
-      nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'pm', 'service_order.ordered_at': '2026-01-01T00:00:00+08:00', 'service_order.engineer': '工', 'service_order.customer_name': '甲' }),
-      nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'relocation', 'service_order.ordered_at': '2026-01-02T00:00:00+08:00', 'service_order.engineer': '乙', 'service_order.customer_name': '甲' }),
+      nrow('invoice', { 'invoice.ecc': 'E-1', 'invoice.amount_cents': '0', 'invoice.invoiced_at': '2026-01-05' }),
+      nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'pm', 'service_order.ordered_at': '2026-01-01', 'service_order.engineer': '工', 'service_order.customer_name': '甲' }),
+      nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'relocation', 'service_order.ordered_at': '2026-01-02', 'service_order.engineer': '乙', 'service_order.customer_name': '甲' }),
     ];
     const invoiceRow = rows[1];
     // 编辑掉票行（受影响记录 = invoice 行；受影响 ECC = E-1）。

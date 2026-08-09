@@ -1,7 +1,13 @@
 import { ValidationError } from '../../core/errors';
 import { normalizeRegion } from '../../core/ids';
 import { Money, Ratio, RMB_TO_USD_RATE } from '../../core/money';
-import { monthOfIso, SystemClock, type Clock } from '../../core/time';
+import {
+  SystemClock,
+  toMonthKey,
+  type BusinessDate,
+  type Clock,
+  type MonthKey,
+} from '../../core/time';
 import type { Project } from '../relocation-project-lifecycle';
 import type { ProjectStatusOrCancelled } from '../relocation-project-lifecycle';
 import type { OrderType } from '../service-order-recording';
@@ -80,8 +86,8 @@ export interface DamageDetailRow {
   projectId: string;
   projectTempNo: string;
   region: string;
-  registeredAt: string;
-  month: string;
+  registeredAt: BusinessDate;
+  month: MonthKey;
   partStatus: PartStatus | null;
   partAmountCents: bigint;
   partCurrency: PartCurrency;
@@ -145,7 +151,7 @@ export interface PendingLogisticsRow {
   projectId: string;
   projectTempNo: string;
   transportCompany: string | null;
-  planTransportDate: string | null;
+  planTransportDate: BusinessDate | null;
   /** 已有成交价格（批次折后价，分整数）。 */
   dealPriceCents: bigint | null;
 }
@@ -211,15 +217,15 @@ export interface ReportModel {
 export type MetricDetailRow =
   | ProjectPipelineRow
   | EntryAmountRow
-  | { month: string; invoiceId: string; projectTempNo: string; invoicedAt: string; amountCents: bigint; region: string }
-  | { month: string; orderId: string; orderType: OrderType; serviceOrderNo: string | null; orderedAt: string; engineer: string; region: string | null }
+  | { month: MonthKey; invoiceId: string; projectTempNo: string; invoicedAt: BusinessDate; amountCents: bigint; region: string }
+  | { month: MonthKey; orderId: string; orderType: OrderType; serviceOrderNo: string | null; orderedAt: BusinessDate; engineer: string; region: string | null }
   | DamageDetailRow
-  | { month: string; feeId: string; batchId: string; projectTempNo: string; transportCompany: string | null; appliedAt: string; budgetPriceCents: bigint; dealPriceCents: bigint; costCents: bigint; cancelled: boolean }
+  | { month: MonthKey; feeId: string; batchId: string; projectTempNo: string; transportCompany: string | null; appliedAt: BusinessDate; budgetPriceCents: bigint; dealPriceCents: bigint; costCents: bigint; cancelled: boolean }
   | LogisticsRatioRow
   | PendingLogisticsRow
-  | { month: string; requestId: string; customerName: string; submittedAt: string; operatorAccountId: string | null; operatorUsername: string | null }
-  | { month: string; requestId: string; applicant: string; requestedAt: string; typeCode: QrRequestTypeCode; operatorAccountId: string | null; operatorUsername: string | null }
-  | { month: string; updateId: string; customerName: string; updatedAt: string; serialNo: string; operatorAccountId: string | null; operatorUsername: string | null };
+  | { month: MonthKey; requestId: string; customerName: string; submittedAt: BusinessDate; operatorAccountId: string | null; operatorUsername: string | null }
+  | { month: MonthKey; requestId: string; applicant: string; requestedAt: BusinessDate; typeCode: QrRequestTypeCode; operatorAccountId: string | null; operatorUsername: string | null }
+  | { month: MonthKey; updateId: string; customerName: string; updatedAt: BusinessDate; serialNo: string; operatorAccountId: string | null; operatorUsername: string | null };
 
 // ---------------------------------------------------------------------------
 // 服务
@@ -313,7 +319,7 @@ export class ReportingService {
       if (project.entryAt === null) continue; // 未正式进单不计
       if (project.status === 'cancelled') continue; // 已取消排除（7.9）
       if (!this.regionMatch(project, f)) continue;
-      const month = monthOfIso(project.entryAt);
+      const month = toMonthKey(project.entryAt);
       if (!this.inRange(month, f)) continue;
       const contract = contractsByProject.get(project.id);
       const snapshot = contract?.entryAmountSnapshotCents ?? null;
@@ -346,9 +352,9 @@ export class ReportingService {
       .filter((x): x is { inv: (typeof x)['inv']; project: Project } => x.project !== undefined)
       .filter((x) => x.project.status !== 'cancelled') // 已取消项目排除（7.9）
       .filter((x) => this.regionMatch(x.project, f))
-      .filter((x) => this.inRange(monthOfIso(x.inv.invoicedAt), f))
+      .filter((x) => this.inRange(toMonthKey(x.inv.invoicedAt), f))
       .map((x) => ({
-        month: monthOfIso(x.inv.invoicedAt),
+        month: toMonthKey(x.inv.invoicedAt),
         invoiceId: x.inv.id,
         projectId: x.inv.projectId,
         projectTempNo: x.project.tempNo,
@@ -369,7 +375,7 @@ export class ReportingService {
     return all
       .listServiceOrders()
       .filter((o) => o.serviceOrderNo !== null) // 无单号不计工作量
-      .filter((o) => this.inRange(monthOfIso(o.orderedAt), f))
+      .filter((o) => this.inRange(toMonthKey(o.orderedAt), f))
       .filter((o) => f.orderType === null || o.orderType === f.orderType)
       .filter((o) => f.engineer === null || o.engineer.includes(f.engineer))
       .filter((o) => {
@@ -379,7 +385,7 @@ export class ReportingService {
         return project !== undefined && this.regionMatch(project, f);
       })
       .map((o) => ({
-        month: monthOfIso(o.orderedAt),
+        month: toMonthKey(o.orderedAt),
         orderId: o.id,
         orderType: o.orderType,
         serviceOrderNo: o.serviceOrderNo,
@@ -403,7 +409,7 @@ export class ReportingService {
       .map((item) => ({ item, project: projectsById.get(item.projectId) }))
       .filter((x): x is { item: (typeof x)['item']; project: Project } => x.project !== undefined)
       .filter((x) => this.regionMatch(x.project, f))
-      .filter((x) => this.inRange(monthOfIso(x.item.registeredAt), f))
+      .filter((x) => this.inRange(toMonthKey(x.item.registeredAt), f))
       .filter((x) => this.operatorMatch(x.item.operatorUsername, f))
       .map((x) => {
         const { item, project } = x;
@@ -416,7 +422,7 @@ export class ReportingService {
           projectTempNo: project.tempNo,
           region: this.regionKey(project),
           registeredAt: item.registeredAt,
-          month: monthOfIso(item.registeredAt),
+          month: toMonthKey(item.registeredAt),
           partStatus: item.partStatus,
           partAmountCents: item.partAmountCents,
           partCurrency: item.partCurrency,
@@ -469,9 +475,9 @@ export class ReportingService {
       )
       .filter((x) => this.regionMatch(x.project, f))
       .filter((x) => f.transportCompany === null || (x.batch.transportCompany?.trim() ?? '') === f.transportCompany.trim())
-      .filter((x) => this.inRange(monthOfIso(x.fee.appliedAt), f))
+      .filter((x) => this.inRange(toMonthKey(x.fee.appliedAt), f))
       .map((x) => ({
-        month: monthOfIso(x.fee.appliedAt),
+        month: toMonthKey(x.fee.appliedAt),
         feeId: x.fee.id,
         batchId: x.batch.id,
         projectId: x.project.id,
@@ -558,9 +564,9 @@ export class ReportingService {
     const counts = new Map<string, number>();
     for (const request of all.listShipToRequests()) {
       if (request.submittedAt === null) continue; // 待提交草稿不计
-      if (!this.inRange(monthOfIso(request.submittedAt), f)) continue;
+      if (!this.inRange(toMonthKey(request.submittedAt), f)) continue;
       if (!this.operatorMatch(request.operatorUsername, f)) continue;
-      const key = `${monthOfIso(request.submittedAt)}\u0000${operatorKey(request.operatorAccountId, request.operatorUsername)}`;
+      const key = `${toMonthKey(request.submittedAt)}\u0000${operatorKey(request.operatorAccountId, request.operatorUsername)}`;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return [...counts.entries()]
@@ -580,10 +586,10 @@ export class ReportingService {
     return all
       .listShipToRequests()
       .filter((r) => r.submittedAt !== null)
-      .filter((r) => this.inRange(monthOfIso(r.submittedAt!), f))
+      .filter((r) => this.inRange(toMonthKey(r.submittedAt!), f))
       .filter((r) => this.operatorMatch(r.operatorUsername, f))
       .map((r) => ({
-        month: monthOfIso(r.submittedAt!),
+        month: toMonthKey(r.submittedAt!),
         requestId: r.id,
         customerName: r.customerName,
         submittedAt: r.submittedAt!,
@@ -595,10 +601,10 @@ export class ReportingService {
   private qrWorkloadRows(all: ReportingFactReader, f: NormalizedFilter): QrWorkloadRow[] {
     const counts = new Map<string, number>();
     for (const request of all.listQrRequests()) {
-      if (!this.inRange(monthOfIso(request.requestedAt), f)) continue;
+      if (!this.inRange(toMonthKey(request.requestedAt), f)) continue;
       if (!this.operatorMatch(request.operatorUsername, f)) continue;
       for (const typeCode of new Set(request.types)) {
-        const key = `${monthOfIso(request.requestedAt)}\u0000${typeCode}\u0000${operatorKey(request.operatorAccountId, request.operatorUsername)}`;
+        const key = `${toMonthKey(request.requestedAt)}\u0000${typeCode}\u0000${operatorKey(request.operatorAccountId, request.operatorUsername)}`;
         counts.set(key, (counts.get(key) ?? 0) + 1);
       }
     }
@@ -619,13 +625,13 @@ export class ReportingService {
   private qrDetailRows(all: ReportingFactReader, f: NormalizedFilter): MetricDetailRow[] {
     return all
       .listQrRequests()
-      .filter((r) => this.inRange(monthOfIso(r.requestedAt), f))
+      .filter((r) => this.inRange(toMonthKey(r.requestedAt), f))
       .filter((r) => this.operatorMatch(r.operatorUsername, f))
       .flatMap((r) =>
         new Set(r.types).size === 0
           ? []
           : [...new Set(r.types)].map((typeCode) => ({
-              month: monthOfIso(r.requestedAt),
+              month: toMonthKey(r.requestedAt),
               requestId: r.id,
               applicant: r.applicant,
               requestedAt: r.requestedAt,
@@ -639,9 +645,9 @@ export class ReportingService {
   private serialUpdateRows(all: ReportingFactReader, f: NormalizedFilter): SerialAddressUpdateRow[] {
     const counts = new Map<string, number>();
     for (const update of all.listSerialAddressUpdates()) {
-      if (!this.inRange(monthOfIso(update.updatedAt), f)) continue;
+      if (!this.inRange(toMonthKey(update.updatedAt), f)) continue;
       if (!this.operatorMatch(update.operatorUsername, f)) continue;
-      const key = `${monthOfIso(update.updatedAt)}\u0000${update.customerName}\u0000${operatorKey(update.operatorAccountId, update.operatorUsername)}`;
+      const key = `${toMonthKey(update.updatedAt)}\u0000${update.customerName}\u0000${operatorKey(update.operatorAccountId, update.operatorUsername)}`;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return [...counts.entries()]
@@ -661,10 +667,10 @@ export class ReportingService {
   private serialDetailRows(all: ReportingFactReader, f: NormalizedFilter): MetricDetailRow[] {
     return all
       .listSerialAddressUpdates()
-      .filter((u) => this.inRange(monthOfIso(u.updatedAt), f))
+      .filter((u) => this.inRange(toMonthKey(u.updatedAt), f))
       .filter((u) => this.operatorMatch(u.operatorUsername, f))
       .map((u) => ({
-        month: monthOfIso(u.updatedAt),
+        month: toMonthKey(u.updatedAt),
         updateId: u.id,
         customerName: u.customerName,
         updatedAt: u.updatedAt,
@@ -749,12 +755,12 @@ export class ReportingService {
 // ---------------------------------------------------------------------------
 
 interface InvoiceAggDetail {
-  month: string;
+  month: MonthKey;
   invoiceId: string;
   projectId: string;
   projectTempNo: string;
   region: string;
-  invoicedAt: string;
+  invoicedAt: BusinessDate;
   amountCents: bigint;
 }
 
@@ -772,11 +778,11 @@ function aggregateInvoices(details: InvoiceAggDetail[]): MonthlyInvoiceRow[] {
 }
 
 interface OrderAggDetail {
-  month: string;
+  month: MonthKey;
   orderId: string;
   orderType: OrderType;
   serviceOrderNo: string | null;
-  orderedAt: string;
+  orderedAt: BusinessDate;
   engineer: string;
   region: string | null;
 }
@@ -821,13 +827,13 @@ function aggregateDamages(details: DamageDetailRow[]): DamageSummaryRow[] {
 }
 
 interface LogisticsAggDetail {
-  month: string;
+  month: MonthKey;
   feeId: string;
   batchId: string;
   projectId: string;
   projectTempNo: string;
   transportCompany: string | null;
-  appliedAt: string;
+  appliedAt: BusinessDate;
   budgetPriceCents: bigint;
   dealPriceCents: bigint;
   costCents: bigint;

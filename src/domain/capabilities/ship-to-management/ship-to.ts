@@ -8,8 +8,11 @@
  * - 首次实际提交计一次工作量，待提交草稿不计，后续状态更新不重复计数。
  * - 批次与项目仅汇总展示所涉 Ship-to，不维护批次级/项目级唯一地址；
  *   申请未完成仅作独立提醒、不阻塞搬迁项目任何状态流转。
+ * - 业务时间字段（首次实际提交/完成日期）为 yyyy-mm-dd；createdAt/updatedAt 仍为带偏移 ISO。
  * 规则实现见 tasks 4.1~4.2。
  */
+import type { BusinessDate } from '../../core/time';
+
 export const SHIP_TO_REQUEST_STATUSES = [
   'pending_submit', // 待提交
   'processing', // 处理中
@@ -35,9 +38,9 @@ export interface ShipToRequest {
   /** 创建时可为空；进入已完成前必填，补入后全局唯一。 */
   accountId: string | null;
   status: ShipToRequestStatus;
-  /** 首次实际提交时间（计一次工作量，按该月份归属）。 */
-  submittedAt: string | null;
-  completedAt: string | null;
+  /** 首次实际提交日期（业务日期；计一次工作量，按该月份归属）。 */
+  submittedAt: BusinessDate | null;
+  completedAt: BusinessDate | null;
   /** 操作账号归属快照（手工创建/维护申请时记录）。 */
   operatorAccountId: string | null;
   operatorUsername: string | null;

@@ -1,5 +1,12 @@
 import { ValidationError } from './errors';
-import { assertValidIso, SystemClock, type Clock, type IsoDateTime } from './time';
+import {
+  assertValidBusinessDate,
+  assertValidIso,
+  SystemClock,
+  type BusinessDate,
+  type Clock,
+  type IsoDateTime,
+} from './time';
 
 /** 事实来源归属校验错误类型随本模块 API 一并导出。 */
 export { ValidationError } from './errors';
@@ -25,9 +32,9 @@ export interface ActorSnapshot {
 /** 事实元信息：来源 + 业务时间 + 审计时间 + 账号归属快照。 */
 export interface FactMeta {
   source: FactSource;
-  /** 业务时间：业务事件实际发生时间。 */
-  businessAt: IsoDateTime;
-  /** 审计时间：系统记录该事实的时间，与业务时间分开保存。 */
+  /** 业务时间（yyyy-mm-dd）：业务事件实际发生日期。 */
+  businessAt: BusinessDate;
+  /** 审计时间（带偏移 ISO）：系统记录该事实的时间，与业务时间分开保存。 */
   auditAt: IsoDateTime;
   /** 账号归属快照；仅 manual 事实非空。 */
   actor: ActorSnapshot | null;
@@ -35,9 +42,9 @@ export interface FactMeta {
 
 export interface FactMetaInput {
   source: FactSource;
-  /** 缺省取时钟当前时间。 */
-  businessAt?: IsoDateTime;
-  /** 缺省取时钟当前时间。 */
+  /** 缺省取时钟当前业务日期（today()）。 */
+  businessAt?: BusinessDate;
+  /** 缺省取时钟当前时间（nowIso()）。 */
   auditAt?: IsoDateTime;
   actor?: ActorSnapshot | null;
   clock?: Clock;
@@ -47,7 +54,7 @@ export function createFactMeta(input: FactMetaInput): FactMeta {
   const clock = input.clock ?? new SystemClock();
   const meta: FactMeta = {
     source: input.source,
-    businessAt: input.businessAt ?? clock.nowIso(),
+    businessAt: input.businessAt ?? clock.today(),
     auditAt: input.auditAt ?? clock.nowIso(),
     actor: input.actor ?? null,
   };
@@ -57,7 +64,7 @@ export function createFactMeta(input: FactMetaInput): FactMeta {
 
 /** 校验事实来源归属规则：manual 必须有账号快照，非 manual 不得有。 */
 export function validateFactMeta(meta: FactMeta): void {
-  assertValidIso(meta.businessAt, '业务时间');
+  assertValidBusinessDate(meta.businessAt, '业务时间');
   assertValidIso(meta.auditAt, '审计时间');
   if (meta.source === 'manual' && meta.actor === null) {
     throw new ValidationError(

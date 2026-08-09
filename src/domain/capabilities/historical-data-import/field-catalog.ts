@@ -10,7 +10,9 @@ import type { ImportCategory } from './workspace/workspace-model';
  * - 业务键（ECC、服务单号、Account ID、序列号；用于子记录识别与稳定源行身份）；
  * - 稳定别名（冻结；模板表头 + 旧五份来源工作簿列名共用，不做相似名称模糊匹配）；
  * - 金额币种（money 字段：USD / RMB）；
- * - 日期语义（date=纯业务日期，datetime=带时区偏移业务时间）；
+ * - 日期语义（统一 date：目标业务时间一律按业务日期 yyyy-mm-dd 处理，接受
+ *   Excel serial / 纯日期 / 显式偏移 ISO / 无偏移本地 datetime；审计时间仍精确，
+ *   见 design D30）；
  * - 是否允许用户编辑（工作台网格修正范围；主状态等只读字段不进入目录）。
  *
  * 主状态（project.status）由导入事实确定性重建（8.6），不提供可直接指定的
@@ -38,7 +40,7 @@ export interface TargetFieldDef {
   aliases: readonly string[];
   /** 金额币种（type=money 时必填）。 */
   currency?: TargetFieldCurrency;
-  /** 日期语义（type=date/datetime 时必填；datetime 按本机业务时区规范化）。 */
+  /** 日期语义（业务时间字段统一 'date'，输出 yyyy-mm-dd；'datetime' 保留给审计等精确时间）。 */
   dateSemantics?: 'date' | 'datetime';
   /** 是否允许用户在工作台网格中编辑该字段。 */
   editable: boolean;
@@ -97,11 +99,11 @@ export const CATEGORY_FIELDS: Record<ImportCategory, readonly TargetFieldDef[]> 
       field: 'project.entry_at',
       label: '进单时间',
       category: 'project',
-      type: 'datetime',
+      type: 'date',
       required: false,
       businessKey: false,
       aliases: [],
-      dateSemantics: 'datetime',
+      dateSemantics: 'date',
       editable: true,
       help: '源业务时间保存到业务字段；导入时间只用于审计，不替代源时间',
     },
@@ -132,11 +134,11 @@ export const CATEGORY_FIELDS: Record<ImportCategory, readonly TargetFieldDef[]> 
       field: 'project.actual_install_done_at',
       label: '实际装机完成时间',
       category: 'project',
-      type: 'datetime',
+      type: 'date',
       required: false,
       businessKey: false,
       aliases: [],
-      dateSemantics: 'datetime',
+      dateSemantics: 'date',
       editable: true,
     },
     {
@@ -154,11 +156,11 @@ export const CATEGORY_FIELDS: Record<ImportCategory, readonly TargetFieldDef[]> 
       field: 'project.cancelled_at',
       label: '取消时间',
       category: 'project',
-      type: 'datetime',
+      type: 'date',
       required: false,
       businessKey: false,
       aliases: [],
-      dateSemantics: 'datetime',
+      dateSemantics: 'date',
       editable: true,
     },
     {
@@ -211,11 +213,11 @@ export const CATEGORY_FIELDS: Record<ImportCategory, readonly TargetFieldDef[]> 
       field: 'service_order.ordered_at',
       label: '开单时间',
       category: 'service_order',
-      type: 'datetime',
+      type: 'date',
       required: true,
       businessKey: false,
       aliases: ['日期'],
-      dateSemantics: 'datetime',
+      dateSemantics: 'date',
       editable: true,
     },
     {
@@ -277,11 +279,11 @@ export const CATEGORY_FIELDS: Record<ImportCategory, readonly TargetFieldDef[]> 
       field: 'invoice.invoiced_at',
       label: '掉票时间',
       category: 'invoice',
-      type: 'datetime',
+      type: 'date',
       required: true,
       businessKey: false,
       aliases: [],
-      dateSemantics: 'datetime',
+      dateSemantics: 'date',
       editable: true,
     },
     {
@@ -321,11 +323,11 @@ export const CATEGORY_FIELDS: Record<ImportCategory, readonly TargetFieldDef[]> 
       field: 'logistics_fee.applied_at',
       label: '物流费用申请（登记）时间',
       category: 'logistics_fee',
-      type: 'datetime',
+      type: 'date',
       required: true,
       businessKey: false,
       aliases: ['申请时间', '登记时间', '物流费用申请时间', '物流费用申请登记时间'],
-      dateSemantics: 'datetime',
+      dateSemantics: 'date',
       editable: true,
       help: '目标必填；只登记月份无法推断具体日期',
     },
@@ -424,11 +426,11 @@ export const CATEGORY_FIELDS: Record<ImportCategory, readonly TargetFieldDef[]> 
       field: 'serial_address_update.updated_at',
       label: '更新时间',
       category: 'serial_address_update',
-      type: 'datetime',
+      type: 'date',
       required: true,
       businessKey: false,
       aliases: ['更新日期'],
-      dateSemantics: 'datetime',
+      dateSemantics: 'date',
       editable: true,
     },
   ],
@@ -447,11 +449,11 @@ export const CATEGORY_FIELDS: Record<ImportCategory, readonly TargetFieldDef[]> 
       field: 'qr_request.requested_at',
       label: '申请时间',
       category: 'qr_request',
-      type: 'datetime',
+      type: 'date',
       required: true,
       businessKey: false,
       aliases: ['日期'],
-      dateSemantics: 'datetime',
+      dateSemantics: 'date',
       editable: true,
     },
     {
@@ -513,11 +515,11 @@ export const CATEGORY_FIELDS: Record<ImportCategory, readonly TargetFieldDef[]> 
       field: 'ship_to_request.requested_at',
       label: '日期',
       category: 'ship_to_request',
-      type: 'datetime',
+      type: 'date',
       required: false,
       businessKey: false,
       aliases: ['申请时间', '提交时间'],
-      dateSemantics: 'datetime',
+      dateSemantics: 'date',
       editable: true,
     },
   ],

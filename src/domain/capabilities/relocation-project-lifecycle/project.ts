@@ -1,4 +1,5 @@
 import { newInternalId, newTempNumber } from '../../core/ids';
+import type { BusinessDate } from '../../core/time';
 import type { ProjectStatusOrCancelled } from './states';
 
 /**
@@ -28,8 +29,8 @@ export interface Project {
   customerId: string | null;
   /** 关联合同（内部 ID）；待进单阶段合同可空，正式进单前必须补齐。 */
   contractId: string | null;
-  /** 进单时间（业务时间）；待进单可空，正式进单必填默认当前可补录。 */
-  entryAt: string | null;
+  /** 进单日期（业务日期）；待进单可空，正式进单必填默认当前可补录。 */
+  entryAt: BusinessDate | null;
   /** 区域（手工文本，trim 后精确分组）。 */
   region: string | null;
   oldSiteContact: string | null;
@@ -38,24 +39,24 @@ export interface Project {
   oldSiteAddress: string | null;
   /** 项目默认新址地址（仅作默认计划，实际关联以序列号地址更新事实为准）。 */
   newSiteAddress: string | null;
-  contractStartDate: string | null;
-  contractEndDate: string | null;
-  /** 执行准备占位：计划上门时间（不触发状态流转）。 */
-  planVisitAt: string | null;
-  /** 执行准备占位：计划运输时间（不触发状态流转）。 */
-  planTransportAt: string | null;
+  contractStartDate: BusinessDate | null;
+  contractEndDate: BusinessDate | null;
+  /** 执行准备占位：计划上门日期（不触发状态流转）。 */
+  planVisitAt: BusinessDate | null;
+  /** 执行准备占位：计划运输日期（不触发状态流转）。 */
+  planTransportAt: BusinessDate | null;
   /** 执行准备占位：场地确认状态（不触发状态流转）。 */
   siteConfirmed: boolean;
-  /** 执行准备占位：实际装机完成时间（录入后由 lifecycle 自动置为待验收）。 */
-  actualInstallDoneAt: string | null;
+  /** 执行准备占位：实际装机完成日期（录入后由 lifecycle 自动置为待验收）。 */
+  actualInstallDoneAt: BusinessDate | null;
   /** 验收报告标记与报告形成日期（自动触发规则归 lifecycle）。 */
   acceptanceReport: boolean;
-  acceptanceReportDate: string | null;
-  /** 取消信息（取消时间与原因，TBD-10）。 */
-  cancelledAt: string | null;
+  acceptanceReportDate: BusinessDate | null;
+  /** 取消信息（取消日期与原因，TBD-10）。 */
+  cancelledAt: BusinessDate | null;
   cancelReason: string | null;
-  /** 项目提醒字段（当前提醒时间与备注，手工维护，见 workbench-todos 第 6 组）。 */
-  reminderAt: string | null;
+  /** 项目提醒字段（当前提醒日期与备注，手工维护，见 workbench-todos 第 6 组）。 */
+  reminderAt: BusinessDate | null;
   reminderNote: string | null;
   /** 最近一次提醒创建/编辑/清除操作绑定的登录账号内部 ID（手工事实归属，D12）。 */
   reminderAccountId: string | null;

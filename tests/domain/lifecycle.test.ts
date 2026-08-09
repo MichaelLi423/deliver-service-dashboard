@@ -54,7 +54,7 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
       ctx({
         currentStatus: 'executing',
         requestedStatus: 'executing', // 负责人同时提交人工值
-        actualInstallDoneAt: '2026-07-20T18:00:00+08:00',
+        actualInstallDoneAt: '2026-07-20',
       }),
     );
     expectStatus(result, 'pending_acceptance');
@@ -66,7 +66,7 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
       ctx({
         currentStatus: 'pending_acceptance',
         requestedStatus: 'pending_acceptance',
-        acceptanceReportDate: '2026-07-25T00:00:00+08:00',
+        acceptanceReportDate: '2026-07-25',
       }),
     );
     expectStatus(result, 'pending_invoice');
@@ -78,7 +78,7 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
       ctx({
         currentStatus: 'executing',
         requestedStatus: 'executing', // 负责人同时提交人工值
-        acceptanceReportDate: '2026-07-25T00:00:00+08:00',
+        acceptanceReportDate: '2026-07-25',
       }),
     );
     expectStatus(result, 'pending_invoice');
@@ -90,8 +90,8 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
       ctx({
         currentStatus: 'executing',
         requestedStatus: 'executing',
-        actualInstallDoneAt: '2026-07-20T18:00:00+08:00',
-        acceptanceReportDate: '2026-07-25T00:00:00+08:00',
+        actualInstallDoneAt: '2026-07-20',
+        acceptanceReportDate: '2026-07-25',
       }),
     );
     expectStatus(result, 'pending_invoice');
@@ -104,7 +104,7 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
       ctx({
         currentStatus: 'completed',
         requestedStatus: 'completed',
-        acceptanceReportDate: '2026-07-25T00:00:00+08:00',
+        acceptanceReportDate: '2026-07-25',
         amounts: { confirmedAmountCents: 800000n, finalConfirmableAmountCents: 800000n },
       }),
     );
@@ -115,7 +115,7 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
       ctx({
         currentStatus: 'pending_invoice',
         requestedStatus: 'pending_invoice',
-        acceptanceReportDate: '2026-07-25T00:00:00+08:00',
+        acceptanceReportDate: '2026-07-25',
         amounts: { confirmedAmountCents: 800000n, finalConfirmableAmountCents: 800000n },
       }),
     );
@@ -128,7 +128,7 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
       ctx({
         currentStatus: 'cancelled',
         requestedStatus: 'cancelled',
-        acceptanceReportDate: '2026-07-25T00:00:00+08:00',
+        acceptanceReportDate: '2026-07-25',
       }),
     );
     expectRejected(result, '不可恢复');
@@ -218,7 +218,7 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
       ctx({
         currentStatus: 'pending_entry',
         requestedStatus: 'pending_entry',
-        actualInstallDoneAt: '2026-07-20T18:00:00+08:00',
+        actualInstallDoneAt: '2026-07-20',
         preEntryExecution: true,
       }),
     );
@@ -249,7 +249,7 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
       ctx({
         currentStatus: 'pending_entry',
         requestedStatus: 'pending_entry',
-        actualInstallDoneAt: '2026-07-20T18:00:00+08:00',
+        actualInstallDoneAt: '2026-07-20',
       }),
     );
     expectStatus(auto, 'pending_acceptance');

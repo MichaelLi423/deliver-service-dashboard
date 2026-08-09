@@ -313,8 +313,8 @@ describe('8.80 状态与业务时间重建', () => {
       expect(f1.status).toBe('pending_invoice');
       expect(f2.status).toBe('pending_entry');
 
-      // ② 源业务时间进入业务字段（非导入时间）。
-      expect(f1.entry_at).toBe('2026-01-01T08:00:00+08:00');
+      // ② 源业务时间进入业务字段（非导入时间），统一为业务日期 yyyy-mm-dd（D30）。
+      expect(f1.entry_at).toBe('2026-01-01');
       expect(f2.entry_at).toBeNull();
 
       // ③ 导入时间只进审计：migration_audit/import_run 记录 started/committed（2026-12-31）。

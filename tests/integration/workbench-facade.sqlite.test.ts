@@ -1,16 +1,31 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
-import { closeDatabase } from '../../src/domain/capabilities/local-data-persistence/connection';
+import { closeDatabase, prepareReadBigInt } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { SqliteAccountRepository } from '../../src/domain/capabilities/local-data-persistence/repositories';
 import {
   SqliteShipToAddressReader,
   SqliteShipToRepository,
   SqliteShipToRequestRepository,
 } from '../../src/domain/capabilities/local-data-persistence';
+import {
+  SqliteActivityEngineerRepository,
+  SqliteActivityRepository,
+  SqliteBatchChangeHistoryRepository,
+  SqliteBatchRepository,
+  SqliteInstrumentRepository,
+  SqliteLogisticsFeeRepository,
+  SqliteWorkFactRepository,
+} from '../../src/domain/capabilities/local-data-persistence/execution-repositories';
+import { ExecutionService } from '../../src/domain/capabilities/relocation-execution/execution-service';
 import { ShipToService, type ShipToRepository } from '../../src/domain/capabilities/ship-to-management';
 import { LocalAccountService } from '../../src/domain/capabilities/workbench-access';
 import { WorkbenchFacade } from '../../src/main/workbench-facade';
-import type { ProjectWizardPayload, WorkbenchV2LookupRow, WorkbenchV2MutationResult } from '../../src/shared/ipc';
+import type {
+  ProjectWizardPayload,
+  WorkbenchV2LookupRow,
+  WorkbenchV2MutationResult,
+  WorkbenchV2SectionRow,
+} from '../../src/shared/ipc';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 
 /**
@@ -44,7 +59,7 @@ function wizard(overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPay
   };
 }
 
-async function makeFacade(): Promise<{ facade: WorkbenchFacade }> {
+async function makeFacade(): Promise<{ facade: WorkbenchFacade; db: import('node:sqlite').DatabaseSync; accountId: string }> {
   const dir = makeTempDir('workbench-facade-');
   dirs.push(dir);
   const { db } = bootstrapDatabase({ dataDir: dir });
@@ -53,7 +68,7 @@ async function makeFacade(): Promise<{ facade: WorkbenchFacade }> {
     password: 'password1',
   });
   const facade = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }));
-  return { facade };
+  return { facade, db, accountId: account.id };
 }
 
 describe('工作台 application facade → 领域服务 → SQLite（v2 有界 API）', () => {
@@ -82,24 +97,24 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(detail.ecc).toBe('ECC-UI-001');
     expect(facade.v2ProjectDetail(projectId).detail).toMatchObject({ oldSiteContact: '旧址王工', newSiteContact: '新址李工' });
     expect(facade.v2SectionPage({ projectId, kind: 'orders' }).rows[0]).toMatchObject({ serviceOrderNo: 'SO-WIZ-001', engineer: '工程师甲、乙', note: '现场提前联系' });
-    facade.v2Mutate({ op: 'set_reminder', projectId, reminderAt: '2026-08-09T09:00:00+08:00', reminderNote: '确认运输安排' });
+    facade.v2Mutate({ op: 'set_reminder', projectId, reminderAt: '2026-08-09', reminderNote: '确认运输安排' });
     expect(facade.v2ProjectDetail(projectId).project!.reminderNote).toBe('确认运输安排');
     facade.v2Mutate({
       op: 'submit_action',
       projectId,
-      action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '测试运输公司', originalPrice: '12000', discountedPrice: '11000' } },
+      action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '测试运输公司', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '11000' } },
     });
     expect(facade.v2SectionPage({ projectId, kind: 'batches' }).total).toBe(1);
     facade.v2Mutate({
       op: 'submit_action',
       projectId,
-      action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '20000' } },
+      action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '20000' } },
     });
     detail = facade.v2ProjectDetail(projectId).project!;
     expect(detail.invoicedAmount).toBe('20000.00');
     facade.v2Mutate({
       op: 'submit_action',
-      action: { type: 'qr_request', values: { applicant: '负责人', requestedAt: '2026-08-11T10:00', types: ['A', 'logistics_management'] } },
+      action: { type: 'qr_request', values: { applicant: '负责人', requestedAt: '2026-08-11', types: ['A', 'logistics_management'] } },
     });
     const qr = facade.v2IndependentPage({ kind: 'qr_request' }).rows[0] as Extract<
       ReturnType<WorkbenchFacade['v2IndependentPage']>['rows'][number],
@@ -114,7 +129,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'draft', customerName: '待进单客户', region: '华北' }),
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '待进单客户', region: '华北' }),
     });
     const projectId = projectIdOf(created);
     expect(() => facade.v2Mutate({ op: 'adjust_status', projectId, status: 'completed' })).toThrow();
@@ -193,7 +208,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         ecc: 'ECC-INV-EDIT',
         contractAmount: '2000',
         finalAmount: '2000',
-        actualInstallDoneAt: '2026-08-08T18:00',
+        actualInstallDoneAt: '2026-08-08',
         instrumentName: '质谱仪',
         ups: true,
       }),
@@ -201,7 +216,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const projectId = projectIdOf(created);
     facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'acceptance', projectId, values: { reportDate: '2026-08-09' } } });
     expect(facade.v2ProjectDetail(projectId).project!.status).toBe('pending_invoice');
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '1000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '1000' } } });
     let invoices = facade.v2SectionPage({ projectId, kind: 'invoices' }).rows as Array<
       Extract<ReturnType<WorkbenchFacade['v2SectionPage']>['rows'][number], { kind: 'invoices' }>
     >;
@@ -210,7 +225,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const invoiceId = invoices[0].id;
 
     // 编辑：1234.567 → 123457 分（HALF_UP），金额字符串 '1234.57'
-    facade.v2Mutate({ op: 'invoice_edit', invoiceId, invoicedAt: '2026-08-12T09:00', amount: '1234.567' });
+    facade.v2Mutate({ op: 'invoice_edit', invoiceId, invoicedAt: '2026-08-12', amount: '1234.567' });
     invoices = facade.v2SectionPage({ projectId, kind: 'invoices' }).rows as Array<
       Extract<ReturnType<WorkbenchFacade['v2SectionPage']>['rows'][number], { kind: 'invoices' }>
     >;
@@ -218,7 +233,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(facade.v2ProjectDetail(projectId).project!.invoicedAmount).toBe('1234.57');
 
     // 编辑至累计达到最终可确认金额 → 自动进入已完成（金额闭环）
-    facade.v2Mutate({ op: 'invoice_edit', invoiceId, invoicedAt: '2026-08-12T09:00', amount: '2000' });
+    facade.v2Mutate({ op: 'invoice_edit', invoiceId, invoicedAt: '2026-08-12', amount: '2000' });
     let detail = facade.v2ProjectDetail(projectId).project!;
     expect(detail.invoicedAmount).toBe('2000.00');
     expect(detail.status).toBe('completed');
@@ -227,7 +242,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(invRow.amountCents).toBe('2000.00'); // 报表 IPC 序列化：bigint → 十进制字符串
 
     // 撤销：撤销后为终态，不计入金额，状态回退到待掉票
-    facade.v2Mutate({ op: 'invoice_revoke', invoiceId, time: '2026-08-13T09:00', reason: '客户更正' });
+    facade.v2Mutate({ op: 'invoice_revoke', invoiceId, time: '2026-08-13', reason: '客户更正' });
     invoices = facade.v2SectionPage({ projectId, kind: 'invoices' }).rows as Array<
       Extract<ReturnType<WorkbenchFacade['v2SectionPage']>['rows'][number], { kind: 'invoices' }>
     >;
@@ -238,11 +253,11 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(detail.status).toBe('pending_invoice');
 
     // 重复撤销 / 撤销后编辑：终态拒绝
-    expect(() => facade.v2Mutate({ op: 'invoice_revoke', invoiceId, time: '2026-08-14T09:00', reason: '再次撤销' })).toThrow(/终态/);
-    expect(() => facade.v2Mutate({ op: 'invoice_edit', invoiceId, invoicedAt: '2026-08-14T09:00', amount: '2000' })).toThrow(/终态/);
+    expect(() => facade.v2Mutate({ op: 'invoice_revoke', invoiceId, time: '2026-08-14', reason: '再次撤销' })).toThrow(/终态/);
+    expect(() => facade.v2Mutate({ op: 'invoice_edit', invoiceId, invoicedAt: '2026-08-14', amount: '2000' })).toThrow(/终态/);
 
     // 取消项目：任何掉票历史（含已撤销）禁止取消
-    expect(() => facade.v2Mutate({ op: 'cancel_project', projectId, time: '2026-08-15T09:00', reason: '客户取消' })).toThrow(/掉票/);
+    expect(() => facade.v2Mutate({ op: 'cancel_project', projectId, time: '2026-08-15', reason: '客户取消' })).toThrow(/掉票/);
   });
 
   it('Ship-to complete 原子性：第二步不可变 Ship-to 落库失败时整体回滚，申请保持 processing 且无 Ship-to', async () => {
@@ -304,7 +319,8 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const created = facade.v2Mutate({
       op: 'create_project',
       payload: wizard({
-        intent: 'draft',
+        intent: 'pre_entry_execution',
+        approvalReason: '测试批复：经理批准未进单先执行',
         customerName: '资料更新客户',
         region: '华东',
         oldSiteContact: '旧址王工',
@@ -313,8 +329,8 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         newSiteAddress: '新址乙',
         contractStartDate: '2026-08-01',
         contractEndDate: '2027-07-31',
-        planVisitAt: '2026-08-10T09:00:00+08:00',
-        planTransportAt: '2026-08-12T09:00:00+08:00',
+        planVisitAt: '2026-08-10',
+        planTransportAt: '2026-08-12',
         siteConfirmed: true,
       }),
     });
@@ -329,9 +345,9 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         newSiteContact: '新新址刘工',
         oldSiteAddress: '旧址丙',
         newSiteAddress: '新址丁',
-        contractStartAt: '2026-09-01',
-        contractEndAt: '2027-08-31',
-        plannedVisitAt: '2026-09-05T02:00:00.000Z',
+        contractStartDate: '2026-09-01',
+        contractEndDate: '2027-08-31',
+        plannedVisitAt: '2026-09-05',
         plannedTransportAt: null, // 显式清空
         siteConfirmed: false, // 显式 false，不允许 truthy 丢失
       },
@@ -350,7 +366,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       newSiteAddress: '新址丁',
       contractStartDate: '2026-09-01',
       contractEndDate: '2027-08-31',
-      planVisitAt: '2026-09-05T02:00:00.000Z',
+      planVisitAt: '2026-09-05',
       planTransportAt: null,
       siteConfirmed: false,
     });
@@ -360,7 +376,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'draft', customerName: '原客户', region: '华东', oldSiteContact: '旧址王工' }),
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '原客户', region: '华东', oldSiteContact: '旧址王工' }),
     });
     const projectId = projectIdOf(created);
 
@@ -381,14 +397,14 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(facade.v2ProjectDetail(projectId).project!.region).toBeNull();
   });
 
-  it('update_project 正式进单后更正 ECC/进单时间/合同金额/最终可确认金额', async () => {
+  it('update_project 正式进单后更正 ECC/进单日期/合同金额/最终可确认金额', async () => {
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
       payload: wizard({
         customerName: '金额更正客户',
         ecc: 'ECC-UPD-1',
-        entryAt: '2026-08-01T09:00:00+08:00',
+        entryAt: '2026-08-01',
         contractAmount: '100000',
         finalAmount: '100000',
       }),
@@ -402,14 +418,14 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       payload: {
         projectId,
         ecc: 'ECC-UPD-2',
-        enteredAt: '2026-08-15T02:30:00.000Z',
+        entryAt: '2026-08-15',
         contractUsdTaxAmount: '2000',
         finalConfirmableAmount: '1500',
       },
     });
     const after = facade.v2ProjectDetail(projectId);
     expect(after.project!.ecc).toBe('ECC-UPD-2');
-    expect(after.project!.entryAt).toBe('2026-08-15T02:30:00.000Z');
+    expect(after.project!.entryAt).toBe('2026-08-15');
     expect(after.project!.contractAmount).toBe('2000.00');
     expect(after.project!.finalAmount).toBe('1500.00');
   });
@@ -418,7 +434,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'draft', customerName: '待进单更正客户' }),
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '待进单更正客户' }),
     });
     const projectId = projectIdOf(created);
     expect(() =>
@@ -445,7 +461,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     });
     const projectId = projectIdOf(created);
     // 掉票 1000 → 最终可确认金额不得低于累计有效掉票
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '1000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '1000' } } });
     expect(facade.v2ProjectDetail(projectId).project!.invoicedAmount).toBe('1000.00');
 
     // 同一次调用：区域已提交（事务内先写）但 finalAmount 低于累计掉票被领域拒绝 → 整体回滚
@@ -477,10 +493,228 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(facade.v2ProjectDetail(projectIdOf(second)).project!.ecc).toBe('ECC-UNIQUE-2');
 
     // 已取消项目：终态禁止任何资料更新
-    facade.v2Mutate({ op: 'cancel_project', projectId: projectIdOf(first), time: '2026-08-15T09:00', reason: '客户取消' });
+    facade.v2Mutate({ op: 'cancel_project', projectId: projectIdOf(first), time: '2026-08-15', reason: '客户取消' });
     expect(() =>
       facade.v2Mutate({ op: 'update_project', payload: { projectId: projectIdOf(first), region: '华北' } }),
     ).toThrow(/已取消项目禁止修改项目资料/);
     expect(facade.v2ProjectDetail(projectIdOf(first)).project!.region).toBe('华东');
+  });
+
+  // ---- 快速记录搬迁批次：批次 + 物流费用同一事务原子创建 ----
+
+  it('快速记录搬迁批次：原子创建批次与唯一物流费用，两个价格口径正确映射', async () => {
+    const { facade, db } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '批次快速记录客户' }),
+    });
+    const projectId = projectIdOf(created);
+
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: {
+        type: 'batch',
+        projectId,
+        values: {
+          planTransportDate: '2026-08-10',
+          transportCompany: '测试运输',
+          appliedAt: '2026-08-09',
+          budgetPrice: '12000',
+          dealPrice: '11000',
+        },
+      },
+    });
+
+    const batch = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+      WorkbenchV2SectionRow,
+      { kind: 'batches' }
+    >;
+    // 合同预算价 → batch.originalPriceCents；物流成交价 → batch.discountedPriceCents
+    expect(batch).toMatchObject({
+      planTransportDate: '2026-08-10',
+      transportCompany: '测试运输',
+      originalPrice: '12000.00',
+      discountedPrice: '11000.00',
+    });
+
+    // 费用记录同批落库：budgetPrice → fee.budgetPriceCents；dealPrice → dealPriceCents + logisticsCostCents
+    const fee = prepareReadBigInt(
+      db,
+      'SELECT applied_at, budget_price_cents, deal_price_cents, logistics_cost_cents FROM logistics_fees WHERE batch_id = ?',
+    ).get(batch.id) as {
+      applied_at: string;
+      budget_price_cents: bigint;
+      deal_price_cents: bigint;
+      logistics_cost_cents: bigint;
+    };
+    expect(fee.applied_at).toBe('2026-08-09');
+    expect(fee.budget_price_cents).toBe(1200000n); // 12000 元
+    expect(fee.deal_price_cents).toBe(1100000n);
+    expect(fee.logistics_cost_cents).toBe(1100000n); // 物流成交价即最终实际费用
+  });
+
+  it('快速记录搬迁批次：必填缺失/非法值全部回滚，批次与费用均不落库', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '原子批次客户' }),
+    });
+    const projectId = projectIdOf(created);
+
+    // 必填缺失：appliedAt 缺失 → 明确报错，不虚构申请日期
+    expect(() =>
+      facade.v2Mutate({
+        op: 'submit_action',
+        projectId,
+        action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', budgetPrice: '12000', dealPrice: '11000' } },
+      }),
+    ).toThrow(/物流费用申请（登记）日期必填/);
+
+    // 非法价格：成交价 0 → 报错
+    expect(() =>
+      facade.v2Mutate({
+        op: 'submit_action',
+        projectId,
+        action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '0' } },
+      }),
+    ).toThrow(/物流成交价/);
+
+    // 原子性：批次已创建后报价校验失败（日期格式非法）→ 同一事务整体回滚
+    expect(() =>
+      facade.v2Mutate({
+        op: 'submit_action',
+        projectId,
+        action: { type: 'batch', projectId, values: { planTransportDate: '2026-8-1', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '11000' } },
+      }),
+    ).toThrow(/计划运输日期 格式非法/);
+
+    // 三连失败均未产生任何批次或费用
+    expect(facade.v2SectionPage({ projectId, kind: 'batches' }).total).toBe(0);
+    expect(
+      facade.reportDto({ monthFrom: '2026-08', monthTo: '2026-08' }).sections.find((s) => s.key === 'monthly_logistics')?.rows,
+    ).toHaveLength(0);
+  });
+
+  // ---- batch_edit：编辑批次与费用，不允许修改 appliedAt ----
+
+  it('batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt', async () => {
+    const { facade, db } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '批次编辑客户' }),
+    });
+    const projectId = projectIdOf(created);
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '原公司', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '11000' } },
+    });
+    const before = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+      WorkbenchV2SectionRow,
+      { kind: 'batches' }
+    >;
+    const appliedAtBefore = prepareReadBigInt(db, 'SELECT applied_at FROM logistics_fees WHERE batch_id = ?').get(
+      before.id,
+    ) as { applied_at: string };
+
+    const result = facade.v2Mutate({
+      op: 'batch_edit',
+      payload: {
+        batchId: before.id,
+        planTransportDate: '2026-08-12',
+        transportCompany: '新公司',
+        budgetPrice: '13000',
+        dealPrice: '12500',
+      },
+    });
+    expect(result.changed).toMatchObject({ projectId, batchId: before.id });
+    expect(result.invalidated).toEqual(
+      expect.arrayContaining(['overview', 'projects', `project:${projectId}`, `sections:${projectId}`]),
+    );
+
+    const after = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+      WorkbenchV2SectionRow,
+      { kind: 'batches' }
+    >;
+    expect(after).toMatchObject({
+      planTransportDate: '2026-08-12',
+      transportCompany: '新公司',
+      originalPrice: '13000.00',
+      discountedPrice: '12500.00',
+    });
+
+    const fee = prepareReadBigInt(
+      db,
+      'SELECT applied_at, budget_price_cents, deal_price_cents, logistics_cost_cents FROM logistics_fees WHERE batch_id = ?',
+    ).get(before.id) as {
+      applied_at: string;
+      budget_price_cents: bigint;
+      deal_price_cents: bigint;
+      logistics_cost_cents: bigint;
+    };
+    // 不允许修改 appliedAt：申请（登记）时间保持原值，归属月份不变
+    expect(fee.applied_at).toBe(appliedAtBefore.applied_at);
+    expect(fee.applied_at).toBe('2026-08-09');
+    // dealPrice 同时覆盖 dealPriceCents 与 logisticsCostCents（物流成交价即最终实际费用）
+    expect(fee.budget_price_cents).toBe(1300000n);
+    expect(fee.deal_price_cents).toBe(1250000n);
+    expect(fee.logistics_cost_cents).toBe(1250000n);
+  });
+
+  it('batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑', async () => {
+    const { facade, db, accountId } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '历史批次客户' }),
+    });
+    const projectId = projectIdOf(created);
+
+    // 构造历史批次：仅有批次报价、无物流费用记录（旧数据形态）
+    const actor = { accountId, username: '负责人' };
+    const service = new ExecutionService(
+      new SqliteBatchRepository(db),
+      new SqliteInstrumentRepository(db),
+      new SqliteBatchChangeHistoryRepository(db),
+      new SqliteActivityRepository(db),
+      new SqliteActivityEngineerRepository(db),
+      new SqliteWorkFactRepository(db),
+      new SqliteLogisticsFeeRepository(db),
+      { onExecutionStarted: () => undefined },
+    );
+    const batch = service.createBatch(projectId, actor);
+    service.updateBatchQuote(
+      batch.id,
+      { planTransportDate: '2026-08-10', transportCompany: '历史运输', originalPriceCents: 1200000n, discountedPriceCents: 1100000n },
+      actor,
+    );
+
+    // 编辑价格：明确报错（编辑契约无 appliedAt，不虚构申请时间创建费用），且不部分落库
+    expect(() =>
+      facade.v2Mutate({ op: 'batch_edit', payload: { batchId: batch.id, budgetPrice: '13000' } }),
+    ).toThrow(/尚无实际物流费用记录/);
+    const unchanged = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+      WorkbenchV2SectionRow,
+      { kind: 'batches' }
+    >;
+    expect(unchanged.originalPrice).toBe('12000.00');
+    expect(unchanged.discountedPrice).toBe('11000.00');
+
+    // 仅批次字段（计划运输日期/运输公司）仍可编辑
+    facade.v2Mutate({ op: 'batch_edit', payload: { batchId: batch.id, planTransportDate: '2026-08-15', transportCompany: '新运输' } });
+    const edited = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+      WorkbenchV2SectionRow,
+      { kind: 'batches' }
+    >;
+    expect(edited).toMatchObject({ planTransportDate: '2026-08-15', transportCompany: '新运输', originalPrice: '12000.00' });
+    // 仍未虚构任何费用记录
+    expect((db.prepare('SELECT COUNT(*) AS n FROM logistics_fees WHERE batch_id = ?').get(batch.id) as { n: number }).n).toBe(0);
+  });
+
+  it('batch_edit 不存在的批次明确报错', async () => {
+    const { facade } = await makeFacade();
+    expect(() =>
+      facade.v2Mutate({ op: 'batch_edit', payload: { batchId: 'no-such-batch', planTransportDate: '2026-08-12' } }),
+    ).toThrow(/搬迁批次不存在/);
   });
 });

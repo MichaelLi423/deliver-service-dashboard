@@ -23,11 +23,11 @@ describe('独立二维码申请模块与申请记录（4.9 / TBD-06）', () => {
   it('保存申请人与申请时间并选择申请类型', () => {
     const { service } = setup();
     const request = service.createRequest(
-      { applicant: '负责人甲', requestedAt: '2026-08-01T09:00:00+08:00', types: ['A', 'B'] },
+      { applicant: '负责人甲', requestedAt: '2026-08-01', types: ['A', 'B'] },
       ACTOR,
     );
     expect(request.applicant).toBe('负责人甲');
-    expect(request.requestedAt).toBe('2026-08-01T09:00:00+08:00');
+    expect(request.requestedAt).toBe('2026-08-01');
     expect(request.types).toEqual(['A', 'B']);
   });
 

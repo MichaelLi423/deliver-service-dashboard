@@ -16,6 +16,7 @@ import {
 import type { SourceRow } from '../../src/domain/capabilities/historical-data-import/source-model';
 import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { closeDatabase } from '../../src/domain/capabilities/local-data-persistence/connection';
+import { localCalendarDateOf } from '../../src/domain/capabilities/local-data-persistence/business-date';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 
 /**
@@ -347,7 +348,9 @@ describe('8.9 源业务时间保留（导入时间只作审计字段）', () => 
       ];
       runImport(db, { rows, mapping: MAPPING_V1 });
       const project = db.prepare('SELECT entry_at FROM projects WHERE temp_no = ?').get('MIG-ECC-030') as { entry_at: string };
-      expect(project.entry_at).toBe('2026-05-01T00:00:00+08:00'); // 源业务时间
+      // 业务日期化（design D30）：源进单时间按冻结本机 IANA 时区转为业务日期 yyyy-mm-dd；
+      // 导入时间只作审计字段，绝不替代源业务日期。
+      expect(project.entry_at).toBe(localCalendarDateOf(new Date('2026-05-01T00:00:00+08:00')));
       closeDatabase(db);
     } finally {
       cleanupTempDir(dir);

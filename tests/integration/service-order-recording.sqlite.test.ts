@@ -136,7 +136,7 @@ describe('service-order-recording SQLite 集成（3.12）', () => {
       expect(ctx.projects.findById(project.id)?.id).toBe(project.id);
       expect(ctx.orders.findById(result.order!.id)?.serviceOrderNo).toBe('ORD-300');
       expect(ctx.orders.findById(result.order!.id)?.projectId).toBe(project.id);
-      expect(ctx.orders.findById(result.order!.id)?.orderedAt).toBe('2026-08-07T10:00:00+08:00');
+      expect(ctx.orders.findById(result.order!.id)?.orderedAt).toBe('2026-08-07');
       // 账号归属快照持久化
       const orderRow = ctx.db
         .prepare('SELECT account_id, username_snapshot FROM service_orders WHERE id = ?')
@@ -210,7 +210,7 @@ describe('service-order-recording SQLite 集成（3.12）', () => {
         id: 'o-wizard-fail',
         orderType: 'relocation' as const,
         serviceOrderNo: 'ORD-302',
-        orderedAt: '2026-08-07T10:00:00+08:00',
+        orderedAt: '2026-08-07',
         engineer: '工程师甲',
         customerName: '华东医药',
         projectId: project.id,

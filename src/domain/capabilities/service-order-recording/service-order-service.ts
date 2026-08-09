@@ -1,7 +1,12 @@
 import { UniquenessError, ValidationError } from '../../core/errors';
 import { assertRequiredText, newInternalId } from '../../core/ids';
 import type { ActorSnapshot } from '../../core/source';
-import { assertValidIso, SystemClock, type Clock } from '../../core/time';
+import {
+  assertValidBusinessDate,
+  SystemClock,
+  type BusinessDate,
+  type Clock,
+} from '../../core/time';
 import type { Project, ProjectRepository } from '../relocation-project-lifecycle';
 import { ORDER_TYPES, type OrderType, type ServiceOrder } from './service-order';
 import type { ServiceOrderRepository, WizardSaveGateway } from './service-order-repositories';
@@ -25,8 +30,8 @@ export interface ServiceOrderInput {
   orderType: OrderType;
   /** 非空服务单号全局唯一（四类共用唯一空间）。 */
   serviceOrderNo: string;
-  /** 开单时间（未填默认当前时间，TBD-22）。 */
-  orderedAt?: string;
+  /** 开单日期（未填默认当天，TBD-22）。 */
+  orderedAt?: BusinessDate;
   /** 参与工程师（必填）。 */
   engineer: string;
   /** 客户单位（必填）。 */
@@ -47,8 +52,8 @@ export interface WizardSaveInput {
   serviceOrderNo?: string | null;
   /** 客户单位（自动创建的搬迁开单必填字段）。 */
   customerName: string;
-  /** 开单时间（缺省当前时间）。 */
-  orderedAt?: string;
+  /** 开单日期（缺省当天）。 */
+  orderedAt?: BusinessDate;
 }
 
 export interface WizardSaveResult {
@@ -100,8 +105,8 @@ export class ServiceOrderService {
       );
     }
 
-    const orderedAt = input.orderedAt ?? this.now();
-    assertValidIso(orderedAt, '开单时间');
+    const orderedAt = input.orderedAt ?? this.today();
+    assertValidBusinessDate(orderedAt, '开单时间');
     const now = this.now();
     const order: ServiceOrder = {
       id: newInternalId(),
@@ -176,6 +181,11 @@ export class ServiceOrderService {
   private now(): string {
     return this.clock.nowIso();
   }
+
+  /** 当前业务日期（yyyy-mm-dd）：业务时间字段默认值。 */
+  private today(): BusinessDate {
+    return this.clock.today();
+  }
 }
 
 /**
@@ -213,8 +223,8 @@ export class ProjectWizardService {
         );
       }
       const now = this.now();
-      const orderedAt = input.orderedAt ?? now;
-      assertValidIso(orderedAt, '开单时间');
+      const orderedAt = input.orderedAt ?? this.today();
+      assertValidBusinessDate(orderedAt, '开单时间');
       order = {
         id: newInternalId(),
         orderType: 'relocation',
@@ -238,5 +248,10 @@ export class ProjectWizardService {
 
   private now(): string {
     return this.clock.nowIso();
+  }
+
+  /** 当前业务日期（yyyy-mm-dd）：业务时间字段默认值。 */
+  private today(): BusinessDate {
+    return this.clock.today();
   }
 }

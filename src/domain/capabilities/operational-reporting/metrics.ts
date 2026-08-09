@@ -19,8 +19,8 @@ export const REPORT_METRIC_KEYS = [
   'monthly_service_order_count', // 月度开单量（唯一服务单号）
   'damage_repair_stats', // 损坏维修统计（仅已使用备件）
   'monthly_logistics', // 月度物流费用汇总（人民币）
-  'logistics_contract_ratio', // 物流费用合同占比
-  'pending_logistics_list', // 待补实际费用清单
+  'logistics_contract_ratio', // 物流成交价合同占比
+  'pending_logistics_list', // 历史异常批次（已有物流成交价但无费用记录，仅展示）
   'ship_to_request_workload', // Ship-to 申请工作量（首次实际提交）
   'qr_request_workload', // 二维码申请工作量（去重类型）
   'serial_address_update_count', // 序列号地址更新记录数
@@ -126,23 +126,23 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     key: 'monthly_logistics',
     label: '月度物流费用汇总',
     timeAttribution: '实际物流费用申请（登记）时间（applied_at）所属月份',
-    factSource: 'logistics_fees（人民币预算/成交/实际）按 batches.transport_company 分组',
+    factSource: 'logistics_fees（合同预算价/物流成交价；实际费用旧列与物流成交价同值，仅历史兼容）按 batches.transport_company 分组',
     filters: ['monthFrom', 'monthTo', 'region', 'transportCompany'],
     hasDrillDown: true,
   },
   {
     key: 'logistics_contract_ratio',
-    label: '物流费用合同占比',
+    label: '物流成交价合同占比',
     timeAttribution: '实际物流费用申请（登记）时间所属月份',
-    factSource: 'logistics_fees 人民币费用 ÷ 固定汇率 7.2 折算 USD ÷ 最新合同 USD 含税金额',
+    factSource: 'logistics_fees 物流成交价（即最终实际费用）÷ 固定汇率 7.2 折算 USD ÷ 最新合同 USD 含税金额',
     filters: ['monthFrom', 'monthTo', 'region'],
     hasDrillDown: true,
   },
   {
     key: 'pending_logistics_list',
-    label: '待补实际费用清单',
+    label: '历史异常批次',
     timeAttribution: '不按月归属（当前清单）；已取消项目排除',
-    factSource: 'batches（已有成交价格 discounted_price_cents 且无 logistics_fees 记录）',
+    factSource: 'batches（已有物流成交价 discounted_price_cents 且无 logistics_fees 记录；历史数据形态，仅展示不提供补录指引）',
     filters: ['region', 'transportCompany'],
     hasDrillDown: false,
   },

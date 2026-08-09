@@ -143,7 +143,7 @@ describe('serial-address-update SQLite 集成（4.12）', () => {
 
       const update = ctx.serialService.register(
         'i-1',
-        { customerName: '华东医药', newSiteAddress: '新址A', serialNo: 'SN-100', accountId: 'ACC-300', updatedAt: '2026-08-01T09:00:00+08:00' },
+        { customerName: '华东医药', newSiteAddress: '新址A', serialNo: 'SN-100', accountId: 'ACC-300', updatedAt: '2026-08-01' },
         ACTOR,
       );
 
@@ -153,7 +153,7 @@ describe('serial-address-update SQLite 集成（4.12）', () => {
       const stored = reopened.updates.findById(update.id)!;
       expect(stored.newSiteAddress).toBe('新址A');
       expect(stored.serialNo).toBe('SN-100');
-      expect(stored.updatedAt).toBe('2026-08-01T09:00:00+08:00');
+      expect(stored.updatedAt).toBe('2026-08-01');
       expect(reopened.serialService.getActualAddress('i-1')!.accountId).toBe('ACC-300');
       expect(reopened.serialService.countByMonth()).toEqual([{ month: '2026-08', count: 1 }]);
 

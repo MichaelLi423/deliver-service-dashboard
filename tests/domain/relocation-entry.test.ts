@@ -106,19 +106,19 @@ describe('正式进单（2.1）', () => {
     const { projectId } = prepareEnterableProject(service);
     const entered = service.formalEntry(projectId, {
       ecc: 'ECC-001',
-      entryAt: '2026-06-01T09:00:00+08:00',
+      entryAt: '2026-06-01',
     });
-    expect(entered.entryAt).toBe('2026-06-01T09:00:00+08:00');
+    expect(entered.entryAt).toBe('2026-06-01');
   });
 
   it('进单时间未填写默认取当前时间，并允许进单后补录或修正', () => {
     const { service } = setup('2026-08-07T10:00:00+08:00');
     const { projectId } = prepareEnterableProject(service);
     const entered = service.formalEntry(projectId, { ecc: 'ECC-001' });
-    expect(entered.entryAt).toBe('2026-08-07T10:00:00+08:00');
+    expect(entered.entryAt).toBe('2026-08-07');
 
-    const corrected = service.setEntryAt(projectId, '2026-07-01T08:00:00+08:00');
-    expect(corrected.entryAt).toBe('2026-07-01T08:00:00+08:00');
+    const corrected = service.setEntryAt(projectId, '2026-07-01');
+    expect(corrected.entryAt).toBe('2026-07-01');
   });
 
   it('待进单阶段进单时间可空', () => {

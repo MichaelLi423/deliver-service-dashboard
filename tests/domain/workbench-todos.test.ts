@@ -41,29 +41,29 @@ describe('项目提醒手工维护（6.1）', () => {
     addProject(ctx);
     const reminder = ctx.service.setReminder(
       'p1',
-      { at: '2026-08-10T09:00:00+08:00', note: '补齐搬迁范围资料' },
+      { at: '2026-08-10', note: '补齐搬迁范围资料' },
       ACTOR,
     );
-    expect(reminder.at).toBe('2026-08-10T09:00:00+08:00');
+    expect(reminder.at).toBe('2026-08-10');
     expect(reminder.note).toBe('补齐搬迁范围资料');
-    expect(ctx.projects.findById('p1')!.reminderAt).toBe('2026-08-10T09:00:00+08:00');
+    expect(ctx.projects.findById('p1')!.reminderAt).toBe('2026-08-10');
     expect(ctx.projects.findById('p1')!.reminderNote).toBe('补齐搬迁范围资料');
   });
 
   it('编辑当前提醒：覆盖为新的当前提醒，不保存旧内容或完成历史', () => {
     const ctx = setup();
     addProject(ctx);
-    ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00', note: '旧备注' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-10', note: '旧备注' }, ACTOR);
     const edited = ctx.service.setReminder(
       'p1',
-      { at: '2026-08-12T09:00:00+08:00', note: '新备注' },
+      { at: '2026-08-12', note: '新备注' },
       ACTOR,
     );
-    expect(edited.at).toBe('2026-08-12T09:00:00+08:00');
+    expect(edited.at).toBe('2026-08-12');
     expect(edited.note).toBe('新备注');
     // 无完成历史/历史提醒表：仅当前字段，旧内容不可再取到
     const stored = ctx.projects.findById('p1')!;
-    expect(stored.reminderAt).toBe('2026-08-12T09:00:00+08:00');
+    expect(stored.reminderAt).toBe('2026-08-12');
     expect(stored.reminderNote).toBe('新备注');
     expect('reminderHistory' in stored).toBe(false);
     expect('reminderDoneAt' in stored).toBe(false);
@@ -72,7 +72,7 @@ describe('项目提醒手工维护（6.1）', () => {
   it('清除项目提醒：项目不再显示任何提醒', () => {
     const ctx = setup();
     addProject(ctx);
-    ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00', note: '跟进' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-10', note: '跟进' }, ACTOR);
     const cleared = ctx.service.clearReminder('p1', ACTOR);
     expect(cleared.at).toBeNull();
     expect(cleared.note).toBeNull();
@@ -92,8 +92,8 @@ describe('项目提醒手工维护（6.1）', () => {
   it('提醒备注可空：仅填提醒时间可保存提醒', () => {
     const ctx = setup();
     addProject(ctx);
-    const reminder = ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00' }, ACTOR);
-    expect(reminder.at).toBe('2026-08-10T09:00:00+08:00');
+    const reminder = ctx.service.setReminder('p1', { at: '2026-08-10' }, ACTOR);
+    expect(reminder.at).toBe('2026-08-10');
     expect(reminder.note).toBeNull();
   });
 
@@ -104,18 +104,21 @@ describe('项目提醒手工维护（6.1）', () => {
     expect(() => ctx.service.setReminder('p1', {}, ACTOR)).toThrow(/至少填写一项/);
   });
 
-  it('提醒时间格式非法时拒绝保存', () => {
+  it('提醒日期格式非法或不是真实日历日期时拒绝保存', () => {
     const ctx = setup();
     addProject(ctx);
     expect(() =>
-      ctx.service.setReminder('p1', { at: '2026-08-10', note: 'x' }, ACTOR),
+      ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00', note: 'x' }, ACTOR),
+    ).toThrow(/格式非法/);
+    expect(() =>
+      ctx.service.setReminder('p1', { at: '2026-02-30', note: 'x' }, ACTOR),
     ).toThrow(/格式非法/);
   });
 
   it('操作绑定当前登录账号归属快照（D12：手工事实归属当前账号）', () => {
     const ctx = setup();
     addProject(ctx);
-    ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00', note: '跟进' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-10', note: '跟进' }, ACTOR);
     const stored = ctx.projects.findById('p1')!;
     expect(stored.reminderAccountId).toBe('account-1');
     expect(stored.reminderUsernameSnapshot).toBe('负责人甲');
@@ -135,7 +138,7 @@ describe('项目提醒手工维护（6.1）', () => {
     expect(ctx.projects.findById('p2')!.reminderNote).toBeNull();
     expect(ctx.service.listReminders()).toHaveLength(0);
     // 负责人手工维护后才产生提醒
-    ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-10' }, ACTOR);
     expect(ctx.service.listReminders()).toHaveLength(1);
   });
 });
@@ -144,21 +147,21 @@ describe('提醒到期分类（6.2）', () => {
   it('截止日当天归为今日到期', () => {
     const ctx = setup();
     addProject(ctx);
-    ctx.service.setReminder('p1', { at: '2026-08-07T18:00:00+08:00', note: '今天截止' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-07', note: '今天截止' }, ACTOR);
     expect(ctx.service.classifyProject(ctx.projects.findById('p1')!)).toBe('today');
   });
 
   it('超过截止日归为已逾期', () => {
     const ctx = setup();
     addProject(ctx);
-    ctx.service.setReminder('p1', { at: '2026-08-06T09:00:00+08:00', note: '已超期' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-06', note: '已超期' }, ACTOR);
     expect(ctx.service.classifyProject(ctx.projects.findById('p1')!)).toBe('overdue');
   });
 
   it('临期窗口内且未到期的提醒归为临期', () => {
     const ctx = setup();
     addProject(ctx);
-    ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00', note: '临期跟进' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-10', note: '临期跟进' }, ACTOR);
     expect(ctx.service.classifyProject(ctx.projects.findById('p1')!)).toBe('upcoming');
   });
 
@@ -170,9 +173,9 @@ describe('提醒到期分类（6.2）', () => {
 
   it('分类纯函数边界：恰好未来 7 天为临期，第 8 天起不分类', () => {
     const today = '2026-08-07';
-    expect(classifyReminder('2026-08-07T23:59:00+08:00', today, 7)).toBe('today');
-    expect(classifyReminder('2026-08-14T00:00:00+08:00', today, 7)).toBe('upcoming');
-    expect(classifyReminder('2026-08-15T00:00:00+08:00', today, 7)).toBeNull();
+    expect(classifyReminder('2026-08-07', today, 7)).toBe('today');
+    expect(classifyReminder('2026-08-14', today, 7)).toBe('upcoming');
+    expect(classifyReminder('2026-08-15', today, 7)).toBeNull();
     expect(classifyReminder(null, today, 7)).toBeNull();
     expect(classifyReminder('', today, 7)).toBeNull();
   });
@@ -193,8 +196,8 @@ describe('临期窗口可配置、默认 7 个自然日（6.3）', () => {
     expect(ctx.service.getUpcomingWindowDays()).toBe(DEFAULT_UPCOMING_WINDOW_DAYS);
     expect(ctx.service.getUpcomingWindowDays()).toBe(7);
     // 第 7 天临期、第 8 天不临期（默认窗口）
-    expect(ctx.service.classifyAt('2026-08-14T00:00:00+08:00')).toBe('upcoming');
-    expect(ctx.service.classifyAt('2026-08-15T00:00:00+08:00')).toBeNull();
+    expect(ctx.service.classifyAt('2026-08-14')).toBe('upcoming');
+    expect(ctx.service.classifyAt('2026-08-15')).toBeNull();
   });
 
   it('配置临期窗口后立即生效于后续到期分类', () => {
@@ -203,12 +206,12 @@ describe('临期窗口可配置、默认 7 个自然日（6.3）', () => {
     ctx.service.setUpcomingWindowDays(3);
     expect(ctx.service.getUpcomingWindowDays()).toBe(3);
     // 仅未来 3 天内的提醒进入临期
-    expect(ctx.service.classifyAt('2026-08-10T00:00:00+08:00')).toBe('upcoming');
-    expect(ctx.service.classifyAt('2026-08-11T00:00:00+08:00')).toBeNull();
+    expect(ctx.service.classifyAt('2026-08-10')).toBe('upcoming');
+    expect(ctx.service.classifyAt('2026-08-11')).toBeNull();
     // 再次配置立即生效
     ctx.service.setUpcomingWindowDays(1);
-    expect(ctx.service.classifyAt('2026-08-08T00:00:00+08:00')).toBe('upcoming');
-    expect(ctx.service.classifyAt('2026-08-09T00:00:00+08:00')).toBeNull();
+    expect(ctx.service.classifyAt('2026-08-08')).toBe('upcoming');
+    expect(ctx.service.classifyAt('2026-08-09')).toBeNull();
   });
 
   it('配置非法值（负数/非整数）被拒绝', () => {
@@ -223,8 +226,8 @@ describe('提醒仅工作台内展示（6.4）', () => {
     const ctx = setup();
     addProject(ctx);
     addProject(ctx, 'p2');
-    ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00', note: '跟进' }, ACTOR);
-    ctx.service.setReminder('p2', { at: '2026-08-06T09:00:00+08:00', note: '已超期' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-10', note: '跟进' }, ACTOR);
+    ctx.service.setReminder('p2', { at: '2026-08-06', note: '已超期' }, ACTOR);
 
     const reminders = ctx.service.listReminders();
     expect(reminders).toHaveLength(2);
@@ -252,7 +255,7 @@ describe('不自动创建提醒的场景（6.4 / TBD-23）', () => {
     addProject(ctx);
     const project = ctx.projects.findById('p1')!;
     project.region = '华东';
-    project.planVisitAt = '2026-08-20T09:00:00+08:00';
+    project.planVisitAt = '2026-08-20';
     project.siteConfirmed = true;
     project.actualInstallDoneAt = null;
     ctx.projects.save(project);
@@ -265,7 +268,7 @@ describe('不自动创建提醒的场景（6.4 / TBD-23）', () => {
     const ctx = setup();
     addProject(ctx);
     const before = ctx.projects.findById('p1')!.status;
-    ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00', note: '跟进' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-10', note: '跟进' }, ACTOR);
     ctx.service.clearReminder('p1', ACTOR);
     expect(ctx.projects.findById('p1')!.status).toBe(before);
   });
@@ -273,7 +276,7 @@ describe('不自动创建提醒的场景（6.4 / TBD-23）', () => {
   it('提醒不存在于除项目字段外的任何记录：无独立提醒表/事件表', () => {
     const ctx = setup();
     addProject(ctx);
-    ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00', note: '跟进' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-10', note: '跟进' }, ACTOR);
     const project = ctx.projects.findById('p1')!;
     // 提醒事实仅落在项目聚合字段上
     const keys = Object.keys(project);
@@ -297,7 +300,7 @@ describe('所有权边界（design D9 / tasks 6.5）', () => {
     const ctx = setup();
     addProject(ctx);
     const before = ctx.projects.findById('p1')!;
-    ctx.service.setReminder('p1', { at: '2026-08-10T09:00:00+08:00', note: '跟进' }, ACTOR);
+    ctx.service.setReminder('p1', { at: '2026-08-10', note: '跟进' }, ACTOR);
     const after = ctx.projects.findById('p1')!;
     expect(after.status).toBe(before.status);
     expect(after.entryAt).toBe(before.entryAt);

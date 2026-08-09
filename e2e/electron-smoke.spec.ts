@@ -104,8 +104,9 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData · 
       const batchDialog = window.getByRole('dialog');
       await batchDialog.getByLabel('计划运输日期').fill('2026-08-10');
       await batchDialog.getByLabel('运输公司').fill('E2E 运输');
-      await batchDialog.getByLabel('人民币原价').fill('12000');
-      await batchDialog.getByLabel('人民币折后价').fill('11000');
+      await batchDialog.getByLabel('费用登记日期').fill('2026-08-09');
+      await batchDialog.getByLabel('合同预算价').fill('12000');
+      await batchDialog.getByLabel('物流成交价').fill('11000');
       await batchDialog.getByRole('button', { name: '保存记录' }).click();
       await window.getByRole('tab', { name: '搬迁批次' }).click();
       await expect(window.getByText('E2E 运输').first()).toBeVisible();
@@ -126,7 +127,7 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData · 
       await window.getByRole('button', { name: /^掉票 按 ECC/ }).click();
       const invoiceDialog = window.getByRole('dialog');
       await invoiceDialog.getByLabel('掉票金额（USD）').fill('40000');
-      await invoiceDialog.getByLabel('掉票时间').fill('2026-08-11T09:00');
+      await invoiceDialog.getByLabel('掉票日期').fill('2026-08-11');
       await invoiceDialog.getByRole('button', { name: '保存记录' }).click();
       await window.getByRole('tab', { name: '费用与掉票' }).click();
       await expect(window.getByText('USD 40,000.00').first()).toBeVisible();
@@ -151,13 +152,13 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData · 
       await window.getByRole('button', { name: /^掉票 按 ECC/ }).click();
       const correctedInvoiceDialog = window.getByRole('dialog');
       await correctedInvoiceDialog.getByLabel('掉票金额（USD）').fill('40000');
-      await correctedInvoiceDialog.getByLabel('掉票时间').fill('2026-08-11T10:00');
+      await correctedInvoiceDialog.getByLabel('掉票日期').fill('2026-08-11');
       await correctedInvoiceDialog.getByRole('button', { name: '保存记录' }).click();
 
       // —— 项目提醒手工维护 ——
       await window.getByRole('button', { name: '维护提醒' }).first().click();
       const reminderDialog = window.getByRole('dialog');
-      await reminderDialog.getByLabel('当前提醒时间').fill('2026-08-12T09:00');
+      await reminderDialog.getByLabel('当前提醒日期').fill('2026-08-12');
       await reminderDialog.getByLabel('备注内容').fill('E2E 提醒：确认第二批次运输');
       await reminderDialog.getByRole('button', { name: '保存当前提醒' }).click();
       await expect(window.getByText(/E2E 提醒/).first()).toBeVisible();
@@ -234,7 +235,7 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData · 
       await expect(window.getByText('未进单').first()).toBeVisible();
       await expect(window.getByText('未进单先执行').first()).toBeVisible();
 
-      // —— 实际装机完成时间自动进入待验收 ——
+      // —— 实际装机完成日期自动进入待验收 ——
       await window.getByRole('button', { name: '新建搬迁项目' }).click();
       dialog = window.getByRole('dialog');
       await dialog.getByLabel('客户名称').fill('E2E 装机完成客户');
@@ -247,7 +248,7 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData · 
       await dialog.getByLabel('新址地址').fill('新址');
       await dialog.getByLabel('仪器名称').fill('E2E 仪器乙');
       await dialog.getByRole('button', { name: '下一步' }).click();
-      await dialog.getByLabel('实际装机完成时间').fill('2026-08-08T18:00');
+      await dialog.getByLabel('实际装机完成日期').fill('2026-08-08');
       await dialog.getByRole('button', { name: '下一步' }).click();
       await dialog.getByLabel('ECC').fill('E2E-2026-0002');
       await dialog.getByRole('button', { name: /正式进单/ }).click();

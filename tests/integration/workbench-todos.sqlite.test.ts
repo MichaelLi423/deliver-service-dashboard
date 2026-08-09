@@ -108,11 +108,11 @@ function addProject(db: DatabaseSync, id: string): void {
 }
 
 describe('workbench-todos SQLite 集成（6.5）', () => {
-  it('schema v11：项目提醒归属快照列存在并随迁移写入 user_version=11', () => {
+  it('schema v13：项目提醒归属快照列存在并随迁移写入 user_version=13', () => {
     const dir = makeTempDir();
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(db)).toBe(12);
+      expect(readSchemaVersion(db)).toBe(13);
       const cols = db.prepare('PRAGMA table_info(projects)').all() as { name: string }[];
       expect(cols.map((c) => c.name)).toContain('reminder_account_id');
       expect(cols.map((c) => c.name)).toContain('reminder_username_snapshot');
@@ -128,21 +128,21 @@ describe('workbench-todos SQLite 集成（6.5）', () => {
       const ctx = openService(dir);
       addProject(ctx.db, 'p1');
 
-      ctx.reminders.setReminder('p1', { at: '2026-08-10T09:00:00+08:00', note: '补齐资料' }, ACTOR);
+      ctx.reminders.setReminder('p1', { at: '2026-08-10', note: '补齐资料' }, ACTOR);
       closeDatabase(ctx.db);
 
       const reopened = openService(dir);
       const stored = reopened.projects.findById('p1')!;
-      expect(stored.reminderAt).toBe('2026-08-10T09:00:00+08:00');
+      expect(stored.reminderAt).toBe('2026-08-10');
       expect(stored.reminderNote).toBe('补齐资料');
       expect(stored.reminderAccountId).toBe('account-1');
       expect(stored.reminderUsernameSnapshot).toBe('负责人甲');
       expect(reopened.reminders.classifyProject(stored)).toBe('upcoming');
 
       // 编辑：覆盖为新的当前提醒（不保存旧内容/完成历史）
-      reopened.reminders.setReminder('p1', { at: '2026-08-12T09:00:00+08:00', note: '新备注' }, ACTOR);
+      reopened.reminders.setReminder('p1', { at: '2026-08-12', note: '新备注' }, ACTOR);
       const edited = reopened.projects.findById('p1')!;
-      expect(edited.reminderAt).toBe('2026-08-12T09:00:00+08:00');
+      expect(edited.reminderAt).toBe('2026-08-12');
       expect(edited.reminderNote).toBe('新备注');
       expect(reopened.reminders.classifyProject(edited)).toBe('upcoming');
 
@@ -164,8 +164,8 @@ describe('workbench-todos SQLite 集成（6.5）', () => {
       const ctx = openService(dir);
       // 未配置默认 7 个自然日
       expect(ctx.reminders.getUpcomingWindowDays()).toBe(7);
-      expect(ctx.reminders.classifyAt('2026-08-14T00:00:00+08:00')).toBe('upcoming');
-      expect(ctx.reminders.classifyAt('2026-08-15T00:00:00+08:00')).toBeNull();
+      expect(ctx.reminders.classifyAt('2026-08-14')).toBe('upcoming');
+      expect(ctx.reminders.classifyAt('2026-08-15')).toBeNull();
 
       ctx.reminders.setUpcomingWindowDays(3);
       closeDatabase(ctx.db);
@@ -173,8 +173,8 @@ describe('workbench-todos SQLite 集成（6.5）', () => {
       const reopened = openService(dir);
       expect(reopened.reminders.getUpcomingWindowDays()).toBe(3);
       // 配置立即生效：第 4 天起不再临期
-      expect(reopened.reminders.classifyAt('2026-08-10T00:00:00+08:00')).toBe('upcoming');
-      expect(reopened.reminders.classifyAt('2026-08-11T00:00:00+08:00')).toBeNull();
+      expect(reopened.reminders.classifyAt('2026-08-10')).toBe('upcoming');
+      expect(reopened.reminders.classifyAt('2026-08-11')).toBeNull();
       const row = reopened.db
         .prepare("SELECT value FROM app_settings WHERE key = 'reminder_upcoming_window_days'")
         .get() as { value: string };
@@ -191,8 +191,8 @@ describe('workbench-todos SQLite 集成（6.5）', () => {
       const ctx = openService(dir);
       addProject(ctx.db, 'p1');
       addProject(ctx.db, 'p2');
-      ctx.reminders.setReminder('p1', { at: '2026-08-07T18:00:00+08:00', note: '今日' }, ACTOR);
-      ctx.reminders.setReminder('p2', { at: '2026-08-05T09:00:00+08:00', note: '逾期' }, ACTOR);
+      ctx.reminders.setReminder('p1', { at: '2026-08-07', note: '今日' }, ACTOR);
+      ctx.reminders.setReminder('p2', { at: '2026-08-05', note: '逾期' }, ACTOR);
       closeDatabase(ctx.db);
 
       const reopened = openService(dir);
@@ -228,7 +228,7 @@ describe('workbench-todos SQLite 集成（6.5）', () => {
         .run('b1', 'p1', '2026-08-10', '物流公司甲', 10000, 9000, 't', 't');
       const feeResult = ctx.executionService.recordLogisticsFee(
         'b1',
-        { appliedAt: '2026-08-07T09:00:00+08:00', budgetPriceCents: 10000n, dealPriceCents: 12000n, logisticsCostCents: 11000n },
+        { appliedAt: '2026-08-07', budgetPriceCents: 10000n, dealPriceCents: 12000n, logisticsCostCents: 11000n },
         ACTOR,
       );
       expect(feeResult.warning).toContain('不自动创建项目提醒');
@@ -238,7 +238,7 @@ describe('workbench-todos SQLite 集成（6.5）', () => {
       expect(ctx.reminders.listReminders()).toHaveLength(0);
 
       // 负责人手工维护后才有提醒（系统绝不由上述事实推导）
-      ctx.reminders.setReminder('p1', { at: '2026-08-09T09:00:00+08:00', note: '手工跟进' }, ACTOR);
+      ctx.reminders.setReminder('p1', { at: '2026-08-09', note: '手工跟进' }, ACTOR);
       expect(ctx.projects.findById('p1')!.reminderNote).toBe('手工跟进');
       closeDatabase(ctx.db);
     } finally {

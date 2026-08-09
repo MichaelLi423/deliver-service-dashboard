@@ -44,7 +44,7 @@
 
 ### Requirement: Account ID 创建时可空、外部完成后补入并进入已完成
 
-Ship-to 申请创建时 Account ID SHALL 可空；申请由系统外完成流程处理后，负责人 SHALL 将系统外返回的 Account ID 补入申请，补入后申请 SHALL 进入已完成并记录完成时间。申请进入已完成前 Account ID MUST NOT 为空，未补入 Account ID 的申请 SHALL NOT 进入已完成。补入的 Account ID SHALL 全局唯一，MUST NOT 与已有 Ship-to 重复；补入的 Account ID SHALL 创建/对应不可变的 Ship-to。
+Ship-to 申请创建时 Account ID SHALL 可空；申请由系统外完成流程处理后，负责人 SHALL 将系统外返回的 Account ID 补入申请，补入后申请 SHALL 进入已完成并记录完成日期。申请进入已完成前 Account ID MUST NOT 为空，未补入 Account ID 的申请 SHALL NOT 进入已完成。补入的 Account ID SHALL 全局唯一，MUST NOT 与已有 Ship-to 重复；补入的 Account ID SHALL 创建/对应不可变的 Ship-to。
 
 #### Scenario: 创建申请时 Account ID 可空
 
@@ -57,7 +57,7 @@ Ship-to 申请创建时 Account ID SHALL 可空；申请由系统外完成流程
 
 - **GIVEN** 一条 Ship-to 申请处于处理中且系统外已完成
 - **WHEN** 负责人补入系统外返回的 Account ID
-- **THEN** 申请进入已完成并记录完成时间
+- **THEN** 申请进入已完成并记录完成日期
 - **AND** 补入的 Account ID 创建/对应该申请产生的不可变 Ship-to
 
 #### Scenario: 补入重复 Account ID 被拒

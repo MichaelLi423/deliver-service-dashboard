@@ -36,7 +36,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     managerApprovalMissing: null,
     customerId: null,
     contractId: 'c1',
-    entryAt: '2026-07-01T09:00:00+08:00',
+    entryAt: '2026-07-01',
     region: '华东',
     oldSiteContact: null,
     newSiteContact: null,
@@ -84,7 +84,7 @@ function makeInvoice(overrides: Partial<InvoiceRecord> = {}): InvoiceRecord {
     id: 'inv-1',
     projectId: 'p1',
     amountCents: 5000n,
-    invoicedAt: '2026-07-15T10:00:00+08:00',
+    invoicedAt: '2026-07-15',
     revokedAt: null,
     revokeReason: null,
     lastModifiedAt: 't',
@@ -100,7 +100,7 @@ function makeOrder(overrides: Partial<ServiceOrder> = {}): ServiceOrder {
     id: 'o1',
     orderType: 'relocation',
     serviceOrderNo: 'ORD-001',
-    orderedAt: '2026-07-10T10:00:00+08:00',
+    orderedAt: '2026-07-10',
     engineer: '工程师甲',
     customerName: '华东医药',
     projectId: 'p1',
@@ -128,7 +128,7 @@ function makeDamageItem(overrides: Partial<DamageRepairItem> = {}): DamageRepair
     partRequestedAt: null,
     partStatus: 'used',
     repairNote: null,
-    registeredAt: '2026-07-12T10:00:00+08:00',
+    registeredAt: '2026-07-12',
     operatorAccountId: 'account-1',
     operatorUsername: '负责人甲',
     createdAt: 't',
@@ -158,7 +158,7 @@ function makeFee(overrides: Partial<LogisticsFee> = {}): LogisticsFee {
   return {
     id: 'f1',
     batchId: 'b1',
-    appliedAt: '2026-07-18T10:00:00+08:00',
+    appliedAt: '2026-07-18',
     budgetPriceCents: 10000n,
     dealPriceCents: 9500n,
     logisticsCostCents: 9000n,
@@ -191,7 +191,7 @@ function makeQrRequest(overrides: Partial<QrRequest> = {}): QrRequest {
   return {
     id: 'q1',
     applicant: '负责人甲',
-    requestedAt: '2026-07-08T10:00:00+08:00',
+    requestedAt: '2026-07-08',
     types: ['A', 'B'],
     operatorAccountId: 'account-1',
     operatorUsername: '负责人甲',
@@ -208,7 +208,7 @@ function makeSerialUpdate(overrides: Partial<SerialAddressUpdate> = {}): SerialA
     newSiteAddress: '新址A',
     serialNo: 'SN-100',
     accountId: 'ACC-001',
-    updatedAt: '2026-07-09T10:00:00+08:00',
+    updatedAt: '2026-07-09',
     operatorAccountId: 'account-1',
     operatorUsername: '负责人甲',
     createdAt: 't',
@@ -244,8 +244,8 @@ describe('各区域新项目进单金额（7.2）', () => {
   it('按进单月份与区域汇总进单金额，每个项目只计一次，不因合同变更改变', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', tempNo: 'TP-1', region: '华东', entryAt: '2026-07-01T09:00:00+08:00' }),
-      makeProject({ id: 'p2', tempNo: 'TP-2', region: '华南', entryAt: '2026-07-02T09:00:00+08:00' }),
+      makeProject({ id: 'p1', tempNo: 'TP-1', region: '华东', entryAt: '2026-07-01' }),
+      makeProject({ id: 'p2', tempNo: 'TP-2', region: '华南', entryAt: '2026-07-02' }),
     ];
     facts.contracts = [
       makeContract({ projectId: 'p1', entryAmountSnapshotCents: 100000n }),
@@ -266,14 +266,14 @@ describe('各区域新项目进单金额（7.2）', () => {
   it('按已记录进单时间归属；补录或修正进单时间后归属实时变化', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', region: '华东', entryAt: '2026-06-20T09:00:00+08:00' }),
+      makeProject({ id: 'p1', region: '华东', entryAt: '2026-06-20' }),
     ];
     facts.contracts = [makeContract({ entryAmountSnapshotCents: 100000n })];
     expect(service.buildReport(JULY).entryAmountByRegion).toHaveLength(0);
     expect(service.buildReport(JUNE_JULY).entryAmountByRegion.find((r) => r.month === '2026-06')?.amountCents).toBe(100000n);
 
     // 修正进单时间到 7 月 → 归属实时变化
-    facts.projects[0].entryAt = '2026-07-01T09:00:00+08:00';
+    facts.projects[0].entryAt = '2026-07-01';
     const report = service.buildReport(JUNE_JULY);
     expect(report.entryAmountByRegion.find((r) => r.month === '2026-07')?.amountCents).toBe(100000n);
     expect(report.entryAmountByRegion.find((r) => r.month === '2026-06')).toBeUndefined();
@@ -282,8 +282,8 @@ describe('各区域新项目进单金额（7.2）', () => {
   it('区域按去除首尾空白后的精确值分组（7.8）', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', region: '华东', entryAt: '2026-07-01T09:00:00+08:00' }),
-      makeProject({ id: 'p2', region: '华东 ', entryAt: '2026-07-02T09:00:00+08:00' }),
+      makeProject({ id: 'p1', region: '华东', entryAt: '2026-07-01' }),
+      makeProject({ id: 'p2', region: '华东 ', entryAt: '2026-07-02' }),
     ];
     facts.contracts = [
       makeContract({ projectId: 'p1', entryAmountSnapshotCents: 100000n }),
@@ -298,7 +298,7 @@ describe('各区域新项目进单金额（7.2）', () => {
   it('区域修改后历史报表实时重算（7.8）', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', region: '华东', entryAt: '2026-07-01T09:00:00+08:00' }),
+      makeProject({ id: 'p1', region: '华东', entryAt: '2026-07-01' }),
     ];
     facts.contracts = [makeContract({ entryAmountSnapshotCents: 100000n })];
     expect(service.buildReport(JULY).entryAmountByRegion[0].region).toBe('华东');
@@ -312,8 +312,8 @@ describe('月度掉票金额与掉票次数（7.3）', () => {
     const { facts, service } = setup();
     facts.projects = [makeProject({})];
     facts.invoices = [
-      makeInvoice({ id: 'inv-1', amountCents: 300000n, invoicedAt: '2026-06-10T10:00:00+08:00' }),
-      makeInvoice({ id: 'inv-2', amountCents: 500000n, invoicedAt: '2026-07-15T10:00:00+08:00' }),
+      makeInvoice({ id: 'inv-1', amountCents: 300000n, invoicedAt: '2026-06-10' }),
+      makeInvoice({ id: 'inv-2', amountCents: 500000n, invoicedAt: '2026-07-15' }),
     ];
     const report = service.buildReport(JUNE_JULY);
     expect(report.monthlyInvoices).toEqual([
@@ -327,7 +327,7 @@ describe('月度掉票金额与掉票次数（7.3）', () => {
     facts.projects = [makeProject({})];
     facts.invoices = [
       makeInvoice({ id: 'inv-1', amountCents: 300000n }),
-      makeInvoice({ id: 'inv-2', amountCents: 500000n, revokedAt: '2026-07-20T10:00:00+08:00' }),
+      makeInvoice({ id: 'inv-2', amountCents: 500000n, revokedAt: '2026-07-20' }),
     ];
     const report = service.buildReport(JULY);
     expect(report.monthlyInvoices).toEqual([{ month: '2026-07', amountCents: 300000n, count: 1 }]);
@@ -473,8 +473,8 @@ describe('损坏维修统计（7.5）', () => {
     const { facts, service } = setup();
     facts.projects = [makeProject({})];
     facts.damageItems = [
-      makeDamageItem({ id: 'd1', registeredAt: '2026-06-10T10:00:00+08:00', partStatus: 'used', partAmountCents: 10000n }),
-      makeDamageItem({ id: 'd2', registeredAt: '2026-07-10T10:00:00+08:00', partStatus: 'used', partAmountCents: 20000n, operatorAccountId: 'account-2', operatorUsername: '负责人乙' }),
+      makeDamageItem({ id: 'd1', registeredAt: '2026-06-10', partStatus: 'used', partAmountCents: 10000n }),
+      makeDamageItem({ id: 'd2', registeredAt: '2026-07-10', partStatus: 'used', partAmountCents: 20000n, operatorAccountId: 'account-2', operatorUsername: '负责人乙' }),
     ];
     const report = service.buildReport(JUNE_JULY);
     expect(report.damageSummary).toEqual([
@@ -502,8 +502,8 @@ describe('损坏维修统计（7.5）', () => {
   });
 });
 
-describe('月度物流费用汇总、合同占比与待补实际费用清单（7.6）', () => {
-  it('按运输公司与月份汇总，展示批次数、预算/成交/实际合计与差异', () => {
+describe('月度物流费用汇总、合同占比与历史异常批次（7.6）', () => {
+  it('按运输公司与月份汇总，展示批次数、合同预算价/物流成交价合计与差异', () => {
     const { facts, service } = setup();
     facts.projects = [makeProject({ id: 'p1' }), makeProject({ id: 'p2', tempNo: 'TP-2', region: '华南' })];
     facts.batches = [
@@ -547,7 +547,7 @@ describe('月度物流费用汇总、合同占比与待补实际费用清单（7
     expect(report.monthlyLogistics[0].transportCompany).toBe('物流公司乙');
   });
 
-  it('物流费用合同占比：RMB 按固定汇率折算 USD ÷ 最新合同金额，空/0 不可算', () => {
+  it('物流成交价合同占比：RMB 按固定汇率折算 USD ÷ 最新合同金额，空/0 不可算', () => {
     const { facts, service } = setup();
     facts.projects = [makeProject({ id: 'p1' })];
     facts.contracts = [makeContract({ projectId: 'p1', usdTaxAmountCents: 1000000n })];
@@ -566,20 +566,20 @@ describe('月度物流费用汇总、合同占比与待补实际费用清单（7
     expect(unavailable.ratioUnavailable).toBe(true);
   });
 
-  it('待补实际费用批次进入清单，补录后按申请（登记）月份纳入报表', () => {
+  it('历史异常批次（已有物流成交价无费用记录）进入清单；底层筛选保留历史兼容（补录后纳入报表）', () => {
     const { facts, service } = setup();
     facts.projects = [makeProject({ id: 'p1' })];
     facts.batches = [
       makeBatch({ id: 'b1', discountedPriceCents: 88000n, transportCompany: '物流公司甲' }),
-      makeBatch({ id: 'b2', discountedPriceCents: null }), // 无成交价格 → 不进入清单
+      makeBatch({ id: 'b2', discountedPriceCents: null }), // 无物流成交价 → 不进入清单
     ];
     const pending = service.buildReport(JULY).pendingLogistics;
     expect(pending).toHaveLength(1);
     expect(pending[0].batchId).toBe('b1');
     expect(pending[0].dealPriceCents).toBe(88000n);
 
-    // 补录实际物流费用后 → 进入月度报表，不再出现在清单
-    facts.logisticsFees = [makeFee({ id: 'f1', batchId: 'b1', appliedAt: '2026-07-18T10:00:00+08:00' })];
+    // 补录物流费用（历史兼容路径）后 → 进入月度报表，不再出现在清单
+    facts.logisticsFees = [makeFee({ id: 'f1', batchId: 'b1', appliedAt: '2026-07-18' })];
     const after = service.buildReport(JULY);
     expect(after.pendingLogistics).toHaveLength(0);
     expect(after.monthlyLogistics.find((r) => r.transportCompany === '物流公司甲')?.batchCount).toBe(1);
@@ -591,8 +591,8 @@ describe('Ship-to / 二维码 / 序列号地址更新工作量（7.7）', () => 
     const { facts, service } = setup();
     facts.shipToRequests = [
       makeShipToRequest({ id: 's1', status: 'pending_submit', submittedAt: null }),
-      makeShipToRequest({ id: 's2', status: 'processing', submittedAt: '2026-07-05T10:00:00+08:00' }),
-      makeShipToRequest({ id: 's3', status: 'completed', submittedAt: '2026-07-06T10:00:00+08:00', completedAt: '2026-07-20T10:00:00+08:00' }),
+      makeShipToRequest({ id: 's2', status: 'processing', submittedAt: '2026-07-05' }),
+      makeShipToRequest({ id: 's3', status: 'completed', submittedAt: '2026-07-06', completedAt: '2026-07-20' }),
     ];
     const report = service.buildReport(JULY);
     expect(report.shipToWorkload).toEqual([
@@ -620,9 +620,9 @@ describe('Ship-to / 二维码 / 序列号地址更新工作量（7.7）', () => 
   it('序列号地址更新按更新记录计数、按月份与客户分组，同一仪器多次更新分别计数', () => {
     const { facts, service } = setup();
     facts.serialAddressUpdates = [
-      makeSerialUpdate({ id: 'u1', customerName: '华东医药', updatedAt: '2026-07-01T10:00:00+08:00' }),
-      makeSerialUpdate({ id: 'u2', customerName: '华东医药', updatedAt: '2026-07-02T10:00:00+08:00' }),
-      makeSerialUpdate({ id: 'u3', customerName: '华北医药', updatedAt: '2026-06-15T10:00:00+08:00' }),
+      makeSerialUpdate({ id: 'u1', customerName: '华东医药', updatedAt: '2026-07-01' }),
+      makeSerialUpdate({ id: 'u2', customerName: '华东医药', updatedAt: '2026-07-02' }),
+      makeSerialUpdate({ id: 'u3', customerName: '华北医药', updatedAt: '2026-06-15' }),
     ];
     const report = service.buildReport(JUNE_JULY);
     expect(report.serialAddressUpdates).toEqual([
@@ -653,8 +653,8 @@ describe('Ship-to / 二维码 / 序列号地址更新工作量（7.7）', () => 
     ];
     // Ship-to：两位责任人各一次实际提交
     facts.shipToRequests = [
-      makeShipToRequest({ id: 's1', status: 'processing', submittedAt: '2026-07-05T10:00:00+08:00' }),
-      makeShipToRequest({ id: 's2', status: 'processing', submittedAt: '2026-07-06T10:00:00+08:00', operatorAccountId: 'account-2', operatorUsername: '负责人乙' }),
+      makeShipToRequest({ id: 's1', status: 'processing', submittedAt: '2026-07-05' }),
+      makeShipToRequest({ id: 's2', status: 'processing', submittedAt: '2026-07-06', operatorAccountId: 'account-2', operatorUsername: '负责人乙' }),
     ];
     // 二维码：两位责任人各一条
     facts.qrRequests = [
@@ -745,8 +745,8 @@ describe('Ship-to / 二维码 / 序列号地址更新工作量（7.7）', () => 
       makeDamageItem({ id: 'd2', partStatus: 'used', partAmountCents: 20000n, operatorAccountId: 'account-2', operatorUsername: '负责人乙' }),
     ];
     facts.shipToRequests = [
-      makeShipToRequest({ id: 's1', status: 'processing', submittedAt: '2026-07-05T10:00:00+08:00' }),
-      makeShipToRequest({ id: 's2', status: 'processing', submittedAt: '2026-07-06T10:00:00+08:00', operatorAccountId: 'account-2', operatorUsername: '负责人乙' }),
+      makeShipToRequest({ id: 's1', status: 'processing', submittedAt: '2026-07-05' }),
+      makeShipToRequest({ id: 's2', status: 'processing', submittedAt: '2026-07-06', operatorAccountId: 'account-2', operatorUsername: '负责人乙' }),
     ];
     facts.qrRequests = [
       makeQrRequest({ id: 'q1', types: ['A'] }),
@@ -790,7 +790,7 @@ describe('Ship-to / 二维码 / 序列号地址更新工作量（7.7）', () => 
       makeDamageItem({ id: 'd1', partStatus: 'used', partAmountCents: 10000n, operatorUsername: '负责人甲（旧名）' }),
     ];
     facts.shipToRequests = [
-      makeShipToRequest({ id: 's1', status: 'processing', submittedAt: '2026-07-05T10:00:00+08:00', operatorUsername: '负责人甲（旧名）' }),
+      makeShipToRequest({ id: 's1', status: 'processing', submittedAt: '2026-07-05', operatorUsername: '负责人甲（旧名）' }),
     ];
     facts.qrRequests = [
       makeQrRequest({ id: 'q1', types: ['A'], operatorUsername: '负责人甲（旧名）' }),
@@ -810,7 +810,7 @@ describe('Ship-to / 二维码 / 序列号地址更新工作量（7.7）', () => 
     // 领域层只消费快照；账号改名对历史的稳定性由集成测试（SQLite accounts 表）验证。
     // 此处模拟动作记录快照保持旧名、同时补充新名记录：两类记录并存、各自按快照归属。
     facts.damageItems.push(makeDamageItem({ id: 'd2', partStatus: 'used', partAmountCents: 5000n, operatorUsername: '负责人甲（新名）' }));
-    facts.shipToRequests.push(makeShipToRequest({ id: 's2', status: 'processing', submittedAt: '2026-07-07T10:00:00+08:00', operatorUsername: '负责人甲（新名）' }));
+    facts.shipToRequests.push(makeShipToRequest({ id: 's2', status: 'processing', submittedAt: '2026-07-07', operatorUsername: '负责人甲（新名）' }));
     facts.qrRequests.push(makeQrRequest({ id: 'q2', types: ['A'], operatorUsername: '负责人甲（新名）' }));
     facts.serialAddressUpdates.push(makeSerialUpdate({ id: 'u2', customerName: '华东医药', operatorUsername: '负责人甲（新名）' }));
 
@@ -834,7 +834,7 @@ describe('已取消项目的统计排除（7.9）', () => {
   it('已取消项目不纳入进单金额统计、不参与掉票统计与项目管道', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', tempNo: 'TP-1', region: '华东', status: 'cancelled', cancelledAt: '2026-07-20T10:00:00+08:00', cancelReason: '客户取消' }),
+      makeProject({ id: 'p1', tempNo: 'TP-1', region: '华东', status: 'cancelled', cancelledAt: '2026-07-20', cancelReason: '客户取消' }),
       makeProject({ id: 'p2', tempNo: 'TP-2', region: '华南' }),
     ];
     facts.contracts = [
@@ -858,7 +858,7 @@ describe('已取消项目的统计排除（7.9）', () => {
   it('取消前实际发生的物流费用与损坏备件金额作为真实成本保留并标记取消', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', tempNo: 'TP-1', status: 'cancelled', cancelledAt: '2026-07-20T10:00:00+08:00' }),
+      makeProject({ id: 'p1', tempNo: 'TP-1', status: 'cancelled', cancelledAt: '2026-07-20' }),
     ];
     facts.contracts = [makeContract({ projectId: 'p1', usdTaxAmountCents: 200000n })];
     facts.batches = [makeBatch({ id: 'b1', projectId: 'p1', transportCompany: '物流公司甲' })];
@@ -873,7 +873,7 @@ describe('已取消项目的统计排除（7.9）', () => {
     expect(report.damageSummary[0].recordCount).toBe(1);
     expect(report.damageSummary[0].usedPartUsdCents).toBe(10000n);
     expect(report.damageDetails[0].cancelled).toBe(true);
-    // 已取消项目不进入待补实际费用清单
+    // 已取消项目不进入历史异常批次清单
     facts.logisticsFees = [];
     expect(service.buildReport(JULY).pendingLogistics).toHaveLength(0);
   });
@@ -892,8 +892,8 @@ describe('报表筛选与手工月份区间（7.10）', () => {
   it('按月份区间与区域筛选', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', region: '华东', entryAt: '2026-06-01T09:00:00+08:00' }),
-      makeProject({ id: 'p2', region: '华南', entryAt: '2026-07-01T09:00:00+08:00' }),
+      makeProject({ id: 'p1', region: '华东', entryAt: '2026-06-01' }),
+      makeProject({ id: 'p2', region: '华南', entryAt: '2026-07-01' }),
     ];
     facts.contracts = [
       makeContract({ projectId: 'p1', entryAmountSnapshotCents: 100000n }),
@@ -916,7 +916,7 @@ describe('报表下钻（7.10）', () => {
     facts.invoices = [
       makeInvoice({ id: 'inv-1', projectId: 'p1', amountCents: 300000n }),
       makeInvoice({ id: 'inv-2', projectId: 'p1', amountCents: 200000n }),
-      makeInvoice({ id: 'inv-3', projectId: 'p2', amountCents: 500000n, revokedAt: '2026-07-20T10:00:00+08:00' }),
+      makeInvoice({ id: 'inv-3', projectId: 'p2', amountCents: 500000n, revokedAt: '2026-07-20' }),
     ];
     const details = service.getMetricDetails('monthly_invoice_amount', JULY) as {
       month: string;
@@ -935,14 +935,14 @@ describe('报表下钻（7.10）', () => {
   it('各指标均支持下钻且与聚合口径一致', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', tempNo: 'TP-1', region: '华东', entryAt: '2026-07-01T09:00:00+08:00' }),
+      makeProject({ id: 'p1', tempNo: 'TP-1', region: '华东', entryAt: '2026-07-01' }),
     ];
     facts.contracts = [makeContract({ entryAmountSnapshotCents: 100000n })];
     facts.batches = [makeBatch({ id: 'b1' })];
     facts.logisticsFees = [makeFee({ id: 'f1', batchId: 'b1' })];
     facts.serviceOrders = [makeOrder({ id: 'o1' })];
     facts.damageItems = [makeDamageItem({ id: 'd1', partStatus: 'used' })];
-    facts.shipToRequests = [makeShipToRequest({ id: 's1', status: 'processing', submittedAt: '2026-07-05T10:00:00+08:00' })];
+    facts.shipToRequests = [makeShipToRequest({ id: 's1', status: 'processing', submittedAt: '2026-07-05' })];
     facts.qrRequests = [makeQrRequest({ id: 'q1', types: ['A'] })];
     facts.serialAddressUpdates = [makeSerialUpdate({ id: 'u1' })];
 

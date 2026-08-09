@@ -235,7 +235,7 @@ describe('金额 IPC 边界（十进制字符串 → 主进程 Money 精确解�
     await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'submit_action',
       projectId,
-      action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '12.34' } },
+      action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '12.34' } },
     } as WorkbenchV2MutationRequest);
     const after = (await bus.invoke(IPC_CHANNELS.workbenchV2ProjectDetail, 100, projectId)) as {
       project: { invoicedAmount: string };
@@ -254,7 +254,7 @@ describe('金额 IPC 边界（十进制字符串 → 主进程 Money 精确解�
         ecc: 'ECC-BIG-001',
         contractAmount: BIG_DEC,
         finalAmount: BIG_DEC,
-        actualInstallDoneAt: '2026-08-08T18:00',
+        actualInstallDoneAt: '2026-08-08',
       }),
     } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
     const projectId = created.changed.projectId;
@@ -271,7 +271,7 @@ describe('金额 IPC 边界（十进制字符串 → 主进程 Money 精确解�
     await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'submit_action',
       projectId,
-      action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: BIG_DEC } },
+      action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: BIG_DEC } },
     } as WorkbenchV2MutationRequest);
     const invoiced = (await bus.invoke(IPC_CHANNELS.workbenchV2ProjectDetail, 100, projectId)) as {
       project: { invoicedAmount: string };
@@ -298,7 +298,7 @@ describe('金额 IPC 边界（十进制字符串 → 主进程 Money 精确解�
       bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
         op: 'submit_action',
         projectId: 'p-none',
-        action: { type: 'invoice', projectId: 'p-none', values: { invoicedAt: '2026-08-11T09:00', amount: '12.34.5' } },
+        action: { type: 'invoice', projectId: 'p-none', values: { invoicedAt: '2026-08-11', amount: '12.34.5' } },
       } as WorkbenchV2MutationRequest),
     ).rejects.toThrow(/金额/);
   });
@@ -335,7 +335,7 @@ describe('取消项目命令（v2 adjust_status 拒绝 cancelled；cancel_projec
     const result = (await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'cancel_project',
       projectId,
-      time: '2026-08-12T09:00',
+      time: '2026-08-12',
       reason: '客户业务调整',
     } as WorkbenchV2MutationRequest)) as { changed: { status: string } };
     expect(result.changed.status).toBe('cancelled');
@@ -354,13 +354,13 @@ describe('取消项目命令（v2 adjust_status 拒绝 cancelled；cancel_projec
     await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'submit_action',
       projectId,
-      action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '10000' } },
+      action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '10000' } },
     } as WorkbenchV2MutationRequest);
     await expect(
       bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
         op: 'cancel_project',
         projectId,
-        time: '2026-08-12T09:00',
+        time: '2026-08-12',
         reason: '尝试取消',
       } as WorkbenchV2MutationRequest),
     ).rejects.toThrow(/掉票/);
@@ -455,7 +455,7 @@ describe('掉票编辑/撤销（v2 invoice_edit / invoice_revoke）', () => {
         ecc: 'ECC-INV-IPC',
         contractAmount: '2000',
         finalAmount: '2000',
-        actualInstallDoneAt: '2026-08-08T18:00',
+        actualInstallDoneAt: '2026-08-08',
       }),
     } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
     const projectId = created.changed.projectId;
@@ -467,7 +467,7 @@ describe('掉票编辑/撤销（v2 invoice_edit / invoice_revoke）', () => {
     await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'submit_action',
       projectId,
-      action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '1000' } },
+      action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '1000' } },
     } as WorkbenchV2MutationRequest);
     const section = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2SectionPage, 100, {
       projectId,
@@ -482,7 +482,7 @@ describe('掉票编辑/撤销（v2 invoice_edit / invoice_revoke）', () => {
     await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'invoice_edit',
       invoiceId,
-      invoicedAt: '2026-08-12T09:00',
+      invoicedAt: '2026-08-12',
       amount: '1234.567',
     } as WorkbenchV2MutationRequest);
     const editedInvoices = (await bus.invoke(IPC_CHANNELS.workbenchV2SectionPage, 100, { projectId, kind: 'invoices' })) as {
@@ -495,7 +495,7 @@ describe('掉票编辑/撤销（v2 invoice_edit / invoice_revoke）', () => {
     await bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'invoice_revoke',
       invoiceId,
-      time: '2026-08-13T09:00',
+      time: '2026-08-13',
       reason: '客户更正',
     } as WorkbenchV2MutationRequest);
     const revokedInvoices = (await bus.invoke(IPC_CHANNELS.workbenchV2SectionPage, 100, { projectId, kind: 'invoices' })) as {
@@ -509,7 +509,7 @@ describe('掉票编辑/撤销（v2 invoice_edit / invoice_revoke）', () => {
       bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
         op: 'invoice_revoke',
         invoiceId,
-        time: '2026-08-14T09:00',
+        time: '2026-08-14',
         reason: '再次撤销',
       } as WorkbenchV2MutationRequest),
     ).rejects.toThrow(/终态/);
@@ -517,7 +517,7 @@ describe('掉票编辑/撤销（v2 invoice_edit / invoice_revoke）', () => {
       bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
         op: 'invoice_edit',
         invoiceId,
-        invoicedAt: '2026-08-14T09:00',
+        invoicedAt: '2026-08-14',
         amount: '2000',
       } as WorkbenchV2MutationRequest),
     ).rejects.toThrow(/终态/);

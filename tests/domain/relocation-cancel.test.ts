@@ -38,11 +38,11 @@ describe('取消（2.5 / TBD-10）', () => {
     service.adjustStatus(projectId, 'executing');
 
     const cancelled = service.cancelProject(projectId, {
-      time: '2026-08-07T11:30:00+08:00',
+      time: '2026-08-07',
       reason: '客户取消搬迁计划',
     });
     expect(cancelled.status).toBe('cancelled');
-    expect(cancelled.cancelledAt).toBe('2026-08-07T11:30:00+08:00');
+    expect(cancelled.cancelledAt).toBe('2026-08-07');
     expect(cancelled.cancelReason).toBe('客户取消搬迁计划');
     expect(projects.findById(projectId)!.status).toBe('cancelled');
   });
@@ -52,7 +52,7 @@ describe('取消（2.5 / TBD-10）', () => {
     const projectId = service.createPendingProject().id;
     expect(() =>
       service.cancelProject(projectId, {
-        time: '2026-08-07T11:30:00+08:00',
+        time: '2026-08-07',
         reason: '   ',
       }),
     ).toThrow(ValidationError);
@@ -72,7 +72,7 @@ describe('取消（2.5 / TBD-10）', () => {
     expect(() =>
       service.cancelProject(
         projectId,
-        { time: '2026-08-07T11:30:00+08:00', reason: '客户取消搬迁计划' },
+        { time: '2026-08-07', reason: '客户取消搬迁计划' },
         { hasAnyInvoiceHistory: true },
       ),
     ).toThrow(/掉票历史/);
@@ -82,7 +82,7 @@ describe('取消（2.5 / TBD-10）', () => {
   it('已取消项目不可恢复，继续工作需重新新增项目（TBD-10）', () => {
     const { service } = setup();
     const projectId = service.createPendingProject().id;
-    service.cancelProject(projectId, { time: '2026-08-07T11:30:00+08:00', reason: '计划变更' });
+    service.cancelProject(projectId, { time: '2026-08-07', reason: '计划变更' });
 
     // 已取消不可恢复：任何状态调整被拒
     const reopen = service.adjustStatus(projectId, 'pending_execution');
@@ -103,7 +103,7 @@ describe('取消（2.5 / TBD-10）', () => {
 
     // 领域取消操作只写项目聚合；上门活动/物流/费用记录属于独立聚合，不受影响。
     // （SQLite 集成测试验证真实记录在取消后仍存在。）
-    service.cancelProject(projectId, { time: '2026-08-07T11:30:00+08:00', reason: '计划变更' });
+    service.cancelProject(projectId, { time: '2026-08-07', reason: '计划变更' });
     const project = projects.findById(projectId)!;
     expect(project.status).toBe('cancelled');
     expect(project.cancelledAt).not.toBeNull();

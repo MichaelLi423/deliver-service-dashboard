@@ -18,7 +18,7 @@ import {
  * 真实打包 Electron UI 冒烟补充（WorkbenchV2，macOS 开发机 · 临时 userData）。
  *
  * 覆盖两件事（全部经真实 UI + 真实 IPC，不绕过界面）：
- * 1) 界面取消项目：填写取消时间/取消原因/不可恢复确认，验证取消终态
+ * 1) 界面取消项目：填写取消日期/取消原因/不可恢复确认，验证取消终态
  *    （队列状态徽标为「已取消」、取消入口消失、已取消不可恢复）。
  * 2) 运营报表导出：依次触发 Excel/PNG/PDF 三种导出。参照
  *    e2e/import-wizard-fixture.ts 的原生 dialog stubs 方案，在 Electron main
@@ -140,7 +140,7 @@ function assertPng(path: string, month: string): void {
 }
 
 test.describe('真实打包 Electron UI 冒烟补充（WorkbenchV2 · 临时 userData）', () => {
-  test('界面取消项目：取消时间/原因/不可恢复确认 → 取消终态', async () => {
+  test('界面取消项目：取消日期/原因/不可恢复确认 → 取消终态', async () => {
     const files = createImportE2eFiles();
     let app: ElectronApplication | null = null;
     try {
@@ -160,9 +160,9 @@ test.describe('真实打包 Electron UI 冒烟补充（WorkbenchV2 · 临时 use
       await row.click();
       await page.getByRole('button', { name: '取消项目' }).click();
 
-      // 填写取消时间/取消原因/不可恢复确认
+      // 填写取消日期/取消原因/不可恢复确认
       const cancelDialog = page.getByRole('dialog');
-      await cancelDialog.getByLabel('取消时间').fill(`${currentMonth()}-10T10:00`);
+      await cancelDialog.getByLabel('取消日期').fill(`${currentMonth()}-10`);
       await cancelDialog.getByLabel('取消原因').fill('E2E 客户业务调整，取消搬迁');
       await cancelDialog.getByLabel('我确认项目取消后不可恢复').check();
       await cancelDialog.getByRole('button', { name: '确认取消项目' }).click();
@@ -208,7 +208,7 @@ test.describe('真实打包 Electron UI 冒烟补充（WorkbenchV2 · 临时 use
       await page.getByRole('button', { name: '快速记录', exact: false }).first().click();
       await page.getByRole('button', { name: /^掉票 按 ECC/ }).click();
       const invoiceDialog = page.getByRole('dialog');
-      await invoiceDialog.getByLabel('掉票时间').fill(`${month}-11T09:00`);
+      await invoiceDialog.getByLabel('掉票日期').fill(`${month}-11`);
       await invoiceDialog.getByLabel('掉票金额（USD）').fill('40000');
       await invoiceDialog.getByRole('button', { name: '保存记录' }).click();
 

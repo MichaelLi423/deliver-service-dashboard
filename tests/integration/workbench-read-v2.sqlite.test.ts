@@ -98,15 +98,15 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
     db.prepare(
       `INSERT INTO projects (id, temp_no, status, region, reminder_at, reminder_note, created_at, updated_at)
        VALUES (?,?,?,?,?,?,?,?)`,
-    ).run('seed-r1', 'TP-R1', 'pending_execution', '华东', '2026-08-07T09:00:00+08:00', '逾期提醒', 't', '2026-08-05T00:00:00+08:00');
+    ).run('seed-r1', 'TP-R1', 'pending_execution', '华东', '2026-08-07', '逾期提醒', 't', '2026-08-05T00:00:00+08:00');
     db.prepare(
       `INSERT INTO projects (id, temp_no, status, region, reminder_at, reminder_note, created_at, updated_at)
        VALUES (?,?,?,?,?,?,?,?)`,
-    ).run('seed-r2', 'TP-R2', 'executing', '华北', '2026-08-10T09:00:00+08:00', '临期提醒', 't', '2026-08-06T00:00:00+08:00');
+    ).run('seed-r2', 'TP-R2', 'executing', '华北', '2026-08-10', '临期提醒', 't', '2026-08-06T00:00:00+08:00');
     db.prepare(
       `INSERT INTO projects (id, temp_no, status, region, reminder_at, reminder_note, created_at, updated_at)
        VALUES (?,?,?,?,?,?,?,?)`,
-    ).run('seed-r3', 'TP-R3', 'completed', '华东', '2026-08-09T09:00:00+08:00', '完成项目也带提醒', 't', '2026-08-07T00:00:00+08:00');
+    ).run('seed-r3', 'TP-R3', 'completed', '华东', '2026-08-09', '完成项目也带提醒', 't', '2026-08-07T00:00:00+08:00');
 
     const overview = reader(ctx).overview();
     expect(overview.businessRevision).toBeGreaterThan(0);
@@ -122,8 +122,8 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
     // 阶段：6 个非取消状态，计数正确
     const stage = Object.fromEntries(overview.stages.map((s) => [s.status, s.count]));
     expect(stage).toMatchObject({
-      pending_entry: 1,
-      pending_execution: 1,
+      pending_entry: 0,
+      pending_execution: 2,
       executing: 1,
       pending_acceptance: 0,
       pending_invoice: 0,
@@ -158,11 +158,11 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
          VALUES (?,?,?,?,?,?,?,?)`,
       ).run(id, `TP-${id}`, 'pending_execution', '华东', at, note, 't', '2026-08-01T00:00:00+08:00');
     };
-    seed('b-overdue', '2026-08-07T09:00:00+08:00', '昨日'); // < today → overdue
-    seed('b-today', '2026-08-08T09:00:00+08:00', '今日'); // == today → today
-    seed('b-upcoming', '2026-08-10T09:00:00+08:00', '窗口内'); // today < d <= today+7 → upcoming
-    seed('b-window-edge', '2026-08-15T09:00:00+08:00', '窗口最后一天'); // == today+7 → upcoming
-    seed('b-outside', '2026-08-16T09:00:00+08:00', '窗口外'); // > today+7 → null
+    seed('b-overdue', '2026-08-07', '昨日'); // < today → overdue
+    seed('b-today', '2026-08-08', '今日'); // == today → today
+    seed('b-upcoming', '2026-08-10', '窗口内'); // today < d <= today+7 → upcoming
+    seed('b-window-edge', '2026-08-15', '窗口最后一天'); // == today+7 → upcoming
+    seed('b-outside', '2026-08-16', '窗口外'); // > today+7 → null
     seed('b-note-only', null, '仅备注无时间'); // null → 无分类但计入 any
 
     const repo = reader(ctx, today, windowDays);
@@ -246,7 +246,7 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
     db.prepare(
       `INSERT INTO projects (id, temp_no, status, region, reminder_at, reminder_note, created_at, updated_at)
        VALUES (?,?,?,?,?,?,?,?)`,
-    ).run('filter-r', 'TP-F-R', 'pending_acceptance', '华南', '2026-08-07T09:00:00+08:00', '过滤提醒', 't', '2026-08-02T00:00:00+08:00');
+    ).run('filter-r', 'TP-F-R', 'pending_acceptance', '华南', '2026-08-07', '过滤提醒', 't', '2026-08-02T00:00:00+08:00');
     const repo = reader(ctx);
 
     expect(repo.projectPage({ status: 'pending_acceptance' }).projects.length).toBe(11); // 10 seed(3%3==2) + 1 filter-r
@@ -274,7 +274,7 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
     db.prepare(
       `INSERT INTO projects (id, temp_no, status, region, reminder_at, reminder_note, created_at, updated_at)
        VALUES (?,?,?,?,?,?,?,?)`,
-    ).run('sort-r2', 'TP-SORT-BBB', 'pending_execution', '华东', '2026-08-09T09:00:00+08:00', null, 't', '2026-08-01T00:00:00+08:00');
+    ).run('sort-r2', 'TP-SORT-BBB', 'pending_execution', '华东', '2026-08-09', null, 't', '2026-08-01T00:00:00+08:00');
     const repo = reader(ctx);
 
     for (const sort of ['created', 'temp', 'reminder'] as const) {
@@ -316,9 +316,9 @@ describe('工作台 v2 项目详情 + 子记录分页（Oracle #10）', () => {
     const ctx = makeFacade();
     const { db, facade, projectId } = ctx;
     // 加子记录
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '运输公司', originalPrice: '12000', discountedPrice: '11000' } } });
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '20000' } } });
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'visit', projectId, values: { visitAt: '2026-08-12T09:00', engineers: '工程师甲、工程师乙', status: 'done', instrumentIds: [String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id)], workTypes: ['teardown'] } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '运输公司', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '11000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '20000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'visit', projectId, values: { visitAt: '2026-08-12', engineers: '工程师甲、工程师乙', status: 'done', instrumentIds: [String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id)], workTypes: ['teardown'] } } });
 
     const detail = facade.v2ProjectDetail(projectId);
     expect(detail.businessRevision).toBeGreaterThan(0);
@@ -342,11 +342,11 @@ describe('工作台 v2 项目详情 + 子记录分页（Oracle #10）', () => {
     const { db, facade, projectId } = ctx;
     const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
     // 预置各 tab 记录
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '运输公司', originalPrice: '12000', discountedPrice: '11000' } } });
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '1234.567' } } });
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'order', values: { orderType: 'relocation', serviceOrderNo: 'ORD-V2-001', orderedAt: '2026-08-11T09:00', engineer: '工程师甲', customerName: '集成客户甲', projectId } } });
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'visit', projectId, values: { visitAt: '2026-08-12T09:00', engineers: '工程师甲、工程师乙', status: 'done', instrumentIds: [instrumentId], workTypes: ['teardown'] } } });
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'damage', projectId, values: { instrumentId, damageReason: '运输碰撞', issueStatus: 'processing', partNumber: 'PART-1', partQuantity: '1', partCurrency: 'USD', partAmount: '500', partStatus: 'arrived' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '运输公司', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '11000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '1234.567' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'order', values: { orderType: 'relocation', serviceOrderNo: 'ORD-V2-001', orderedAt: '2026-08-11', engineer: '工程师甲', customerName: '集成客户甲', projectId } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'visit', projectId, values: { visitAt: '2026-08-12', engineers: '工程师甲、工程师乙', status: 'done', instrumentIds: [instrumentId], workTypes: ['teardown'] } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'damage', projectId, values: { instrumentId, damageReason: '运输碰撞', issueStatus: 'processing', partNumber: 'PART-1', partQuantity: '1', partCurrency: 'USD', partAmount: '500', partStatus: 'arrived', registeredAt: '2026-08-12' } } });
 
     const kinds = ['batches', 'instruments', 'activities', 'orders', 'invoices', 'damage_items'] as const;
     for (const kind of kinds) {
@@ -365,6 +365,7 @@ describe('工作台 v2 项目详情 + 子记录分页（Oracle #10）', () => {
       }
       if (kind === 'batches') {
         const batch = row as Extract<WorkbenchV2SectionRow, { kind: 'batches' }>;
+        // 合同预算价 → originalPrice；物流成交价 → discountedPrice
         expect(batch.originalPrice).toBe('12000.00');
         expect(batch.discountedPrice).toBe('11000.00');
       }
@@ -389,7 +390,7 @@ describe('工作台 v2 项目详情 + 子记录分页（Oracle #10）', () => {
     }
 
     // 多记录 keyset：再记一笔掉票，limit=1 翻页无重复（keyset 仅在页满时给出 nextCursor）
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-13T09:00', amount: '1000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-13', amount: '1000' } } });
     const first = facade.v2SectionPage({ projectId, kind: 'invoices', limit: 1 });
     expect(first.total).toBe(2);
     expect(first.rows.length).toBe(1);
@@ -411,9 +412,9 @@ describe('工作台 v2 独立模块 + lookup 分页（Oracle #10）', () => {
     // 序列号地址更新要求仪器已有序列号且一致
     db.prepare('UPDATE instruments SET serial_no = ? WHERE id = ?').run('SN-001', instrumentId);
 
-    facade.v2Mutate({ op: 'submit_action', action: { type: 'serial_address', values: { instrumentId, customerName: '独立客户', newSiteAddress: '新址独立', serialNo: 'SN-001', accountId: 'ACC-IND-1', updatedAt: '2026-08-10T09:00' } } });
-    facade.v2Mutate({ op: 'submit_action', action: { type: 'qr_request', values: { applicant: '申请人甲', requestedAt: '2026-08-10T09:00', types: ['A', 'logistics_management'] } } });
-    facade.v2Mutate({ op: 'submit_action', action: { type: 'qr_request', values: { applicant: '申请人乙', requestedAt: '2026-08-11T09:00', types: ['B'] } } });
+    facade.v2Mutate({ op: 'submit_action', action: { type: 'serial_address', values: { instrumentId, customerName: '独立客户', newSiteAddress: '新址独立', serialNo: 'SN-001', accountId: 'ACC-IND-1', updatedAt: '2026-08-10' } } });
+    facade.v2Mutate({ op: 'submit_action', action: { type: 'qr_request', values: { applicant: '申请人甲', requestedAt: '2026-08-10', types: ['A', 'logistics_management'] } } });
+    facade.v2Mutate({ op: 'submit_action', action: { type: 'qr_request', values: { applicant: '申请人乙', requestedAt: '2026-08-11', types: ['B'] } } });
 
     const serial = facade.v2IndependentPage({ kind: 'serial_address' });
     expect(serial.rows.length).toBe(1);
@@ -695,12 +696,12 @@ describe('工作台 v2 mutation（Oracle #10：复用写逻辑，无 snapshot）
     const { db, facade, projectId } = ctx;
     const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
     db.prepare('UPDATE instruments SET serial_no = ? WHERE id = ?').run('SN-MUT', instrumentId);
-    const serial = facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'serial_address', projectId, values: { instrumentId, customerName: '集成客户甲', newSiteAddress: '新址', serialNo: 'SN-MUT', accountId: 'ACC-MUT', updatedAt: '2026-08-10T09:00' } } });
+    const serial = facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'serial_address', projectId, values: { instrumentId, customerName: '集成客户甲', newSiteAddress: '新址', serialNo: 'SN-MUT', accountId: 'ACC-MUT', updatedAt: '2026-08-10' } } });
     expect(serial.invalidated).toContain('independent:serial_address');
-    const qr = facade.v2Mutate({ op: 'submit_action', action: { type: 'qr_request', values: { applicant: '申请人', requestedAt: '2026-08-10T09:00', types: ['A'] } } });
+    const qr = facade.v2Mutate({ op: 'submit_action', action: { type: 'qr_request', values: { applicant: '申请人', requestedAt: '2026-08-10', types: ['A'] } } });
     expect(qr.invalidated).toContain('independent:qr_request');
     expect(qr.changed?.projectId).toBeUndefined();
-    const invoice = facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '1000' } } });
+    const invoice = facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '1000' } } });
     expect(invoice.invalidated).toContain(`sections:${projectId}`);
     closeDatabase(db);
   });
@@ -719,16 +720,16 @@ describe('工作台 v2 mutation（Oracle #10：复用写逻辑，无 snapshot）
   it('invoice_edit / invoice_revoke：金额字符串精确编辑，invalidate project + sections', () => {
     const ctx = makeFacade();
     const { db, facade, projectId } = ctx;
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '1000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '1000' } } });
     const invoiceId = String(db.prepare('SELECT id FROM invoices WHERE project_id = ?').get(projectId)!.id);
-    const edited = facade.v2Mutate({ op: 'invoice_edit', invoiceId, invoicedAt: '2026-08-12T09:00', amount: '1234.567' });
+    const edited = facade.v2Mutate({ op: 'invoice_edit', invoiceId, invoicedAt: '2026-08-12', amount: '1234.567' });
     expect(edited.changed?.invoiceId).toBe(invoiceId);
     expect(edited.invalidated).toContain(`project:${projectId}`);
     const section = facade.v2SectionPage({ projectId, kind: 'invoices' });
     const row = section.rows[0] as Extract<WorkbenchV2SectionRow, { kind: 'invoices' }>;
     expect(row.amount).toBe('1234.57');
 
-    const revoked = facade.v2Mutate({ op: 'invoice_revoke', invoiceId, time: '2026-08-13T09:00', reason: '客户更正' });
+    const revoked = facade.v2Mutate({ op: 'invoice_revoke', invoiceId, time: '2026-08-13', reason: '客户更正' });
     expect(revoked.changed).toMatchObject({ invoiceId, status: 'revoked' });
     expect(revoked.invalidated).toContain(`sections:${projectId}`);
     closeDatabase(db);
@@ -740,12 +741,12 @@ describe('工作台 v2 mutation（Oracle #10：复用写逻辑，无 snapshot）
     expect(() =>
       facade.v2Mutate({ op: 'adjust_status', projectId, status: 'cancelled' as never }),
     ).toThrow(/cancelProject/);
-    const cancelled = facade.v2Mutate({ op: 'cancel_project', projectId, time: '2026-08-12T09:00', reason: '客户业务调整' });
+    const cancelled = facade.v2Mutate({ op: 'cancel_project', projectId, time: '2026-08-12', reason: '客户业务调整' });
     expect(cancelled.changed?.status).toBe('cancelled');
     expect(cancelled.invalidated).toContain(`project:${projectId}`);
     // 已取消：拒绝金额修改（5.11）
     expect(() =>
-      facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-12T09:00', amount: '100' } } }),
+      facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-12', amount: '100' } } }),
     ).toThrow(/已取消/);
     closeDatabase(db);
   });
@@ -792,7 +793,7 @@ describe('工作台 v2 BigInt 金额（Oracle #10 精度）', () => {
           ups: true,
           contractAmount: BIG,
           finalAmount: BIG,
-          actualInstallDoneAt: '2026-08-08T18:00',
+          actualInstallDoneAt: '2026-08-08',
           siteConfirmed: false,
         },
       });
@@ -802,7 +803,7 @@ describe('工作台 v2 BigInt 金额（Oracle #10 精度）', () => {
       expect(detail.project!.finalAmount).toBe(BIG);
       expect(detail.project!.invoicedAmount).toBe('0.00');
       // 掉票后累计金额也精确
-      facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: BIG } } });
+      facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: BIG } } });
       const after = facade.v2ProjectDetail(projectId);
       expect(after.project!.invoicedAmount).toBe(BIG);
     } finally {
@@ -833,7 +834,7 @@ describe('工作台 v2 有界性（Oracle #10 反全量约束）', () => {
        VALUES (?,?,?,?,?,?,?,?)`,
     );
     for (let i = 0; i < 50; i++) {
-      stmt.run(`rem-${i}`, `TP-REM-${String(i).padStart(3, '0')}`, 'pending_execution', '华东', `2026-08-${String((i % 28) + 1).padStart(2, '0')}T09:00:00+08:00`, `备注${i}`, 't', `2026-08-0${i % 9}T00:00:00+08:00`);
+      stmt.run(`rem-${i}`, `TP-REM-${String(i).padStart(3, '0')}`, 'pending_execution', '华东', `2026-08-${String((i % 28) + 1).padStart(2, '0')}`, `备注${i}`, 't', `2026-08-0${i % 9}T00:00:00+08:00`);
     }
     const overview = reader(ctx).overview();
     expect(overview.reminderPreview.length).toBeLessThanOrEqual(6);

@@ -99,7 +99,8 @@ describe('模块所有权边界', () => {
 
   it('workbench-interface 只定义录入入口，不重复业务状态与金额校验', () => {
     expect('resolveStatus' in interfaceModule).toBe(false);
-    expect(interfaceModule.QUICK_RECORD_ACTIONS).toHaveLength(10);
+    // 快速记录九类动作（实际物流费用已并入「搬迁批次」原子创建，不设独立入口）
+    expect(interfaceModule.QUICK_RECORD_ACTIONS).toHaveLength(9);
   });
 
   it('project-financial-closure 只消费 lifecycle 校验结果，不重新定义状态', () => {

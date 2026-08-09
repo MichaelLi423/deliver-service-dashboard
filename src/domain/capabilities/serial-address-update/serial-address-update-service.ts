@@ -1,7 +1,13 @@
 import { ValidationError } from '../../core/errors';
 import { assertRequiredText, newInternalId } from '../../core/ids';
 import type { ActorSnapshot } from '../../core/source';
-import { assertValidIso, monthOfIso, SystemClock, type Clock } from '../../core/time';
+import {
+  assertValidBusinessDate,
+  SystemClock,
+  toMonthKey,
+  type BusinessDate,
+  type Clock,
+} from '../../core/time';
 import type {
   SerialAddressUpdate,
   SerialAddressUpdateFilter,
@@ -50,8 +56,8 @@ export class SerialAddressUpdateService {
         `序列号「${serialNo}」与该搬迁仪器登记序列号「${instrument.serialNo}」不一致`,
       );
     }
-    const updatedAt = input.updatedAt ?? this.now();
-    assertValidIso(updatedAt, '更新时间');
+    const updatedAt = input.updatedAt ?? this.today();
+    assertValidBusinessDate(updatedAt, '更新时间');
     const now = this.now();
     const update: SerialAddressUpdate = {
       id: newInternalId(),
@@ -101,11 +107,11 @@ export class SerialAddressUpdateService {
     return rows;
   }
 
-  /** 按更新时间所属月份计数（每条更新事实按更新时间归属）。 */
+  /** 按更新时间所属月份计数（每条更新事实按更新日期归属）。 */
   countByMonth(): { month: string; count: number }[] {
     const counts = new Map<string, number>();
     for (const row of this.updates.listAll()) {
-      const month = monthOfIso(row.updatedAt);
+      const month = toMonthKey(row.updatedAt);
       counts.set(month, (counts.get(month) ?? 0) + 1);
     }
     return [...counts.entries()].map(([month, count]) => ({ month, count }));
@@ -128,5 +134,10 @@ export class SerialAddressUpdateService {
 
   private now(): string {
     return this.clock.nowIso();
+  }
+
+  /** 当前业务日期（yyyy-mm-dd）：业务时间字段默认值。 */
+  private today(): BusinessDate {
+    return this.clock.today();
   }
 }

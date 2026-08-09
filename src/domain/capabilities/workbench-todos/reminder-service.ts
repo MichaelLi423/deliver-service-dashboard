@@ -1,6 +1,6 @@
 import { ValidationError } from '../../core/errors';
 import type { ActorSnapshot } from '../../core/source';
-import { assertValidIso, SystemClock, type Clock } from '../../core/time';
+import { assertValidBusinessDate, SystemClock, type Clock } from '../../core/time';
 import type { Project, ProjectRepository } from '../relocation-project-lifecycle';
 import {
   classifyReminder,
@@ -39,7 +39,7 @@ export class ReminderService {
     const project = this.requireProject(projectId);
     const at = input.at ?? null;
     if (at !== null) {
-      assertValidIso(at, '提醒时间');
+      assertValidBusinessDate(at, '提醒时间');
     }
     const note = (input.note ?? '').trim();
     if (at === null && note === '') {

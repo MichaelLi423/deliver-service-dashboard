@@ -77,11 +77,11 @@ function declaredAll(data: readonly ImportCategory[]): Partial<Record<ImportCate
 function validSevenRows(): NormalizedRow[] {
   return [
     nrow('project', { 'contract.ecc': 'E-1', 'contract.customer_name': '甲', 'instrument.name': '色谱仪', 'instrument.serial_no': 'SN-1' }),
-    nrow('invoice', { 'invoice.ecc': 'E-1', 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05T00:00:00+08:00' }),
-    nrow('logistics_fee', { 'logistics_fee.ecc': 'E-1', 'logistics_fee.applied_at': '2026-01-05T00:00:00+08:00', 'logistics_fee.budget_price_cents': '4000', 'logistics_fee.deal_price_cents': '3500', 'logistics_fee.logistics_cost_cents': '3000', 'logistics_fee.transport_company': '顺丰' }),
-    nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'pm', 'service_order.ordered_at': '2026-01-01T00:00:00+08:00', 'service_order.engineer': '工', 'service_order.customer_name': '甲' }),
-    nrow('serial_address_update', { 'serial_address_update.customer_name': '甲', 'serial_address_update.new_site_address': '新址', 'serial_address_update.serial_no': 'SN-1', 'serial_address_update.account_id': 'ACC-1', 'serial_address_update.updated_at': '2026-01-05T00:00:00+08:00' }),
-    nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05T00:00:00+08:00', 'qr_request.type_code': 'service' }),
+    nrow('invoice', { 'invoice.ecc': 'E-1', 'invoice.amount_cents': '5000', 'invoice.invoiced_at': '2026-01-05' }),
+    nrow('logistics_fee', { 'logistics_fee.ecc': 'E-1', 'logistics_fee.applied_at': '2026-01-05', 'logistics_fee.budget_price_cents': '4000', 'logistics_fee.deal_price_cents': '3500', 'logistics_fee.logistics_cost_cents': '3000', 'logistics_fee.transport_company': '顺丰' }),
+    nrow('service_order', { 'service_order.service_order_no': 'SO-1', 'service_order.order_type': 'pm', 'service_order.ordered_at': '2026-01-01', 'service_order.engineer': '工', 'service_order.customer_name': '甲' }),
+    nrow('serial_address_update', { 'serial_address_update.customer_name': '甲', 'serial_address_update.new_site_address': '新址', 'serial_address_update.serial_no': 'SN-1', 'serial_address_update.account_id': 'ACC-1', 'serial_address_update.updated_at': '2026-01-05' }),
+    nrow('qr_request', { 'qr_request.applicant': '负责人', 'qr_request.requested_at': '2026-01-05', 'qr_request.type_code': 'service' }),
     nrow('ship_to_request', { 'ship_to_request.customer_name': '甲', 'ship_to_request.new_site_address': '新址', 'ship_to_request.account_id': 'ACC-2' }),
   ];
 }
@@ -172,7 +172,7 @@ describe('8.16 import_run 运行审计（schema v11 / operation_id 唯一）', (
     const dir = makeTempDir();
     try {
       const { db, close } = openEnv(dir);
-      expect(readSchemaVersion(db)).toBe(12);
+      expect(readSchemaVersion(db)).toBe(13);
       const cols = db.prepare('PRAGMA table_info(import_run)').all() as { name: string }[];
       const names = cols.map((c) => c.name);
       for (const col of [
@@ -223,7 +223,7 @@ describe('8.16 import_run 运行审计（schema v11 / operation_id 唯一）', (
       expect(run.planDigest).toBe(sealed.planDigest);
       expect(run.templateVersion).toBe('1');
       expect(run.mappingVersion).toBe('1');
-      expect(run.validationVersion).toBe('1');
+      expect(run.validationVersion).toBe('2');
       expect(run.accountId).toBe('acc-owner');
       expect(run.usernameSnapshot).toBe('负责人');
       expect(run.startedAt).toBeTruthy();

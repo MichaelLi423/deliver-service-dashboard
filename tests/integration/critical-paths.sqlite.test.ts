@@ -104,13 +104,13 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     facade.v2Mutate({
       op: 'submit_action',
       projectId,
-      action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-05', transportCompany: '紧急运输', originalPrice: '1000', discountedPrice: '1000' } },
+      action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-05', transportCompany: '紧急运输', appliedAt: '2026-08-04', budgetPrice: '1000', dealPrice: '1000' } },
     });
     const instrumentId = String(facade.v2SectionPage({ projectId, kind: 'instruments' }).rows[0].id);
     facade.v2Mutate({
       op: 'submit_action',
       projectId,
-      action: { type: 'visit', projectId, values: { engineers: '工程师甲', visitAt: '2026-08-06T09:00', workTypes: ['teardown'], instrumentId, status: 'done' } },
+      action: { type: 'visit', projectId, values: { engineers: '工程师甲', visitAt: '2026-08-06', workTypes: ['teardown'], instrumentId, status: 'done' } },
     });
     // 工作事实开始触发 onExecutionStarted → 但未进单先执行标签保持待进单
     detail = facade.v2ProjectDetail(projectId).project!;
@@ -121,7 +121,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     facade.v2Mutate({
       op: 'submit_action',
       projectId,
-      action: { type: 'core', projectId, values: { contractAmount: '200000', ecc: 'ECC-PRE-001', entryAt: '2026-08-07T10:00', finalAmount: '200000' } },
+      action: { type: 'core', projectId, values: { contractAmount: '200000', ecc: 'ECC-PRE-001', entryAt: '2026-08-07', finalAmount: '200000' } },
     });
     detail = facade.v2ProjectDetail(projectId).project!;
     expect(detail.formallyEntered).toBe(true);
@@ -150,13 +150,13 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
         ups: true,
         contractAmount: '100000',
         finalAmount: '100000',
-        planVisitAt: '2026-08-09T09:00',
-        planTransportAt: '2026-08-10T09:00',
+        planVisitAt: '2026-08-09',
+        planTransportAt: '2026-08-10',
         siteConfirmed: true,
       }),
     });
-    // 正式进单后主状态由负责人人工确定；计划/场地确认不触发流转
-    expect(facade.v2ProjectDetail(projectIdOf(a)).project!.status).toBe('pending_entry');
+    // 创建即正式进单：主状态直接推进为待执行；计划/场地确认不触发流转
+    expect(facade.v2ProjectDetail(projectIdOf(a)).project!.status).toBe('pending_execution');
 
     // 录入实际装机完成时间 → 自动进入待验收（自动触发优先于人工值）
     const b = facade.v2Mutate({
@@ -168,7 +168,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
         ups: true,
         contractAmount: '100000',
         finalAmount: '100000',
-        actualInstallDoneAt: '2026-08-08T18:00',
+        actualInstallDoneAt: '2026-08-08',
       }),
     });
     const autoProject = facade.v2ProjectDetail(projectIdOf(b)).project!;
@@ -180,19 +180,25 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     const ctx = makeContext();
     dirs.push(ctx.dir);
     const facade = await ctx.init();
+    // 无 ECC 的未进单先执行项目：标签钉住主状态，离开待进单被拒
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'draft', customerName: '状态校验客户', region: '华北' }),
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '状态校验客户', region: '华北' }),
     });
     const projectId = projectIdOf(created);
+    expect(() => facade.v2Mutate({ op: 'adjust_status', projectId, status: 'completed' })).toThrow(/未进单先执行/);
 
-    // 待进单 → 已完成：无金额闭环依据，拒绝
-    expect(() => facade.v2Mutate({ op: 'adjust_status', projectId, status: 'completed' })).toThrow(/闭环|已完成/);
-    // 待进单 → 执行中：通过
-    facade.v2Mutate({ op: 'adjust_status', projectId, status: 'pending_execution' });
-    expect(facade.v2ProjectDetail(projectId).project!.status).toBe('pending_execution');
-    facade.v2Mutate({ op: 'adjust_status', projectId, status: 'executing' });
-    expect(facade.v2ProjectDetail(projectId).project!.status).toBe('executing');
+    // 正式进单项目：创建结果主状态为待执行；待执行 → 执行中 经 lifecycle 校验通过
+    const formal = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ customerName: '状态校验正式客户', ecc: 'ECC-ADJ-001', region: '华北', contractAmount: '100000', finalAmount: '100000' }),
+    });
+    const formalId = projectIdOf(formal);
+    expect(facade.v2ProjectDetail(formalId).project!.status).toBe('pending_execution');
+    // 待执行 → 已完成：无掉票闭环依据，拒绝并返回原因
+    expect(() => facade.v2Mutate({ op: 'adjust_status', projectId: formalId, status: 'completed' })).toThrow(/已完成/);
+    facade.v2Mutate({ op: 'adjust_status', projectId: formalId, status: 'executing' });
+    expect(facade.v2ProjectDetail(formalId).project!.status).toBe('executing');
   });
 
   it('4. 取消：无掉票历史可取消；任何掉票历史（含已撤销）禁止；取消后指标排除且真实成本保留', async () => {
@@ -206,7 +212,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
       payload: wizard({ customerName: '可取消客户', ecc: 'ECC-CANCEL-01', region: '西南', contractAmount: '50000', finalAmount: '50000', instrumentName: '仪器A' }),
     });
     const projectIdA = projectIdOf(a);
-    facade.v2Mutate({ op: 'cancel_project', projectId: projectIdA, time: '2026-08-12T09:00', reason: '客户业务调整取消' });
+    facade.v2Mutate({ op: 'cancel_project', projectId: projectIdA, time: '2026-08-12', reason: '客户业务调整取消' });
     expect(facade.v2ProjectDetail(projectIdA).project!.status).toBe('cancelled');
     // 取消须经专用命令：adjustStatus 拒绝 cancelled（时间与原因必须随取消一并持久化）
     expect(() => facade.v2Mutate({ op: 'adjust_status', projectId: projectIdA, status: 'cancelled' as never })).toThrow(/cancelProject/);
@@ -219,9 +225,9 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
       payload: wizard({ customerName: '有掉票历史客户', ecc: 'ECC-CANCEL-02', region: '西南', contractAmount: '50000', finalAmount: '50000', instrumentName: '仪器B' }),
     });
     const projectIdB = projectIdOf(b);
-    facade.v2Mutate({ op: 'submit_action', projectId: projectIdB, action: { type: 'invoice', projectId: projectIdB, values: { invoicedAt: '2026-08-11T09:00', amount: '10000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId: projectIdB, action: { type: 'invoice', projectId: projectIdB, values: { invoicedAt: '2026-08-11', amount: '10000' } } });
     // 存在有效掉票时禁止取消（含撤销掉票历史的禁止规则由领域测试覆盖）
-    expect(() => facade.v2Mutate({ op: 'cancel_project', projectId: projectIdB, time: '2026-08-12T09:00', reason: '尝试取消' })).toThrow(/掉票/);
+    expect(() => facade.v2Mutate({ op: 'cancel_project', projectId: projectIdB, time: '2026-08-12', reason: '尝试取消' })).toThrow(/掉票/);
   });
 
   it('5. 掉票金额闭环重算：超额保护、撤销终态、无 0 金额闭环', async () => {
@@ -235,7 +241,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
         ecc: 'ECC-CLOSURE-01',
         contractAmount: '100000',
         finalAmount: '100000',
-        actualInstallDoneAt: '2026-08-08T18:00',
+        actualInstallDoneAt: '2026-08-08',
       }),
     });
     const projectId = projectIdOf(created);
@@ -245,17 +251,17 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
 
     // 超额保护：掉票 120000 > 最终可确认 100000 → 拒绝
     expect(() =>
-      facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '120000' } } }),
+      facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '120000' } } }),
     ).toThrow(/超额|最终可确认/);
 
     // 无 0 金额闭环：0 金额掉票被拒
     expect(() =>
-      facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '0' } } }),
+      facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '0' } } }),
     ).toThrow(/大于 0/);
 
     // 累计达到最终可确认金额 → 自动进入已完成（金额闭环）
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '60000' } } });
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-12T09:00', amount: '40000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '60000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-12', amount: '40000' } } });
     const after = facade.v2ProjectDetail(projectId).project!;
     expect(after.invoicedAmount).toBe('100000.00');
     expect(after.status).toBe('completed');
@@ -290,7 +296,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     facade.v2Mutate({
       op: 'submit_action',
       projectId,
-      action: { type: 'damage', projectId, values: { instrumentId, damageReason: '运输磕碰', partNumber: 'PART-1', partQuantity: '1', partAmount: '1000', partCurrency: 'USD', partStatus: 'pending_submit', issueStatus: 'untreated' } },
+      action: { type: 'damage', projectId, values: { instrumentId, damageReason: '运输磕碰', partNumber: 'PART-1', partQuantity: '1', partAmount: '1000', partCurrency: 'USD', partStatus: 'pending_submit', issueStatus: 'untreated', registeredAt: '2026-08-08' } },
     });
     expect(facade.v2SectionPage({ projectId, kind: 'damage_items' }).total).toBe(1);
     // 合同金额为 0 时禁止备件标记已使用 → 领域校验拒绝（整次提交回滚）
@@ -298,7 +304,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
       facade.v2Mutate({
         op: 'submit_action',
         projectId,
-        action: { type: 'damage', projectId, values: { instrumentId, damageReason: '运输磕碰', partNumber: 'PART-1', partQuantity: '1', partAmount: '1000', partCurrency: 'USD', partStatus: 'used', issueStatus: 'untreated' } },
+        action: { type: 'damage', projectId, values: { instrumentId, damageReason: '运输磕碰', partNumber: 'PART-1', partQuantity: '1', partAmount: '1000', partCurrency: 'USD', partStatus: 'used', issueStatus: 'untreated', registeredAt: '2026-08-08' } },
       }),
     ).toThrow(/已使用/);
     expect(facade.v2SectionPage({ projectId, kind: 'damage_items' }).total).toBe(1); // 回滚后不产生第二条事项
@@ -406,12 +412,12 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     ) as Extract<ReturnType<WorkbenchFacade['v2SectionPage']>['rows'][number], { kind: 'instruments' }>;
     facade.v2Mutate({
       op: 'submit_action',
-      action: { type: 'serial_address', values: { instrumentId: instrument.id, customerName: '序列号地址客户', newSiteAddress: '实际新址1', serialNo: 'SN-A-001', accountId: 'ACC-SN-001', updatedAt: '2026-08-09T09:00' } },
+      action: { type: 'serial_address', values: { instrumentId: instrument.id, customerName: '序列号地址客户', newSiteAddress: '实际新址1', serialNo: 'SN-A-001', accountId: 'ACC-SN-001', updatedAt: '2026-08-09' } },
     });
     expect(facade.v2IndependentPage({ kind: 'serial_address' }).total).toBe(1);
     facade.v2Mutate({
       op: 'submit_action',
-      action: { type: 'serial_address', values: { instrumentId: instrument.id, customerName: '序列号地址客户', newSiteAddress: '实际新址2', serialNo: 'SN-A-001', accountId: 'ACC-SN-002', updatedAt: '2026-08-10T09:00' } },
+      action: { type: 'serial_address', values: { instrumentId: instrument.id, customerName: '序列号地址客户', newSiteAddress: '实际新址2', serialNo: 'SN-A-001', accountId: 'ACC-SN-002', updatedAt: '2026-08-10' } },
     });
     expect(facade.v2IndependentPage({ kind: 'serial_address' }).total).toBe(2); // 一台仪器多次地址变化，逐台登记
   });
@@ -422,7 +428,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     const facade = await ctx.init();
     facade.v2Mutate({
       op: 'submit_action',
-      action: { type: 'qr_request', values: { applicant: '申请人甲', requestedAt: '2026-08-11T10:00', types: ['A', 'A', 'project_acceptance_form'] } },
+      action: { type: 'qr_request', values: { applicant: '申请人甲', requestedAt: '2026-08-11', types: ['A', 'A', 'project_acceptance_form'] } },
     });
     let page = facade.v2IndependentPage({ kind: 'qr_request' });
     expect(page.total).toBe(1);
@@ -431,7 +437,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     expect(first.workload).toBe(2);
     facade.v2Mutate({
       op: 'submit_action',
-      action: { type: 'qr_request', values: { applicant: '申请人乙', requestedAt: '2026-08-11T11:00', types: ['A'] } },
+      action: { type: 'qr_request', values: { applicant: '申请人乙', requestedAt: '2026-08-11', types: ['A'] } },
     });
     page = facade.v2IndependentPage({ kind: 'qr_request' });
     expect(page.total).toBe(2); // 重复申请保留完整历史
@@ -445,15 +451,15 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     const facade = await ctx.init();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'draft', customerName: '提醒客户', region: '东北' }),
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '提醒客户', region: '东北' }),
     });
     const projectId = projectIdOf(created);
 
     // 手工维护当前提醒（含时间与备注）
-    facade.v2Mutate({ op: 'set_reminder', projectId, reminderAt: '2026-08-09T09:00:00+08:00', reminderNote: '确认运输安排' });
+    facade.v2Mutate({ op: 'set_reminder', projectId, reminderAt: '2026-08-09', reminderNote: '确认运输安排' });
     expect(facade.v2ProjectDetail(projectId).project!.reminderNote).toBe('确认运输安排');
     // 过期提醒 → 已逾期分类
-    facade.v2Mutate({ op: 'set_reminder', projectId, reminderAt: '2020-01-01T09:00:00+08:00', reminderNote: '历史提醒' });
+    facade.v2Mutate({ op: 'set_reminder', projectId, reminderAt: '2020-01-01', reminderNote: '历史提醒' });
     expect(facade.v2ProjectDetail(projectId).project!.reminderDueClass).toBe('overdue');
     // 清除提醒
     facade.v2Mutate({ op: 'clear_reminder', projectId });
@@ -472,8 +478,8 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
       payload: wizard({ customerName: '报表客户', ecc: 'ECC-REPORT-001', contractAmount: '100000', finalAmount: '100000' }),
     });
     const projectId = projectIdOf(created);
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '40000' } } });
-    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '报表运输', originalPrice: '10000', discountedPrice: '9000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '40000' } } });
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '报表运输', appliedAt: '2026-08-09', budgetPrice: '10000', dealPrice: '9000' } } });
 
     // 手工月份区间
     const report = facade.reportDto({ monthFrom: '2026-08', monthTo: '2026-08' });

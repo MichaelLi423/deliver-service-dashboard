@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { localCalendarDateOf } from '../../src/domain/capabilities/local-data-persistence/business-date';
 import {
   excelSerialToUtcDate,
   normalizeDateValue,
@@ -64,9 +65,26 @@ describe('8.24 Excel 日期系统确定性转换', () => {
     expect(normalizeDateValue('2026/08/07', '1900', 'date')).toBeNull(); // 非规范格式不猜测
   });
 
-  it('date 语义拒绝带时间的 ISO；datetime 语义拒绝纯日期', () => {
-    expect(normalizeDateValue('2026-08-07T10:30:00+08:00', '1900', 'date')).toBeNull();
+  it('date 语义统一接受四种输入并输出 yyyy-mm-dd；datetime 语义仍拒绝纯日期', () => {
+    // date 语义：带偏移 ISO → 冻结本机 IANA 时区换算为本地业务日期。
+    expect(normalizeDateValue('2026-08-07T10:30:00+08:00', '1900', 'date')).toBe(
+      localCalendarDateOf(new Date('2026-08-07T10:30:00+08:00')),
+    );
+    // date 语义：带 Z ISO → 同样按本机时区换算。
+    expect(normalizeDateValue('2026-08-07T10:30:00Z', '1900', 'date')).toBe(
+      localCalendarDateOf(new Date('2026-08-07T10:30:00Z')),
+    );
+    // date 语义：无偏移本地 datetime → 视为本地墙钟取日期部分（不跨时区换算）。
+    expect(normalizeDateValue('2026-08-07 10:30:00', '1900', 'date')).toBe('2026-08-07');
+    expect(normalizeDateValue('2026-08-07T10:30:00', '1900', 'date')).toBe('2026-08-07');
+    // datetime 语义仍拒绝纯日期（审计/精确时间口径不变）。
     expect(normalizeDateValue('2026-08-07', '1900', 'datetime')).toBeNull();
+  });
+
+  it('date 语义对非法/无法解释的文本仍拒绝猜测（返回 null 由调用方保留原文）', () => {
+    expect(normalizeDateValue('仅月份', '1900', 'date')).toBeNull();
+    expect(normalizeDateValue('2026/08/07', '1900', 'date')).toBeNull();
+    expect(normalizeDateValue('2026-13-45', '1900', 'date')).toBeNull();
   });
 });
 

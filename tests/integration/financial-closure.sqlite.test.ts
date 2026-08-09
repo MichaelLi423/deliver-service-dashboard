@@ -62,7 +62,7 @@ function preparePendingInvoice(ctx: ReturnType<typeof openService>, amount = '10
   ctx.projectService.confirmScope(projectId);
   ctx.projectService.formalEntry(projectId, { ecc: `ECC-FIN-${customerSeq}` });
   ctx.projectService.adjustStatus(projectId, 'executing');
-  ctx.projectService.recordActualInstallDone(projectId, '2026-08-05T18:00:00+08:00');
+  ctx.projectService.recordActualInstallDone(projectId, '2026-08-05');
   ctx.projectService.markAcceptance(projectId, '2026-08-06');
   return projectId;
 }
@@ -74,17 +74,17 @@ describe('project-financial-closure SQLite 集成（5.12）', () => {
       const ctx = openService(dir);
       const projectId = preparePendingInvoice(ctx, '10000');
 
-      const inv = ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-      ctx.financial.editInvoice(inv.id, { amountCents: 600000n, invoicedAt: '2026-08-02T00:00:00+08:00' }, ACTOR);
-      ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-04T00:00:00+08:00', revokeReason: '误登记' }, ACTOR);
-      const correction = ctx.financial.recordInvoice(projectId, { amountCents: 400000n, invoicedAt: '2026-08-05T00:00:00+08:00' }, ACTOR);
+      const inv = ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-08-01' }, ACTOR);
+      ctx.financial.editInvoice(inv.id, { amountCents: 600000n, invoicedAt: '2026-08-02' }, ACTOR);
+      ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-04', revokeReason: '误登记' }, ACTOR);
+      const correction = ctx.financial.recordInvoice(projectId, { amountCents: 400000n, invoicedAt: '2026-08-05' }, ACTOR);
 
       closeDatabase(ctx.db);
 
       const reopened = openService(dir);
       expect(reopened.financial.listInvoices(projectId)).toHaveLength(2); // 原记录保留（已撤销）+ 更正
       const revoked = reopened.financial.listInvoices(projectId).find((i) => i.id === inv.id)!;
-      expect(revoked.revokedAt).toBe('2026-08-04T00:00:00+08:00');
+      expect(revoked.revokedAt).toBe('2026-08-04');
       expect(revoked.amountCents).toBe(600000n); // 编辑后的值保留
       expect(reopened.financial.sumActiveAmounts(projectId)).toBe(400000n); // 仅更正计入
       expect(
@@ -101,8 +101,8 @@ describe('project-financial-closure SQLite 集成（5.12）', () => {
     try {
       const ctx = openService(dir);
       const projectId = preparePendingInvoice(ctx, '10000');
-      const inv = ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-      ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-04T00:00:00+08:00', revokeReason: '撤销' }, ACTOR);
+      const inv = ctx.financial.recordInvoice(projectId, { amountCents: 500000n, invoicedAt: '2026-08-01' }, ACTOR);
+      ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-04', revokeReason: '撤销' }, ACTOR);
 
       const row = ctx.db
         .prepare('SELECT account_id, username_snapshot FROM invoices WHERE id = ?')
@@ -120,14 +120,14 @@ describe('project-financial-closure SQLite 集成（5.12）', () => {
     try {
       const ctx = openService(dir);
       const projectId = preparePendingInvoice(ctx, '8000'); // final 800000
-      ctx.financial.recordInvoice(projectId, { amountCents: 600000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-      ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02T00:00:00+08:00' }, ACTOR);
+      ctx.financial.recordInvoice(projectId, { amountCents: 600000n, invoicedAt: '2026-08-01' }, ACTOR);
+      ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02' }, ACTOR);
       expect(
         ctx.db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)?.status,
       ).toBe('completed');
 
       const second = ctx.financial.listInvoices(projectId).find((i) => i.amountCents === 200000n)!;
-      ctx.financial.revokeInvoice(second.id, { revokedAt: '2026-08-05T00:00:00+08:00', revokeReason: '撤销' }, ACTOR);
+      ctx.financial.revokeInvoice(second.id, { revokedAt: '2026-08-05', revokeReason: '撤销' }, ACTOR);
       expect(
         ctx.db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)?.status,
       ).toBe('pending_invoice');
@@ -143,7 +143,7 @@ describe('project-financial-closure SQLite 集成（5.12）', () => {
       const ctx = openService(dir);
       // 无掉票项目可取消
       const projectId = preparePendingInvoice(ctx, '10000');
-      ctx.projectService.cancelProject(projectId, { time: '2026-08-06T00:00:00+08:00', reason: '客户取消' });
+      ctx.projectService.cancelProject(projectId, { time: '2026-08-06', reason: '客户取消' });
       expect(ctx.projects.findById(projectId)!.status).toBe('cancelled');
       // 取消期间冻结
       expect(() => ctx.financial.setContractUsdTaxAmount(projectId, 1200000n)).toThrow(/已取消/);
@@ -152,10 +152,10 @@ describe('project-financial-closure SQLite 集成（5.12）', () => {
 
       // 有掉票历史的项目禁止取消（含已撤销）
       const projectId2 = preparePendingInvoice(ctx, '10000');
-      const inv = ctx.financial.recordInvoice(projectId2, { amountCents: 100000n, invoicedAt: '2026-08-01T00:00:00+08:00' }, ACTOR);
-      ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-02T00:00:00+08:00', revokeReason: '撤销' }, ACTOR);
+      const inv = ctx.financial.recordInvoice(projectId2, { amountCents: 100000n, invoicedAt: '2026-08-01' }, ACTOR);
+      ctx.financial.revokeInvoice(inv.id, { revokedAt: '2026-08-02', revokeReason: '撤销' }, ACTOR);
       expect(() =>
-        ctx.projectService.cancelProject(projectId2, { time: '2026-08-06T00:00:00+08:00', reason: '取消' }),
+        ctx.projectService.cancelProject(projectId2, { time: '2026-08-06', reason: '取消' }),
       ).toThrow(/掉票历史/);
       closeDatabase(ctx.db);
     } finally {

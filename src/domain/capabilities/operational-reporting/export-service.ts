@@ -127,16 +127,17 @@ export function buildExportSections(report: ReportModel): ExportSection[] {
   sections.push({
     key: 'monthly_logistics',
     title: '月度物流费用汇总（人民币）',
+    // 业务可见列仅保留两个价格口径：合同预算价 / 物流成交价（物流成交价即最终实际费用）。
+    // 底层 LogisticsSummaryRow 的 costSumCents / budgetCostDiffCents 为历史兼容列
+    // （旧「实际费用」口径，现行业务与物流成交价同值），不在导出中重复展示。
     header: [
       '月份',
       '运输公司',
       '批次数',
-      '预算合计',
-      '成交合计',
-      '实际费用合计',
-      '预算-成交差异',
-      '预算-费用差异',
-      '成交>预算批次数',
+      '合同预算价合计',
+      '物流成交价合计',
+      '合同预算价-物流成交价差异',
+      '物流成交价>合同预算价批次数',
       '已取消批次数',
     ],
     rows: report.monthlyLogistics.map((r: LogisticsSummaryRow) => [
@@ -145,9 +146,7 @@ export function buildExportSections(report: ReportModel): ExportSection[] {
       num(r.batchCount),
       money(r.budgetSumCents),
       money(r.dealSumCents),
-      money(r.costSumCents),
       money(r.budgetDealDiffCents),
-      money(r.budgetCostDiffCents),
       num(r.dealOverBudgetCount),
       num(r.cancelledBatchCount),
     ]),
@@ -155,8 +154,8 @@ export function buildExportSections(report: ReportModel): ExportSection[] {
 
   sections.push({
     key: 'logistics_contract_ratio',
-    title: '物流费用合同占比（RMB÷7.2÷最新合同USD）',
-    header: ['项目', '月份', '费用USD', '合同USD', '占比', '不可计算', '已取消'],
+    title: '物流成交价合同占比（物流成交价RMB÷7.2÷最新合同USD）',
+    header: ['项目', '月份', '物流成交价USD', '合同USD', '占比', '不可计算', '已取消'],
     rows: report.logisticsContractRatios.map((r: LogisticsRatioRow) => [
       r.projectTempNo,
       r.month,
@@ -170,8 +169,9 @@ export function buildExportSections(report: ReportModel): ExportSection[] {
 
   sections.push({
     key: 'pending_logistics_list',
-    title: '待补实际费用清单（已有成交价格未登记费用）',
-    header: ['项目', '运输公司', '计划运输日期', '成交价格(RMB)'],
+    // 历史异常批次：已有物流成交价但无物流费用记录（历史数据形态），仅展示，不提供补录指引。
+    title: '历史异常批次（已有物流成交价但无物流费用记录）',
+    header: ['项目', '运输公司', '计划运输日期', '物流成交价(RMB)'],
     rows: report.pendingLogistics.map((r: PendingLogisticsRow) => [
       r.projectTempNo,
       r.transportCompany ?? '',

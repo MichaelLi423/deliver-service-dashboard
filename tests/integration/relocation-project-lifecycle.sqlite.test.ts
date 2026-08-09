@@ -61,7 +61,7 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
 
       const entered = service.formalEntry(projectId, {
         ecc: 'ECC-001',
-        entryAt: '2026-07-01T09:00:00+08:00',
+        entryAt: '2026-07-01',
       });
       expect(entered.status).toBe('pending_entry');
 
@@ -75,7 +75,7 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
 
       // 关闭重开：数据保留
       const reopened = openService(dir);
-      expect(reopened.projects.findById(projectId)!.entryAt).toBe('2026-07-01T09:00:00+08:00');
+      expect(reopened.projects.findById(projectId)!.entryAt).toBe('2026-07-01');
       expect(reopened.contracts.findByProjectId(projectId)!.ecc).toBe('ECC-001');
       expect(reopened.contracts.findByProjectId(projectId)!.entryAmountSnapshotCents).toBe(
         1000000n,
@@ -129,7 +129,7 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
       ).run('inv-1', projectId, 500000, '2026-08-01T00:00:00+08:00', 't', 't');
       expect(() =>
         service.cancelProject(projectId, {
-          time: '2026-08-07T11:30:00+08:00',
+          time: '2026-08-07',
           reason: '客户取消搬迁计划',
         }),
       ).toThrow(/掉票历史/);
@@ -142,7 +142,7 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
       );
       expect(() =>
         service.cancelProject(projectId, {
-          time: '2026-08-07T11:30:00+08:00',
+          time: '2026-08-07',
           reason: '客户取消搬迁计划',
         }),
       ).toThrow(/掉票历史/);
@@ -150,7 +150,7 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
       // 移除掉票历史后取消成功
       db.prepare('DELETE FROM invoices WHERE id = ?').run('inv-1');
       const cancelled = service.cancelProject(projectId, {
-        time: '2026-08-07T11:30:00+08:00',
+        time: '2026-08-07',
         reason: '客户取消搬迁计划',
       });
       expect(cancelled.status).toBe('cancelled');
@@ -174,14 +174,14 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
 
       // 计划时间与场地确认不触发状态流转
       service.updateExecutionPreparation(projectId, {
-        planVisitAt: '2026-08-01T09:00:00+08:00',
-        planTransportAt: '2026-08-02T08:00:00+08:00',
+        planVisitAt: '2026-08-01',
+        planTransportAt: '2026-08-02',
         siteConfirmed: true,
       });
       expect(projects.findById(projectId)!.status).toBe('executing');
 
       // 实际装机完成 → 待验收（持久化）
-      service.recordActualInstallDone(projectId, '2026-08-05T18:00:00+08:00');
+      service.recordActualInstallDone(projectId, '2026-08-05');
       expect(projects.findById(projectId)!.status).toBe('pending_acceptance');
       expect(
         db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)?.status,
@@ -201,7 +201,7 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
         reason: '客户产线停产急需搬迁',
         missingItems: '合同金额待定',
       });
-      service.recordActualInstallDone(projectId, '2026-07-20T18:00:00+08:00');
+      service.recordActualInstallDone(projectId, '2026-07-20');
       expect(projects.findById(projectId)!.status).toBe('pending_entry');
 
       service.formalEntry(projectId, { ecc: 'ECC-001' });

@@ -1,7 +1,13 @@
 import { ValidationError } from '../../core/errors';
 import { assertRequiredText, newInternalId } from '../../core/ids';
 import type { ActorSnapshot } from '../../core/source';
-import { assertValidIso, monthOfIso, SystemClock, type Clock } from '../../core/time';
+import {
+  assertValidBusinessDate,
+  SystemClock,
+  toMonthKey,
+  type BusinessDate,
+  type Clock,
+} from '../../core/time';
 import {
   QR_REQUEST_TYPE_CODES,
   type QrRequest,
@@ -36,8 +42,8 @@ export class QrRequestService {
     for (const type of types) {
       this.assertTypeCode(type);
     }
-    const requestedAt = input.requestedAt ?? this.now();
-    assertValidIso(requestedAt, '申请时间');
+    const requestedAt = input.requestedAt ?? this.today();
+    assertValidBusinessDate(requestedAt, '申请时间');
     const now = this.now();
     const request: QrRequest = {
       id: newInternalId(),
@@ -71,11 +77,11 @@ export class QrRequestService {
     return [...counts.entries()].map(([typeCode, count]) => ({ typeCode, count }));
   }
 
-  /** 申请量按申请时间所属月份归属。 */
+  /** 申请量按申请日期所属月份归属。 */
   countByMonth(): { month: string; count: number }[] {
     const counts = new Map<string, number>();
     for (const request of this.requests.listAll()) {
-      const month = monthOfIso(request.requestedAt);
+      const month = toMonthKey(request.requestedAt);
       counts.set(month, (counts.get(month) ?? 0) + 1);
     }
     return [...counts.entries()].map(([month, count]) => ({ month, count }));
@@ -89,5 +95,10 @@ export class QrRequestService {
 
   private now(): string {
     return this.clock.nowIso();
+  }
+
+  /** 当前业务日期（yyyy-mm-dd）：业务时间字段默认值。 */
+  private today(): BusinessDate {
+    return this.clock.today();
   }
 }

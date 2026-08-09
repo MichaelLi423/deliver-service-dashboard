@@ -137,7 +137,7 @@ describe('Account ID 创建时可空、外部完成后补入并进入已完成�
     const completed = service.complete(request.id, 'ACC-100', ACTOR);
     expect(completed.status).toBe('completed');
     expect(completed.accountId).toBe('ACC-100');
-    expect(completed.completedAt).toBe('2026-08-07T10:00:00+08:00');
+    expect(completed.completedAt).toBe('2026-08-07');
     // 补入的 Account ID 创建不可变 Ship-to
     expect(shipTos.findByAccountId('ACC-100')?.newSiteAddress).toBe('新址A');
   });

@@ -49,7 +49,7 @@ describe('序列号地址更新事实逐台登记（4.3）', () => {
     const instrumentId = addInstrument(ctx);
     const update = ctx.service.register(
       instrumentId,
-      { ...BASE, updatedAt: '2026-08-01T09:00:00+08:00' },
+      { ...BASE, updatedAt: '2026-08-01' },
       ACTOR,
     );
     expect(update.instrumentId).toBe(instrumentId);
@@ -57,7 +57,7 @@ describe('序列号地址更新事实逐台登记（4.3）', () => {
     expect(update.newSiteAddress).toBe('新址A');
     expect(update.serialNo).toBe('SN-100');
     expect(update.accountId).toBe('ACC-001');
-    expect(update.updatedAt).toBe('2026-08-01T09:00:00+08:00');
+    expect(update.updatedAt).toBe('2026-08-01');
     expect(ctx.updates.all).toHaveLength(1);
   });
 
@@ -66,12 +66,12 @@ describe('序列号地址更新事实逐台登记（4.3）', () => {
     const instrumentId = addInstrument(ctx);
     ctx.service.register(
       instrumentId,
-      { ...BASE, newSiteAddress: '新址A', accountId: 'ACC-001', updatedAt: '2026-07-01T09:00:00+08:00' },
+      { ...BASE, newSiteAddress: '新址A', accountId: 'ACC-001', updatedAt: '2026-07-01' },
       ACTOR,
     );
     ctx.service.register(
       instrumentId,
-      { ...BASE, newSiteAddress: '新址B', accountId: 'ACC-002', updatedAt: '2026-08-01T09:00:00+08:00' },
+      { ...BASE, newSiteAddress: '新址B', accountId: 'ACC-002', updatedAt: '2026-08-01' },
       ACTOR,
     );
     expect(ctx.updates.all).toHaveLength(2);
@@ -92,12 +92,12 @@ describe('项目新址为默认计划、更新事实表达实际关联（4.3）'
     const instrumentId = addInstrument(ctx);
     ctx.service.register(
       instrumentId,
-      { ...BASE, newSiteAddress: '旧地址', accountId: 'ACC-001', updatedAt: '2026-07-01T09:00:00+08:00' },
+      { ...BASE, newSiteAddress: '旧地址', accountId: 'ACC-001', updatedAt: '2026-07-01' },
       ACTOR,
     );
     ctx.service.register(
       instrumentId,
-      { ...BASE, newSiteAddress: '实际新址', accountId: 'ACC-002', updatedAt: '2026-08-01T09:00:00+08:00' },
+      { ...BASE, newSiteAddress: '实际新址', accountId: 'ACC-002', updatedAt: '2026-08-01' },
       ACTOR,
     );
     expect(ctx.service.getActualAddress(instrumentId)!.newSiteAddress).toBe('实际新址');
@@ -132,14 +132,14 @@ describe('更新时间必填、默认当前、可补录（4.3）', () => {
     const ctx = setup();
     const instrumentId = addInstrument(ctx);
     const update = ctx.service.register(instrumentId, BASE, ACTOR);
-    expect(update.updatedAt).toBe('2026-08-07T10:00:00+08:00');
+    expect(update.updatedAt).toBe('2026-08-07');
   });
 
   it('补录历史时间：按所填历史时间保存并归属该月份', () => {
     const ctx = setup();
     const instrumentId = addInstrument(ctx);
-    const update = ctx.service.register(instrumentId, { ...BASE, updatedAt: '2026-03-15T08:00:00+08:00' }, ACTOR);
-    expect(update.updatedAt).toBe('2026-03-15T08:00:00+08:00');
+    const update = ctx.service.register(instrumentId, { ...BASE, updatedAt: '2026-03-15' }, ACTOR);
+    expect(update.updatedAt).toBe('2026-03-15');
     expect(ctx.service.countByMonth()).toEqual([{ month: '2026-03', count: 1 }]);
   });
 });
@@ -151,12 +151,12 @@ describe('更新事实列表、筛选与按更新时间计数（4.3）', () => {
     const i2 = addInstrument(ctx, 'SN-200');
     ctx.service.register(
       i1,
-      { customerName: '华东医药', newSiteAddress: '新址A', serialNo: 'SN-100', accountId: 'ACC-001', updatedAt: '2026-07-01T09:00:00+08:00' },
+      { customerName: '华东医药', newSiteAddress: '新址A', serialNo: 'SN-100', accountId: 'ACC-001', updatedAt: '2026-07-01' },
       ACTOR,
     );
     ctx.service.register(
       i2,
-      { customerName: '华北医药', newSiteAddress: '新址B', serialNo: 'SN-200', accountId: 'ACC-002', updatedAt: '2026-08-01T09:00:00+08:00' },
+      { customerName: '华北医药', newSiteAddress: '新址B', serialNo: 'SN-200', accountId: 'ACC-002', updatedAt: '2026-08-01' },
       ACTOR,
     );
     return ctx;

@@ -2,7 +2,12 @@ import { ValidationError } from '../../core/errors';
 import { assertRequiredText, newInternalId } from '../../core/ids';
 import { Money, Ratio } from '../../core/money';
 import type { ActorSnapshot } from '../../core/source';
-import { assertValidIso, SystemClock, type Clock } from '../../core/time';
+import {
+  assertValidBusinessDate,
+  SystemClock,
+  type BusinessDate,
+  type Clock,
+} from '../../core/time';
 import {
   DAMAGE_ITEM_STATUSES,
   PART_CURRENCIES,
@@ -67,7 +72,7 @@ export class DamageRepairService {
     }
     this.assertCurrency(input.partCurrency);
     if (input.partRequestedAt !== undefined && input.partRequestedAt !== null) {
-      assertValidIso(input.partRequestedAt, '备件申请时间');
+      assertValidBusinessDate(input.partRequestedAt, '备件申请时间');
     }
     if (input.partStatus !== undefined && input.partStatus !== null) {
       this.assertPartStatus(input.partStatus);
@@ -81,8 +86,8 @@ export class DamageRepairService {
     }
     const closeReason =
       issueStatus === 'closed_unrepaired' ? assertRequiredText(input.closeReason, '关闭原因') : null;
-    const registeredAt = input.registeredAt ?? this.now();
-    assertValidIso(registeredAt, '事项登记时间');
+    const registeredAt = input.registeredAt ?? this.today();
+    assertValidBusinessDate(registeredAt, '事项登记时间');
     const now = this.now();
     const item: DamageRepairItem = {
       id: newInternalId(),
@@ -176,7 +181,7 @@ export class DamageRepairService {
       item.partCurrency = input.partCurrency;
     }
     if (input.partRequestedAt !== undefined) {
-      if (input.partRequestedAt !== null) assertValidIso(input.partRequestedAt, '备件申请时间');
+      if (input.partRequestedAt !== null) assertValidBusinessDate(input.partRequestedAt, '备件申请时间');
       item.partRequestedAt = input.partRequestedAt;
     }
     if (input.repairNote !== undefined) {
@@ -323,5 +328,10 @@ export class DamageRepairService {
 
   private now(): string {
     return this.clock.nowIso();
+  }
+
+  /** 当前业务日期（yyyy-mm-dd）：业务时间字段默认值。 */
+  private today(): BusinessDate {
+    return this.clock.today();
   }
 }

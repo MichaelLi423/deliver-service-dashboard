@@ -1,5 +1,5 @@
 import { ValidationError } from '../../core/errors';
-import { toBusinessDate, type BusinessDate, type IsoDateTime } from '../../core/time';
+import { type BusinessDate } from '../../core/time';
 
 /**
  * workbench-todos 能力（项目提醒，手工维护）。
@@ -20,14 +20,14 @@ export type ReminderDueClass = (typeof REMINDER_DUE_CLASSES)[number];
 
 /**
  * 项目提醒字段（落在项目聚合内，见 relocation-project-lifecycle Project）。
- * 提醒时间与备注均可空；仅当两者均为空时项目无当前提醒。
+ * 提醒日期与备注均可空；仅当两者均为空时项目无当前提醒。
  * operator* 为最近一次创建/编辑/清除操作绑定的登录账号快照（手工事实归属，
  * design D12；历史统计不因以后改名变化）。
  */
 export interface ProjectReminder {
   projectId: string;
-  /** 当前提醒时间（业务时间），可空；为空时不参与到期分类。 */
-  at: string | null;
+  /** 当前提醒日期（业务日期 yyyy-mm-dd），可空；为空时不参与到期分类。 */
+  at: BusinessDate | null;
   /** 备注内容，可空（去除首尾空白后为空按无备注处理）。 */
   note: string | null;
   /** 操作绑定账号内部 ID（可空：历史数据/无归属场景）。 */
@@ -36,9 +36,9 @@ export interface ProjectReminder {
   operatorUsername: string | null;
 }
 
-/** 提醒维护输入：提醒时间与备注均可选（可空），至少一项非空方可创建/编辑。 */
+/** 提醒维护输入：提醒日期与备注均可选（可空），至少一项非空方可创建/编辑。 */
 export interface ReminderInput {
-  at?: string | null;
+  at?: BusinessDate | null;
   note?: string | null;
 }
 
@@ -56,22 +56,22 @@ export function addBusinessDays(date: BusinessDate, days: number): BusinessDate 
 
 /**
  * 到期分类纯函数（spec「提醒到期分类」/「临期窗口可配置」）：
- * - 无提醒时间（null/空）→ null（无当前提醒的项目不分类）；
- * - 提醒时间业务日期 == 今天 → today（截止日当天）；
- * - 提醒时间业务日期 < 今天 → overdue（超过截止日）；
- * - 今天 < 提醒时间业务日期 ≤ 今天 + 临期窗口 → upcoming（临期窗口内且未到期）；
+ * - 无提醒日期（null/空）→ null（无当前提醒的项目不分类）；
+ * - 提醒日期 == 今天 → today（截止日当天）；
+ * - 提醒日期 < 今天 → overdue（超过截止日）；
+ * - 今天 < 提醒日期 ≤ 今天 + 临期窗口 → upcoming（临期窗口内且未到期）；
  * - 超出临期窗口（未来天数 > windowDays）→ null（不进入任何到期分类）。
- * 使用本机业务日期（调用方提供 today），与 0.2「带偏移 ISO 时间/业务日期」口径一致。
+ * 使用本机业务日期（调用方提供 today），提醒日期为 yyyy-mm-dd 直接按字符串比较。
  */
 export function classifyReminder(
-  reminderAt: string | null,
+  reminderAt: BusinessDate | null,
   today: BusinessDate,
   windowDays: number,
 ): ReminderDueClass | null {
   if (reminderAt === null || reminderAt === '') {
     return null;
   }
-  const dueDate = toBusinessDate(reminderAt as IsoDateTime);
+  const dueDate = reminderAt;
   if (dueDate === today) {
     return 'today';
   }

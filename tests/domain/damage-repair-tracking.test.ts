@@ -108,14 +108,14 @@ describe('事项字段与处理状态（4.5）', () => {
       i1,
       partInput({
         damageReason: '运输碰撞导致面板破损',
-        partRequestedAt: '2026-08-02T10:00:00+08:00',
+        partRequestedAt: '2026-08-02',
         partStatus: 'pending_submit',
         repairNote: '已安排上门',
       }),
       ACTOR,
     );
     expect(item.damageReason).toBe('运输碰撞导致面板破损');
-    expect(item.partRequestedAt).toBe('2026-08-02T10:00:00+08:00');
+    expect(item.partRequestedAt).toBe('2026-08-02');
     expect(item.partStatus).toBe('pending_submit');
     expect(item.repairNote).toBe('已安排上门');
     expect(ctx.items.findById(item.id)!.issueStatus).toBe('untreated');
@@ -136,8 +136,8 @@ describe('备件申请时间与备件处理状态（4.5 / TBD-13）', () => {
   it('记录备件申请时间到事项内，不建立独立备件申请对象', () => {
     const ctx = setup();
     const i1 = addInstrument(ctx, 'i1');
-    const item = ctx.service.registerItem(i1, partInput({ partRequestedAt: '2026-08-02T10:00:00+08:00' }), ACTOR);
-    expect(item.partRequestedAt).toBe('2026-08-02T10:00:00+08:00');
+    const item = ctx.service.registerItem(i1, partInput({ partRequestedAt: '2026-08-02' }), ACTOR);
+    expect(item.partRequestedAt).toBe('2026-08-02');
     const proto = Object.getPrototypeOf(ctx.service) as Record<string, unknown>;
     expect('createPartRequest' in proto).toBe(false);
   });

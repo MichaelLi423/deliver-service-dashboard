@@ -53,7 +53,7 @@ async function seedBulk(db: DatabaseSync, projectCount = 100_000): Promise<void>
   );
   for (let i = 0; i < projectCount; i++) {
     // 前 1000 个项目挂合同并已进单（pendingAmount 有确定值）；其余未进单
-    const entryAt = i < 1_000 ? stamp(1, 1) : null;
+    const entryAt = i < 1_000 ? '2026-08-01' : null;
     insertProject.run(
       `bulk-p-${i}`,
       `TP-BULK-${String(i).padStart(6, '0')}`,
@@ -304,7 +304,7 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
       action: {
         type: 'invoice',
         projectId: result.changed!.projectId!,
-        values: { invoicedAt: '2026-08-11T09:00', amount: '90071992547409.93' },
+        values: { invoicedAt: '2026-08-11', amount: '90071992547409.93' },
       },
     });
     const detail = ctx.facade.v2ProjectDetail(result.changed!.projectId!);

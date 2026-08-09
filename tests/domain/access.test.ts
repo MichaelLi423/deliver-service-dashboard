@@ -282,12 +282,12 @@ describe('手工录入事实归属当前登录账号（tasks 2.8 / spec，联动
   });
 
   it('迁移数据不计手工录入：迁移导入事实不归属本地账号', () => {
-    const importMeta = createFactMeta({ source: 'import', businessAt: T0 });
+    const importMeta = createFactMeta({ source: 'import', businessAt: '2026-08-07' });
     expect(importMeta.actor).toBeNull();
     expect(() =>
       validateFactMeta({
         source: 'import',
-        businessAt: T0,
+        businessAt: '2026-08-07',
         auditAt: T0,
         actor: { accountId: 'acc', username: '负责人甲' },
       }),

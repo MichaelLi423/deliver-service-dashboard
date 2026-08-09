@@ -8,7 +8,10 @@
  * 搬迁仪器上的「二维码是否申请」为手工是/否字段（归属 relocation-execution），
  * 不保存 URL、不由申请记录推导、不自动创建提醒、不阻塞上门/运输/项目流转。
  * 手工记录绑定当前登录账号归属快照。规则实现见 tasks 4.9~4.10。
+ * 业务时间字段（申请日期）为 yyyy-mm-dd；createdAt 仍为带偏移 ISO。
  */
+import type { BusinessDate } from '../../core/time';
+
 /** 九类固定申请类型（TBD-06）。 */
 export const QR_REQUEST_TYPE_CODES = [
   'A',
@@ -27,8 +30,8 @@ export interface QrRequest {
   id: string;
   /** 申请人。 */
   applicant: string;
-  /** 申请时间（业务时间，按该月份归属）。 */
-  requestedAt: string;
+  /** 申请日期（业务日期，按该月份归属）。 */
+  requestedAt: BusinessDate;
   /** 一条申请内去重后的选中类型。 */
   types: QrRequestTypeCode[];
   /** 操作账号归属快照。 */
@@ -40,8 +43,8 @@ export interface QrRequest {
 /** 二维码申请创建输入（4.9）。 */
 export interface QrRequestInput {
   applicant: string;
-  /** 申请时间（缺省当前时间）。 */
-  requestedAt?: string;
+  /** 申请日期（缺省当天）。 */
+  requestedAt?: BusinessDate;
   /** 一个或多个申请类型（多选，同一条内去重）。 */
   types: QrRequestTypeCode[];
 }

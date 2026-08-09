@@ -54,6 +54,10 @@ import {
   applyReadIndexMigration,
   READ_INDEX_MIGRATION_VERSION,
 } from './schema-v12';
+import {
+  applyBusinessDateMigration,
+  BUSINESS_DATE_MIGRATION_VERSION,
+} from './schema-v13';
 
 /** 初始迁移：v1 创建覆盖 14 个能力的核心表/事实表。 */
 export const INITIAL_MIGRATION: Migration = {
@@ -139,6 +143,13 @@ export const READ_INDEX_MIGRATION: Migration = {
   up: (db) => applyReadIndexMigration(db),
 };
 
+/** v13 迁移：业务日期化（design D30，业务时间统一 yyyy-mm-dd；审计技术字段不变）。 */
+export const BUSINESS_DATE_MIGRATION: Migration = {
+  version: BUSINESS_DATE_MIGRATION_VERSION,
+  name: 'business-date-normalization',
+  up: (db) => applyBusinessDateMigration(db),
+};
+
 /** 当前迁移序列（后续 schema 升级追加新 Migration，不修改已发布迁移）。 */
 export const MIGRATIONS: readonly Migration[] = [
   INITIAL_MIGRATION,
@@ -153,6 +164,7 @@ export const MIGRATIONS: readonly Migration[] = [
   BUSINESS_REVISION_MIGRATION,
   IMPORT_RUN_AUDIT_MIGRATION,
   READ_INDEX_MIGRATION,
+  BUSINESS_DATE_MIGRATION,
 ];
 
 export interface BootstrapOptions {

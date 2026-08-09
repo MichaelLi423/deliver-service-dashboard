@@ -124,11 +124,11 @@ describe('relocation-execution SQLite 集成（3.11）', () => {
         originalPriceCents: 100000n,
         discountedPriceCents: 90000n,
       }, ACTOR);
-      const activity = ctx.service.createActivity(projectId, '2026-08-09T09:00:00+08:00', ['工程师甲', '工程师乙'], ACTOR);
+      const activity = ctx.service.createActivity(projectId, '2026-08-09', ['工程师甲', '工程师乙'], ACTOR);
       ctx.service.startWorkFact(activity.id, instrument.id, 'teardown', ACTOR);
       ctx.service.completeWorkFact(activity.id, instrument.id, 'teardown', ACTOR);
       const { fee } = ctx.service.recordLogisticsFee(batch.id, {
-        appliedAt: '2026-08-06T00:00:00+08:00',
+        appliedAt: '2026-08-06',
         budgetPriceCents: 10000n,
         dealPriceCents: 12000n,
         logisticsCostCents: 11000n,
@@ -141,7 +141,7 @@ describe('relocation-execution SQLite 集成（3.11）', () => {
       expect(reopened.instruments.findById(instrument.id)?.serialNo).toBe('SN-900');
       expect(reopened.batches.findById(batch.id)?.transportCompany).toBe('顺丰');
       expect(reopened.batches.findById(batch.id)?.originalPriceCents).toBe(100000n);
-      expect(reopened.activities.findById(activity.id)?.visitAt).toBe('2026-08-09T09:00:00+08:00');
+      expect(reopened.activities.findById(activity.id)?.visitAt).toBe('2026-08-09');
       expect(reopened.engineers.listByActivity(activity.id)).toEqual(['工程师甲', '工程师乙']);
       expect(reopened.workFacts.listByActivity(activity.id)[0].status).toBe('done');
       expect(reopened.workFacts.listByInstrument(instrument.id)).toHaveLength(1);
@@ -196,7 +196,7 @@ describe('relocation-execution SQLite 集成（3.11）', () => {
       const activity = ctx.service.createActivity(projectId, null, ['工程师甲'], ACTOR);
       ctx.service.startWorkFact(activity.id, instrument.id, 'teardown', ACTOR);
       ctx.service.recordLogisticsFee(batch.id, {
-        appliedAt: '2026-08-06T00:00:00+08:00',
+        appliedAt: '2026-08-06',
         budgetPriceCents: 10000n,
         dealPriceCents: 12000n,
         logisticsCostCents: 11000n,
@@ -254,7 +254,7 @@ describe('relocation-execution SQLite 集成（3.11）', () => {
       // 每批次仅一笔物流费用：唯一索引兜底
       const batch = ctx.service.createBatch(projectId, ACTOR);
       ctx.service.recordLogisticsFee(batch.id, {
-        appliedAt: '2026-08-06T00:00:00+08:00',
+        appliedAt: '2026-08-06',
         budgetPriceCents: 10000n,
         dealPriceCents: 12000n,
         logisticsCostCents: 11000n,

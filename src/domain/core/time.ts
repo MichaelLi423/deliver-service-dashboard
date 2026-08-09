@@ -3,8 +3,8 @@ import { ValidationError } from './errors';
 /**
  * 时间表示（tasks 0.2 决策：带偏移 ISO 时间 / 业务日期）。
  *
- * - 业务时间：业务事件实际发生时间（用户录入/源数据/推导），带时区偏移的 ISO 字符串。
- * - 审计时间：系统记录该事实的时间，与业务时间分开保存（tasks 1.5）。
+ * - 业务时间：业务事件实际发生时间（用户录入/源数据/推导），为 yyyy-mm-dd 业务日期。
+ * - 审计时间：系统记录该事实的时间，与业务时间分开保存（tasks 1.5），仍为带偏移 ISO。
  * - 业务日期：由业务时间在本地口径下推导出的 yyyy-mm-dd，用于按月归属统计。
  * - Clock 可注入，便于测试固定时间（备份轮转、恢复等按日期/时间的行为）。
  */
@@ -95,12 +95,29 @@ export function assertValidIso(iso: string | null | undefined, fieldName: string
   }
 }
 
-/** 校验日期字段（合同起止日期等，yyyy-mm-dd）。 */
-export function assertValidDateOnly(value: string | null | undefined, fieldName: string): void {
+/** 校验字符串是否为真实日历日期（yyyy-mm-dd，含闰年/大小月校验）。 */
+export function isValidBusinessDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12) return false;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return day >= 1 && day <= daysInMonth;
+}
+
+/** 校验业务日期（yyyy-mm-dd 且必须是真实日历日期）。 */
+export function assertValidBusinessDate(value: string | null | undefined, fieldName: string): void {
   if (value === null || value === undefined || value === '') {
     throw new ValidationError('REQUIRED_FIELD', `${fieldName} 必填`);
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new ValidationError('INVALID_DATE', `${fieldName} 格式非法: ${value}`);
+  if (!isValidBusinessDate(value)) {
+    throw new ValidationError('INVALID_DATE', `${fieldName} 格式非法或不是真实日历日期: ${value}`);
   }
+}
+
+/** 校验日期字段（合同起止日期等，yyyy-mm-dd；同 assertValidBusinessDate）。 */
+export function assertValidDateOnly(value: string | null | undefined, fieldName: string): void {
+  assertValidBusinessDate(value, fieldName);
 }

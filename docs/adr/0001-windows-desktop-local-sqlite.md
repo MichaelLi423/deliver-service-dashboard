@@ -16,7 +16,7 @@
 4. 手工录入事实与工作量责任人归属当前已登录的本地应用账号，动作记录持久化账号内部 ID 与当时用户名快照；历史统计不因以后用户名修改而动态变化。本规则不因仅有一个账号而省略。
 5. 数据保护采用**本地备份**：每日首次使用时自动备份并仅保留最近 7 份；支持立即手动备份到所选本地目录，以及从所选本地备份恢复（恢复前确认并验证可读，失败不覆盖当前数据）。
 
-本决定确认架构方向与实现细节：Electron 43.3.0、Forge 7.11.2 + webpack-typescript + React、SQLite 访问采用 Node 内置 node:sqlite、schema 迁移采用 PRAGMA user_version、数据目录为 userData/data、备份采用在线 backup + integrity_check + 原子恢复并可做恢复前安全快照、连接启用 WAL/foreign_keys/busy timeout、金额以分整数物理表示、时间采用带偏移 ISO 时间与业务日期（tasks 0.2 决策）。
+本决定确认架构方向与实现细节：Electron 43.3.0、Forge 7.11.2 + webpack-typescript + React、SQLite 访问采用 Node 内置 node:sqlite、schema 迁移采用 PRAGMA user_version、数据目录为 userData/data、备份采用在线 backup + integrity_check + 原子恢复并可做恢复前安全快照、连接启用 WAL/foreign_keys/busy timeout、金额以分整数物理表示、业务时间仅记录业务日期（yyyy-mm-dd）而审计/技术时间保留精确 ISO（tasks 0.2 决策，时间口径见 openspec design D30）。
 
 ## 原因
 

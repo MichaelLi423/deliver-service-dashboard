@@ -203,14 +203,14 @@ describe('认证、单寄备件与 PM 开单最小字段（3.8 / TBD-22）', () 
       {
         orderType: 'parts_by_mail',
         serviceOrderNo: 'ORD-301',
-        orderedAt: '2026-07-01T09:00:00+08:00',
+        orderedAt: '2026-07-01',
         engineer: '工程师甲',
         customerName: '华东医药',
       },
       ACTOR,
     );
     expect(orders.findById(order.id)?.id).toBe(order.id);
-    expect(order.orderedAt).toBe('2026-07-01T09:00:00+08:00');
+    expect(order.orderedAt).toBe('2026-07-01');
     expect(order.projectId).toBeNull();
   });
 
@@ -220,7 +220,7 @@ describe('认证、单寄备件与 PM 开单最小字段（3.8 / TBD-22）', () 
       { orderType: 'pm', serviceOrderNo: 'ORD-302', engineer: '工程师', customerName: '客户' },
       ACTOR,
     );
-    expect(order.orderedAt).toBe('2026-08-07T10:00:00+08:00');
+    expect(order.orderedAt).toBe('2026-08-07');
     expect(order.orderedAt.slice(0, 7)).toBe('2026-08');
   });
 
@@ -318,7 +318,7 @@ describe('项目向导选填单号自动创建开单记录（3.10）', () => {
       { project, engineers: ['工程师甲'], serviceOrderNo: 'ORD-502', customerName: '华东医药' },
       ACTOR,
     );
-    expect(result.order!.orderedAt).toBe('2026-08-07T10:00:00+08:00');
+    expect(result.order!.orderedAt).toBe('2026-08-07');
     expect(result.order!.note).toBeNull();
   });
 

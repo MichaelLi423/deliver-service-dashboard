@@ -1,7 +1,12 @@
 import { ValidationError } from '../../core/errors';
 import { assertRequiredText, newInternalId } from '../../core/ids';
 import type { ActorSnapshot } from '../../core/source';
-import { assertValidIso, SystemClock, type Clock } from '../../core/time';
+import {
+  assertValidBusinessDate,
+  SystemClock,
+  type BusinessDate,
+  type Clock,
+} from '../../core/time';
 import type { Contract, ContractRepository, Project, ProjectRepository } from '../relocation-project-lifecycle';
 import {
   countActiveInvoices,
@@ -133,8 +138,8 @@ export class FinancialClosureService {
         `新增掉票后累计掉票金额 ${newSum} 分将超过最终可确认金额 ${final} 分；请先调整最终可确认金额再登记掉票`,
       );
     }
-    const invoicedAt = input.invoicedAt ?? this.now();
-    assertValidIso(invoicedAt, '掉票时间');
+    const invoicedAt = input.invoicedAt ?? this.today();
+    assertValidBusinessDate(invoicedAt, '掉票时间');
     const now = this.now();
     const invoice: InvoiceRecord = {
       id: newInternalId(),
@@ -182,7 +187,7 @@ export class FinancialClosureService {
       );
     }
     const invoicedAt = input.invoicedAt ?? invoice.invoicedAt;
-    assertValidIso(invoicedAt, '掉票时间');
+    assertValidBusinessDate(invoicedAt, '掉票时间');
     invoice.amountCents = input.amountCents;
     invoice.invoicedAt = invoicedAt;
     invoice.lastModifiedAt = this.now();
@@ -206,7 +211,7 @@ export class FinancialClosureService {
         '已撤销掉票为终态，禁止重复撤销；更正需新增有效掉票',
       );
     }
-    assertValidIso(input.revokedAt, '撤销时间');
+    assertValidBusinessDate(input.revokedAt, '撤销时间');
     const reason = assertRequiredText(input.revokeReason, '撤销原因');
     invoice.revokedAt = input.revokedAt;
     invoice.revokeReason = reason;
@@ -284,5 +289,10 @@ export class FinancialClosureService {
 
   private now(): string {
     return this.clock.nowIso();
+  }
+
+  /** 当前业务日期（yyyy-mm-dd）：业务时间字段默认值。 */
+  private today(): BusinessDate {
+    return this.clock.today();
   }
 }

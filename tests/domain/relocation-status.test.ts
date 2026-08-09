@@ -53,7 +53,7 @@ describe('主状态与标签（2.2）', () => {
     const { projects, service } = setup();
     const projectId = prepareEnterableProject(service);
     service.cancelProject(projectId, {
-      time: '2026-08-07T11:00:00+08:00',
+      time: '2026-08-07',
       reason: '客户取消搬迁计划',
     });
     expect(projects.findById(projectId)!.status).toBe('cancelled');
@@ -126,7 +126,7 @@ describe('主状态人工调整与系统校验（2.2 / TBD-09）', () => {
     service.setPreEntryExecution(projectId, { reason: 'r', missingItems: 'm' });
 
     // 带标签期间录入实际装机完成时间：主状态保持待进单
-    service.recordActualInstallDone(projectId, '2026-07-20T18:00:00+08:00');
+    service.recordActualInstallDone(projectId, '2026-07-20');
     expect(projects.findById(projectId)!.status).toBe('pending_entry');
 
     // 正式进单后按明确自动触发 → 待验收
@@ -140,12 +140,12 @@ describe('执行准备与待验收触发（2.3）', () => {
     const { projects, service } = setup();
     const projectId = service.createPendingProject().id;
     service.updateExecutionPreparation(projectId, {
-      planVisitAt: '2026-08-10T09:00:00+08:00',
-      planTransportAt: '2026-08-11T08:00:00+08:00',
+      planVisitAt: '2026-08-10',
+      planTransportAt: '2026-08-11',
     });
     const project = projects.findById(projectId)!;
-    expect(project.planVisitAt).toBe('2026-08-10T09:00:00+08:00');
-    expect(project.planTransportAt).toBe('2026-08-11T08:00:00+08:00');
+    expect(project.planVisitAt).toBe('2026-08-10');
+    expect(project.planTransportAt).toBe('2026-08-11');
   });
 
   it('场地确认不影响状态流转', () => {
@@ -162,8 +162,8 @@ describe('执行准备与待验收触发（2.3）', () => {
     const projectId = service.createPendingProject().id;
     service.adjustStatus(projectId, 'executing');
     service.updateExecutionPreparation(projectId, {
-      planVisitAt: '2026-08-01T09:00:00+08:00', // 已到期
-      planTransportAt: '2026-08-02T08:00:00+08:00',
+      planVisitAt: '2026-08-01', // 已到期
+      planTransportAt: '2026-08-02',
       siteConfirmed: true,
     });
     expect(projects.findById(projectId)!.status).toBe('executing');
@@ -173,9 +173,9 @@ describe('执行准备与待验收触发（2.3）', () => {
     const { projects, service } = setup();
     const projectId = service.createPendingProject().id;
     service.adjustStatus(projectId, 'executing');
-    service.recordActualInstallDone(projectId, '2026-08-05T18:00:00+08:00');
+    service.recordActualInstallDone(projectId, '2026-08-05');
     const project = projects.findById(projectId)!;
-    expect(project.actualInstallDoneAt).toBe('2026-08-05T18:00:00+08:00');
+    expect(project.actualInstallDoneAt).toBe('2026-08-05');
     expect(project.status).toBe('pending_acceptance');
   });
 });
@@ -186,7 +186,7 @@ describe('项目验收（2.4 / TBD-07）', () => {
     const projectId = prepareEnterableProject(service);
     service.formalEntry(projectId, { ecc: 'ECC-001' });
     service.adjustStatus(projectId, 'executing');
-    service.recordActualInstallDone(projectId, '2026-08-05T18:00:00+08:00');
+    service.recordActualInstallDone(projectId, '2026-08-05');
     return projectId;
   }
 
@@ -227,7 +227,7 @@ describe('项目验收（2.4 / TBD-07）', () => {
     const { projects, service } = setup();
     const projectId = prepareEnterableProject(service);
     service.adjustStatus(projectId, 'executing');
-    service.cancelProject(projectId, { time: '2026-08-07T11:30:00+08:00', reason: '客户取消搬迁计划' });
+    service.cancelProject(projectId, { time: '2026-08-07', reason: '客户取消搬迁计划' });
     expect(projects.findById(projectId)!.status).toBe('cancelled');
     expect(() => service.markAcceptance(projectId, '2026-08-06')).toThrow(/已取消/);
     const project = projects.findById(projectId)!;

@@ -1,7 +1,7 @@
 import { UniquenessError, ValidationError } from '../../core/errors';
 import { assertRequiredText, newInternalId } from '../../core/ids';
 import type { ActorSnapshot } from '../../core/source';
-import { monthOfIso, SystemClock, type Clock } from '../../core/time';
+import { SystemClock, toMonthKey, type BusinessDate, type Clock } from '../../core/time';
 import type {
   ShipTo,
   ShipToRequest,
@@ -115,7 +115,7 @@ export class ShipToService {
       );
     }
     request.status = 'processing';
-    request.submittedAt = request.submittedAt ?? this.now(); // 首次提交时间，之后不再改写
+    request.submittedAt = request.submittedAt ?? this.today(); // 首次提交日期，之后不再改写
     this.touch(request, actor);
     this.requests.save(request);
     return request;
@@ -139,7 +139,7 @@ export class ShipToService {
     this.assertAccountIdUnique(acc, request.id);
     request.accountId = acc;
     request.status = 'completed';
-    request.completedAt = this.now();
+    request.completedAt = this.today();
     this.touch(request, actor);
     this.requests.save(request);
     // 补入的 Account ID 创建/对应不可变 Ship-to
@@ -155,12 +155,12 @@ export class ShipToService {
     return this.shipTos.listAll();
   }
 
-  /** 首次实际提交工作量：按提交时间所属月份归属，待提交草稿不计。 */
+  /** 首次实际提交工作量：按提交日期所属月份归属，待提交草稿不计。 */
   countWorkloadByMonth(): ShipToRequestWorkloadRow[] {
     const counts = new Map<string, number>();
     for (const request of this.requests.listAll()) {
       if (request.submittedAt === null) continue; // 从未实际提交的草稿不计
-      const month = monthOfIso(request.submittedAt);
+      const month = toMonthKey(request.submittedAt);
       counts.set(month, (counts.get(month) ?? 0) + 1);
     }
     return [...counts.entries()].map(([month, count]) => ({ month, count }));
@@ -209,5 +209,10 @@ export class ShipToService {
 
   private now(): string {
     return this.clock.nowIso();
+  }
+
+  /** 当前业务日期（yyyy-mm-dd）：业务时间字段默认值。 */
+  private today(): BusinessDate {
+    return this.clock.today();
   }
 }

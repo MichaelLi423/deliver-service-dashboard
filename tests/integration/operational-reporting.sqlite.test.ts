@@ -222,30 +222,30 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const pEast = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
-      const pSouth = seedEnteredProject(ctx, { region: '华南', entryAt: '2026-07-02T09:00:00+08:00', snapshot: '20000' });
+      const pEast = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const pSouth = seedEnteredProject(ctx, { region: '华南', entryAt: '2026-07-02', snapshot: '20000' });
 
-      ctx.financial.recordInvoice(pEast, { amountCents: 300000n, invoicedAt: '2026-07-15T10:00:00+08:00' }, ACTOR);
-      ctx.financial.recordInvoice(pSouth, { amountCents: 500000n, invoicedAt: '2026-06-20T10:00:00+08:00' }, ACTOR);
+      ctx.financial.recordInvoice(pEast, { amountCents: 300000n, invoicedAt: '2026-07-15' }, ACTOR);
+      ctx.financial.recordInvoice(pSouth, { amountCents: 500000n, invoicedAt: '2026-06-20' }, ACTOR);
 
       ctx.orderService.recordOrder(
-        { orderType: 'relocation', serviceOrderNo: 'ORD-001', orderedAt: '2026-07-10T10:00:00+08:00', engineer: '工程师甲', customerName: '华东医药', projectId: pEast },
+        { orderType: 'relocation', serviceOrderNo: 'ORD-001', orderedAt: '2026-07-10', engineer: '工程师甲', customerName: '华东医药', projectId: pEast },
         ACTOR,
       );
       ctx.orderService.recordOrder(
-        { orderType: 'pm', serviceOrderNo: 'ORD-002', orderedAt: '2026-07-11T10:00:00+08:00', engineer: '工程师乙', customerName: '华南医药' },
+        { orderType: 'pm', serviceOrderNo: 'ORD-002', orderedAt: '2026-07-11', engineer: '工程师乙', customerName: '华南医药' },
         ACTOR,
       );
 
       const instrumentId = seedInstrument(ctx, pEast, 'SN-100');
       ctx.damageService.registerItem(
         instrumentId,
-        { partNumber: 'PART-1', partQuantity: 1, partAmountCents: 72000n, partCurrency: 'RMB', partStatus: 'used', registeredAt: '2026-07-12T10:00:00+08:00' },
+        { partNumber: 'PART-1', partQuantity: 1, partAmountCents: 72000n, partCurrency: 'RMB', partStatus: 'used', registeredAt: '2026-07-12' },
         ACTOR,
       );
       ctx.damageService.registerItem(
         instrumentId,
-        { partNumber: 'PART-2', partQuantity: 1, partAmountCents: 30000n, partCurrency: 'USD', partStatus: 'arrived', registeredAt: '2026-07-13T10:00:00+08:00' },
+        { partNumber: 'PART-2', partQuantity: 1, partAmountCents: 30000n, partCurrency: 'USD', partStatus: 'arrived', registeredAt: '2026-07-13' },
         ACTOR,
       );
 
@@ -253,7 +253,7 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
       ctx.execution.updateBatchQuote(batchA.id, { transportCompany: '物流公司甲', planTransportDate: '2026-07-20', originalPriceCents: 100000n, discountedPriceCents: 95000n }, ACTOR);
       ctx.execution.recordLogisticsFee(
         batchA.id,
-        { appliedAt: '2026-07-18T10:00:00+08:00', budgetPriceCents: 10000n, dealPriceCents: 12000n, logisticsCostCents: 11000n },
+        { appliedAt: '2026-07-18', budgetPriceCents: 10000n, dealPriceCents: 12000n, logisticsCostCents: 11000n },
         ACTOR,
       );
 
@@ -264,8 +264,8 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
         .prepare('UPDATE ship_to_requests SET submitted_at = ? WHERE id = ?')
         .run('2026-07-05T10:00:00+08:00', shipToReq.id);
 
-      ctx.qrService.createRequest({ applicant: '负责人甲', requestedAt: '2026-07-08T10:00:00+08:00', types: ['A', 'A', 'B'] }, ACTOR);
-      ctx.serialService.register(instrumentId, { customerName: '华东医药', newSiteAddress: '新址A', serialNo: 'SN-100', accountId: 'ACC-001', updatedAt: '2026-07-09T10:00:00+08:00' }, ACTOR);
+      ctx.qrService.createRequest({ applicant: '负责人甲', requestedAt: '2026-07-08', types: ['A', 'A', 'B'] }, ACTOR);
+      ctx.serialService.register(instrumentId, { customerName: '华东医药', newSiteAddress: '新址A', serialNo: 'SN-100', accountId: 'ACC-001', updatedAt: '2026-07-09' }, ACTOR);
 
       const report = ctx.reporting.buildReport({ monthFrom: '2026-06', monthTo: '2026-07' });
 
@@ -310,19 +310,19 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
-      const invoice = ctx.financial.recordInvoice(p1, { amountCents: 500000n, invoicedAt: '2026-07-15T10:00:00+08:00' }, ACTOR);
+      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const invoice = ctx.financial.recordInvoice(p1, { amountCents: 500000n, invoicedAt: '2026-07-15' }, ACTOR);
 
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
       expect(ctx.reporting.buildReport(month).monthlyInvoices[0].amountCents).toBe(500000n);
 
       // 掉票直接覆盖编辑 → 实时更新
-      ctx.financial.editInvoice(invoice.id, { amountCents: 600000n, invoicedAt: '2026-07-16T10:00:00+08:00' }, ACTOR);
+      ctx.financial.editInvoice(invoice.id, { amountCents: 600000n, invoicedAt: '2026-07-16' }, ACTOR);
       const afterEdit = ctx.reporting.buildReport(month);
       expect(afterEdit.monthlyInvoices[0].amountCents).toBe(600000n);
 
       // 撤销 → 实时排除（终态，禁止再次编辑/撤销由 financial 层校验）
-      ctx.financial.revokeInvoice(invoice.id, { revokedAt: '2026-07-20T10:00:00+08:00', revokeReason: '重复登记' }, ACTOR);
+      ctx.financial.revokeInvoice(invoice.id, { revokedAt: '2026-07-20', revokeReason: '重复登记' }, ACTOR);
       expect(ctx.reporting.buildReport(month).monthlyInvoices).toHaveLength(0);
 
       // 关闭重开后报表仍一致（实时读取落库事实）
@@ -339,11 +339,11 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
+      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
       const instrumentId = seedInstrument(ctx, p1, 'SN-200');
       const item = ctx.damageService.registerItem(
         instrumentId,
-        { partNumber: 'P-1', partQuantity: 1, partAmountCents: 10000n, partCurrency: 'USD', partStatus: 'used', registeredAt: '2026-07-12T10:00:00+08:00' },
+        { partNumber: 'P-1', partQuantity: 1, partAmountCents: 10000n, partCurrency: 'USD', partStatus: 'used', registeredAt: '2026-07-12' },
         ACTOR,
       );
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
@@ -372,25 +372,25 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
-      seedEnteredProject(ctx, { region: '华南', entryAt: '2026-07-02T09:00:00+08:00', snapshot: '20000' });
+      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      seedEnteredProject(ctx, { region: '华南', entryAt: '2026-07-02', snapshot: '20000' });
 
       const instrumentId = seedInstrument(ctx, p1, 'SN-300');
       ctx.damageService.registerItem(
         instrumentId,
-        { partNumber: 'P-1', partQuantity: 1, partAmountCents: 10000n, partCurrency: 'USD', partStatus: 'used', registeredAt: '2026-07-12T10:00:00+08:00' },
+        { partNumber: 'P-1', partQuantity: 1, partAmountCents: 10000n, partCurrency: 'USD', partStatus: 'used', registeredAt: '2026-07-12' },
         ACTOR,
       );
       const batch = ctx.execution.createBatch(p1, ACTOR);
       ctx.execution.updateBatchQuote(batch.id, { transportCompany: '物流公司甲' }, ACTOR);
       ctx.execution.recordLogisticsFee(
         batch.id,
-        { appliedAt: '2026-07-18T10:00:00+08:00', budgetPriceCents: 10000n, dealPriceCents: 9500n, logisticsCostCents: 9000n },
+        { appliedAt: '2026-07-18', budgetPriceCents: 10000n, dealPriceCents: 9500n, logisticsCostCents: 9000n },
         ACTOR,
       );
 
       // 取消 p1（无任何掉票历史，可取消）
-      ctx.projectService.cancelProject(p1, { time: '2026-07-25T10:00:00+08:00', reason: '客户取消' });
+      ctx.projectService.cancelProject(p1, { time: '2026-07-25', reason: '客户取消' });
 
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
       const report = ctx.reporting.buildReport(month);
@@ -413,8 +413,8 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
-      ctx.financial.recordInvoice(p1, { amountCents: 500000n, invoicedAt: '2026-07-15T10:00:00+08:00' }, ACTOR);
+      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      ctx.financial.recordInvoice(p1, { amountCents: 500000n, invoicedAt: '2026-07-15' }, ACTOR);
       const month = { monthFrom: '2026-07', monthTo: '2026-07', region: '华东' };
       const report = ctx.reporting.buildReport(month);
 
@@ -489,18 +489,18 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
         .run('account-2', '负责人乙', 'hash', 'salt', 't', 't');
       const ACTOR_B = makeAccount('account-2', '负责人乙');
 
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01T09:00:00+08:00', snapshot: '10000' });
+      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
       const instrumentId = seedInstrument(ctx, p1, 'SN-400');
 
       // 损坏：两位责任人各一条已使用备件
       ctx.damageService.registerItem(
         instrumentId,
-        { partNumber: 'P-1', partQuantity: 1, partAmountCents: 10000n, partCurrency: 'USD', partStatus: 'used', registeredAt: '2026-07-12T10:00:00+08:00' },
+        { partNumber: 'P-1', partQuantity: 1, partAmountCents: 10000n, partCurrency: 'USD', partStatus: 'used', registeredAt: '2026-07-12' },
         ACTOR,
       );
       ctx.damageService.registerItem(
         instrumentId,
-        { partNumber: 'P-2', partQuantity: 1, partAmountCents: 20000n, partCurrency: 'USD', partStatus: 'used', registeredAt: '2026-07-13T10:00:00+08:00' },
+        { partNumber: 'P-2', partQuantity: 1, partAmountCents: 20000n, partCurrency: 'USD', partStatus: 'used', registeredAt: '2026-07-13' },
         ACTOR_B,
       );
 
@@ -513,12 +513,12 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
       ctx.db.prepare('UPDATE ship_to_requests SET submitted_at = ? WHERE id = ?').run('2026-07-06T10:00:00+08:00', sB.id);
 
       // 二维码：两位责任人各一条
-      ctx.qrService.createRequest({ applicant: '负责人甲', requestedAt: '2026-07-08T10:00:00+08:00', types: ['A', 'A', 'B'] }, ACTOR);
-      ctx.qrService.createRequest({ applicant: '负责人乙', requestedAt: '2026-07-09T10:00:00+08:00', types: ['A'] }, ACTOR_B);
+      ctx.qrService.createRequest({ applicant: '负责人甲', requestedAt: '2026-07-08', types: ['A', 'A', 'B'] }, ACTOR);
+      ctx.qrService.createRequest({ applicant: '负责人乙', requestedAt: '2026-07-09', types: ['A'] }, ACTOR_B);
 
       // 序列号地址更新：两位责任人各一条
-      ctx.serialService.register(instrumentId, { customerName: '华东医药', newSiteAddress: '新址A', serialNo: 'SN-400', accountId: 'ACC-001', updatedAt: '2026-07-09T10:00:00+08:00' }, ACTOR);
-      ctx.serialService.register(instrumentId, { customerName: '华东医药', newSiteAddress: '新址B', serialNo: 'SN-400', accountId: 'ACC-002', updatedAt: '2026-07-10T10:00:00+08:00' }, ACTOR_B);
+      ctx.serialService.register(instrumentId, { customerName: '华东医药', newSiteAddress: '新址A', serialNo: 'SN-400', accountId: 'ACC-001', updatedAt: '2026-07-09' }, ACTOR);
+      ctx.serialService.register(instrumentId, { customerName: '华东医药', newSiteAddress: '新址B', serialNo: 'SN-400', accountId: 'ACC-002', updatedAt: '2026-07-10' }, ACTOR_B);
 
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
       const report = ctx.reporting.buildReport(month);

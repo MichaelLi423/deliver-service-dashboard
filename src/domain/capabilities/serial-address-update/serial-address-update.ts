@@ -7,7 +7,10 @@
  * 项目级新址仅作默认计划，仪器实际关联新址以最近一条更新事实为准；
  * 未登记更新事实的仪器不视为已关联新址。
  * 手工登记绑定当前登录账号归属快照。规则实现见 tasks 4.3。
+ * 业务时间字段（更新时间）为 yyyy-mm-dd；createdAt 仍为带偏移 ISO。
  */
+import type { BusinessDate } from '../../core/time';
+
 export interface SerialAddressUpdate {
   id: string;
   instrumentId: string;
@@ -16,8 +19,8 @@ export interface SerialAddressUpdate {
   serialNo: string;
   /** Account ID（对应不可变 Ship-to，本模块不创建/修改/删除 Ship-to）。 */
   accountId: string;
-  /** 更新时间（业务时间，必填；默认当前时间，可补录历史）。 */
-  updatedAt: string;
+  /** 更新日期（业务日期，必填；默认当天，可补录历史）。 */
+  updatedAt: BusinessDate;
   /** 操作账号归属快照。 */
   operatorAccountId: string | null;
   operatorUsername: string | null;
@@ -32,8 +35,8 @@ export interface SerialAddressUpdateInput {
   serialNo: string;
   /** Account ID（非空）。 */
   accountId: string;
-  /** 更新时间（必填，缺省默认当前时间，可补录历史）。 */
-  updatedAt?: string;
+  /** 更新日期（必填，缺省默认当天，可补录历史）。 */
+  updatedAt?: BusinessDate;
 }
 
 /** 更新事实筛选（4.3）：按客户/新址地址/序列号/Account ID/更新时间。 */

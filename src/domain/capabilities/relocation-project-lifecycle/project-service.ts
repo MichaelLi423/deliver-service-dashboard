@@ -1,6 +1,12 @@
 import { UniquenessError, ValidationError } from '../../core/errors';
 import { assertRequiredText, normalizeBusinessId, normalizeRegion } from '../../core/ids';
-import { assertValidDateOnly, assertValidIso, SystemClock, type Clock } from '../../core/time';
+import {
+  assertValidBusinessDate,
+  assertValidDateOnly,
+  SystemClock,
+  type BusinessDate,
+  type Clock,
+} from '../../core/time';
 import { createPendingProject, isFormallyEntered, type Project } from './project';
 import { createContract, type Contract } from './contract';
 import { resolveStatus, type TransitionContext, type TransitionResult } from './lifecycle';
@@ -52,8 +58,8 @@ export interface InvoiceReadRepository {
 export interface FormalEntryInput {
   /** 唯一 ECC（正式进单必填，全局唯一）。 */
   ecc: string;
-  /** 进单时间（业务时间）；缺省取当前时间，允许补录修正。 */
-  entryAt?: string;
+  /** 进单日期（业务日期）；缺省取当前日期，允许补录修正。 */
+  entryAt?: BusinessDate;
   /** 最终可确认金额（分）；缺省取合同 USD 含税金额；合同金额为空/0 时必填且 > 0。 */
   finalConfirmableAmountCents?: bigint | null;
 }
@@ -70,10 +76,10 @@ export interface BasicInfoInput {
   contractEndDate: string;
 }
 
-/** 执行准备（2.3）：计划上门/运输时间与场地确认（均不触发状态流转）。 */
+/** 执行准备（2.3）：计划上门/运输日期与场地确认（均不触发状态流转）。 */
 export interface ExecutionPreparationInput {
-  planVisitAt?: string | null;
-  planTransportAt?: string | null;
+  planVisitAt?: BusinessDate | null;
+  planTransportAt?: BusinessDate | null;
   siteConfirmed?: boolean;
 }
 
@@ -83,9 +89,9 @@ export interface PreEntryExecutionInput {
   missingItems: string;
 }
 
-/** 取消（2.5）：取消时间与原因。 */
+/** 取消（2.5）：取消日期与原因。 */
 export interface CancelInput {
-  time: string;
+  time: BusinessDate;
   reason: string;
 }
 
@@ -173,9 +179,9 @@ export class ProjectService {
     }
     this.assertEccUnique(ecc, contract.id);
 
-    // 进单时间：正式进单时必填，缺省取当前时间，允许补录或修正（保持填写值）。
-    const entryAt = input.entryAt ?? this.now();
-    assertValidIso(entryAt, '进单时间');
+    // 进单时间：正式进单时必填，缺省取当前日期，允许补录或修正（保持填写值）。
+    const entryAt = input.entryAt ?? this.today();
+    assertValidBusinessDate(entryAt, '进单时间');
 
     // 最终可确认金额：合同金额 > 0 时默认取合同金额；合同金额为空/0 时必须另行录入 > 0
     // （TBD-11：合同金额为 0 时最终可确认金额不能默认成 0）。
@@ -237,10 +243,10 @@ export class ProjectService {
     return contract;
   }
 
-  /** 进单时间补录或修正（保持填写值，不以当前时间覆盖）。 */
-  setEntryAt(projectId: string, entryAt: string): Project {
+  /** 进单日期补录或修正（保持填写值，不以当前日期覆盖）。 */
+  setEntryAt(projectId: string, entryAt: BusinessDate): Project {
     const project = this.requireProject(projectId);
-    assertValidIso(entryAt, '进单时间');
+    assertValidBusinessDate(entryAt, '进单时间');
     project.entryAt = entryAt;
     project.updatedAt = this.now();
     this.projects.save(project);
@@ -303,7 +309,7 @@ export class ProjectService {
     return result;
   }
 
-  /** 未进单先执行（2.2/TBD-08）：记录经理批复、原因与缺失项，主状态保持待进单。 */
+  /** 未进单先执行（2.2/TBD-08）：经理批复原因必填；记录批复、原因与缺失项，主状态保持待进单。 */
   setPreEntryExecution(projectId: string, input: PreEntryExecutionInput): Project {
     const project = this.requireProject(projectId);
     if (isFormallyEntered(project)) {
@@ -312,8 +318,13 @@ export class ProjectService {
     if (project.status !== 'pending_entry') {
       throw new ValidationError('LABEL_ONLY_PENDING', '未进单先执行标签仅可标记在待进单项目上');
     }
+    // 经理批复原因必填（与向导既有校验同口径：未进单先执行必须记录经理批复原因）。
+    const reason = input.reason.trim();
+    if (reason === '') {
+      throw new ValidationError('PRE_ENTRY_REASON_REQUIRED', '未进单先执行必须填写经理批复原因');
+    }
     project.preEntryExecution = true;
-    project.managerApprovalReason = input.reason.trim() === '' ? null : input.reason.trim();
+    project.managerApprovalReason = reason;
     project.managerApprovalMissing = input.missingItems.trim() === '' ? null : input.missingItems.trim();
     project.updatedAt = this.now();
     this.projects.save(project);
@@ -323,17 +334,17 @@ export class ProjectService {
   // ---- 2.3 执行准备与待验收触发 ----
 
   /**
-   * 更新执行准备：计划上门时间、计划运输时间、场地确认。
-   * 计划时间与场地确认不触发主状态流转（TBD-07）。
+   * 更新执行准备：计划上门日期、计划运输日期、场地确认。
+   * 计划日期与场地确认不触发主状态流转（TBD-07）。
    */
   updateExecutionPreparation(projectId: string, input: ExecutionPreparationInput): Project {
     const project = this.requireProject(projectId);
     if (input.planVisitAt !== undefined) {
-      if (input.planVisitAt !== null) assertValidIso(input.planVisitAt, '计划上门时间');
+      if (input.planVisitAt !== null) assertValidBusinessDate(input.planVisitAt, '计划上门日期');
       project.planVisitAt = input.planVisitAt;
     }
     if (input.planTransportAt !== undefined) {
-      if (input.planTransportAt !== null) assertValidIso(input.planTransportAt, '计划运输时间');
+      if (input.planTransportAt !== null) assertValidBusinessDate(input.planTransportAt, '计划运输日期');
       project.planTransportAt = input.planTransportAt;
     }
     if (input.siteConfirmed !== undefined) {
@@ -344,10 +355,10 @@ export class ProjectService {
     return project;
   }
 
-  /** 录入实际装机完成时间：lifecycle 自动置为待验收（TBD-07）。 */
-  recordActualInstallDone(projectId: string, at: string): Project {
+  /** 录入实际装机完成日期：lifecycle 自动置为待验收（TBD-07）。 */
+  recordActualInstallDone(projectId: string, at: BusinessDate): Project {
     const project = this.requireProject(projectId);
-    assertValidIso(at, '实际装机完成时间');
+    assertValidBusinessDate(at, '实际装机完成日期');
     project.actualInstallDoneAt = at;
     project.updatedAt = this.now();
     this.projects.save(project);
@@ -374,9 +385,9 @@ export class ProjectService {
 
   // ---- 2.5 取消 ----
 
-  /** 取消：通过 lifecycle 取消约束校验（任何掉票历史含已撤销禁止），记录时间与原因。 */
+  /** 取消：通过 lifecycle 取消约束校验（任何掉票历史含已撤销禁止），记录日期与原因。 */
   cancelProject(projectId: string, input: CancelInput, facts?: StatusAdjustFacts): Project {
-    assertValidIso(input.time, '取消时间');
+    assertValidBusinessDate(input.time, '取消日期');
     const reason = assertRequiredText(input.reason, '取消原因');
     const result = this.adjustStatus(projectId, 'cancelled', facts);
     if (!result.ok) {
@@ -474,5 +485,10 @@ export class ProjectService {
 
   private now(): string {
     return this.clock.nowIso();
+  }
+
+  /** 当前业务日期（yyyy-mm-dd）：业务时间字段默认值。 */
+  private today(): BusinessDate {
+    return this.clock.today();
   }
 }

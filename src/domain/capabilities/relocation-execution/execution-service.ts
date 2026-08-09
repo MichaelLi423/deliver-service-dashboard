@@ -2,9 +2,9 @@ import { UniquenessError, ValidationError } from '../../core/errors';
 import { assertRequiredText, newInternalId } from '../../core/ids';
 import type { ActorSnapshot } from '../../core/source';
 import {
-  assertValidDateOnly,
-  assertValidIso,
+  assertValidBusinessDate,
   SystemClock,
+  type BusinessDate,
   type Clock,
 } from '../../core/time';
 import type {
@@ -95,7 +95,7 @@ export class ExecutionService {
     const batch = this.requireBatch(batchId);
     if (input.planTransportDate !== undefined) {
       if (input.planTransportDate !== null) {
-        assertValidDateOnly(input.planTransportDate, '计划运输日期');
+        assertValidBusinessDate(input.planTransportDate, '计划运输日期');
       }
       batch.planTransportDate = input.planTransportDate;
     }
@@ -136,7 +136,7 @@ export class ExecutionService {
         '空批次不能开始运输：该批次至少需要一台归属仪器',
       );
     }
-    batch.startedAt = this.now();
+    batch.startedAt = this.today();
     batch.accountId = actor.accountId;
     batch.usernameSnapshot = actor.username;
     batch.updatedAt = this.now();
@@ -255,7 +255,7 @@ export class ExecutionService {
       instrumentId,
       fromBatchId,
       toBatchId: newBatchId,
-      changedAt: now,
+      changedAt: this.today(),
       accountId: actor.accountId,
       usernameSnapshot: actor.username,
     });
@@ -273,9 +273,9 @@ export class ExecutionService {
    * 创建上门活动并记录参与工程师（同一活动可多名工程师）。
    * 创建活动本身仅属排期/工程师安排，不触发主状态流转。
    */
-  createActivity(projectId: string, visitAt: string | null, engineerNames: string[], actor: ActorSnapshot) {
+  createActivity(projectId: string, visitAt: BusinessDate | null, engineerNames: string[], actor: ActorSnapshot) {
     if (visitAt !== null) {
-      assertValidIso(visitAt, '到访时间');
+      assertValidBusinessDate(visitAt, '到访时间');
     }
     const engineers = engineerNames.map((name) => assertRequiredText(name, '参与工程师'));
     if (engineers.length === 0) {
@@ -333,7 +333,7 @@ export class ExecutionService {
       instrumentId,
       workType,
       status: 'in_progress',
-      startedAt: now,
+      startedAt: this.today(),
       completedAt: null,
       accountId: actor.accountId,
       usernameSnapshot: actor.username,
@@ -364,7 +364,7 @@ export class ExecutionService {
       throw new ValidationError('WORK_FACT_ALREADY_DONE', '该工作事实已完成');
     }
     fact.status = 'done';
-    fact.completedAt = this.now();
+    fact.completedAt = this.today();
     fact.accountId = actor.accountId;
     fact.usernameSnapshot = actor.username;
     this.workFacts.save(fact);
@@ -405,8 +405,8 @@ export class ExecutionService {
     if (this.fees.findByBatchId(batchId)) {
       throw new ValidationError('FEE_ALREADY_EXISTS', '该批次已登记一笔物流费用，每批次仅允许一笔');
     }
-    const appliedAt = input.appliedAt === undefined ? this.now() : input.appliedAt;
-    assertValidIso(appliedAt, '物流费用申请（登记）时间');
+    const appliedAt = input.appliedAt === undefined ? this.today() : input.appliedAt;
+    assertValidBusinessDate(appliedAt, '物流费用申请（登记）时间');
     assertPositiveAmount(input.budgetPriceCents, '合同预算价');
     assertPositiveAmount(input.dealPriceCents, '物流成交价');
     assertPositiveAmount(input.logisticsCostCents, '实际物流费用（历史兼容，现行业务与物流成交价同值）');
@@ -516,6 +516,10 @@ export class ExecutionService {
     return this.clock.nowIso();
   }
 
+  /** 当前业务日期（yyyy-mm-dd）：业务时间字段默认值。 */
+  private today(): BusinessDate {
+    return this.clock.today();
+  }
 }
 
 function assertPositiveAmount(cents: bigint | null | undefined, fieldName: string): asserts cents is bigint {

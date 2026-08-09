@@ -4,7 +4,7 @@ import {
   type FactMeta,
   type FactMetaInput,
 } from '../../src/domain/core/source';
-import { FixedClock, type Clock, type IsoDateTime } from '../../src/domain/core/time';
+import { FixedClock, type BusinessDate, type Clock, type IsoDateTime } from '../../src/domain/core/time';
 
 /**
  * 事实集合构造工具（tasks 1.4）。
@@ -35,5 +35,5 @@ export function fixedClock(iso: IsoDateTime): Clock {
   return new FixedClock(iso);
 }
 
-export const EXAMPLE_BUSINESS_TIME: IsoDateTime = '2026-07-15T10:30:00+08:00';
+export const EXAMPLE_BUSINESS_TIME: BusinessDate = '2026-07-15';
 export const EXAMPLE_AUDIT_TIME: IsoDateTime = '2026-07-15T11:00:00+08:00';

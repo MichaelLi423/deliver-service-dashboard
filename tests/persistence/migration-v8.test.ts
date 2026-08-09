@@ -11,6 +11,7 @@ import { closeDatabase, openDatabase, readSchemaVersion } from '../../src/domain
 import { MigrationError, runMigrations } from '../../src/domain/capabilities/local-data-persistence/migration';
 import { SqliteShipToRequestRepository } from '../../src/domain/capabilities/local-data-persistence/ship-to-repositories';
 import { UniquenessError } from '../../src/domain/core/errors';
+import { localCalendarDateOf } from '../../src/domain/capabilities/local-data-persistence/business-date';
 import { cleanupTempDir, makeTempDir, makeTempDbPath } from '../helpers/tmp-db';
 
 /**
@@ -54,7 +55,7 @@ function seedV2(db: DatabaseSync): void {
 }
 
 function assertMigratedToV10(db: DatabaseSync): void {
-  expect(readSchemaVersion(db)).toBe(12);
+  expect(readSchemaVersion(db)).toBe(13);
   // project_id 已按 instrument 回填
   const row = db.prepare('SELECT project_id FROM damage_repair_items WHERE id = ?').get('d1') as {
     project_id: string;
@@ -83,7 +84,8 @@ function assertMigratedToV10(db: DatabaseSync): void {
     .get('d1') as Record<string, unknown>;
   expect(item.part_number).toBe('PART-1');
   expect(BigInt(String(item.part_amount_cents))).toBe(10000n);
-  expect(item.registered_at).toBe('2026-08-01T08:00:00+08:00');
+  // v13 业务日期化：registered_at 已统一为 yyyy-mm-dd（冻结本机时区换算）。
+  expect(item.registered_at).toBe(localCalendarDateOf(new Date('2026-08-01T08:00:00+08:00')));
   // activity_damage_links 数据与外键完整保留
   const link = db
     .prepare('SELECT activity_id, damage_item_id FROM activity_damage_links WHERE id = ?')
@@ -109,7 +111,7 @@ describe('schema v8：damage_repair_items.project_id 回填并 NOT NULL（Oracle
       seedV1(db);
 
       const result = runMigrations(db, { migrations: [...MIGRATIONS], backupDir });
-      expect(result.applied.map((m) => m.version)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+      expect(result.applied.map((m) => m.version)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
       assertMigratedToV10(db);
       closeDatabase(db);
     } finally {
@@ -158,7 +160,7 @@ describe('schema v8：damage_repair_items.project_id 回填并 NOT NULL（Oracle
            id, instrument_id, issue_status, part_number, part_quantity,
            part_amount_cents, part_currency, registered_at, created_at, updated_at
          ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      ).run('d2', 'i2', 'untreated', 'PART-2', 2, 20000, 'RMB', 't', 't', 't');
+      ).run('d2', 'i2', 'untreated', 'PART-2', 2, 20000, 'RMB', '2026-08-02', 't', 't');
 
       runMigrations(db, { migrations: [...MIGRATIONS], backupDir });
       const projects = db

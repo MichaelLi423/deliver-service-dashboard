@@ -7,7 +7,11 @@ import { MIGRATION_MAPPING_VERSION } from './mapping';
 import { readDatabaseIdentity } from '../local-data-persistence/identity';
 import { readSchemaVersion } from '../local-data-persistence/connection';
 import { normalizedRowHash, planDigestFromRowHashes } from './digest';
-import type { NormalizedRow } from './normalized-row';
+import {
+  normalizeCellValue,
+  type NormalizedRow,
+} from './normalized-row';
+import { findFieldByTarget } from './field-catalog';
 import type { ImportProblem } from './validation-model';
 
 /**
@@ -22,8 +26,11 @@ import type { ImportProblem } from './validation-model';
  * 否则拒绝生成；验证时逐分量比较，不一致即失效（草稿仍在 sealed 时持久化失效）。
  */
 
-/** 校验规则版本（8.35：任一规则升级使旧 seal 失效）。 */
-export const VALIDATION_VERSION = 1;
+/** 校验规则版本（8.35：任一规则升级使旧 seal 失效）。
+ *  v2：业务日期化（design D30）——业务时间字段统一按 yyyy-mm-dd 校验/规范化，
+ *  旧版本 seal 因 validationVersion 不一致自动失效，旧草稿必须重新完整校验，
+ *  不得以旧语义绕过新日期语义。 */
+export const VALIDATION_VERSION = 2;
 
 /** seal 绑定分量（可审计/可稳定序列化）。 */
 export interface SealBinding {
@@ -76,7 +83,10 @@ export function conflictDecisionDigest(repo: WorkspaceRepository, draftId: strin
     .digest('hex');
 }
 
-/** 由工作区行重建 NormalizedRow（供 planDigest 防御性复核）。 */
+/** 由工作区行重建 NormalizedRow（供 planDigest 防御性复核）。
+ *  业务日期字段（type=date）在读取时统一规范化为 yyyy-mm-dd（design D30）：
+ *  旧草稿/手工补录单元格即使以 datetime 形式入库，重建时也按新语义输出日期，
+ *  保证旧 seal/草稿无法绕过业务日期化语义（配合 VALIDATION_VERSION 升级双保险）。 */
 export function toNormalizedRows(rows: readonly WorkspaceRow[]): NormalizedRow[] {
   return rows.map((r) => {
     let businessKey = r.businessKey;
@@ -85,6 +95,16 @@ export function toNormalizedRows(rows: readonly WorkspaceRow[]): NormalizedRow[]
       // toAppendRowInput 将物理位置兜底身份写入 business_key。
       positionOnlyIdentity = true;
       businessKey = null;
+    }
+    const cells: Record<string, string | null> = {};
+    for (const [field, value] of Object.entries(r.cells)) {
+      const def = findFieldByTarget(r.category, field);
+      // 日期系统默认 1900（与模板一致；日期单元格读取层已转本地墙钟文本，
+      // 此处只对仍为 datetime/纯日期文本的单元格做统一换算）。
+      cells[field] =
+        def !== undefined && def.type === 'date' && value !== null && value !== ''
+          ? normalizeCellValue(def, value, '1900')
+          : value;
     }
     return {
       category: r.category,
@@ -96,7 +116,7 @@ export function toNormalizedRows(rows: readonly WorkspaceRow[]): NormalizedRow[]
       sourceSheet: r.sourceSheet,
       sourceRow: r.sourceRow,
       pasteBatch: r.pasteBatch,
-      cells: r.cells,
+      cells,
       positionOnlyIdentity: positionOnlyIdentity || (businessKey === null && r.sourceRowId === null),
     };
   });

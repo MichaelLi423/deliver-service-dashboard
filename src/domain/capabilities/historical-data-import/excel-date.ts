@@ -1,14 +1,15 @@
 import { formatCents, parseDecimalToCents } from '../../core/money';
 import { toIsoWithOffset } from '../../core/time';
+import { normalizeBusinessDateText } from '../local-data-persistence/business-date';
 
 /**
  * Excel 日期系统与金额的确定性转换（design D7/D21 / tasks 8.24）。
  *
  * - 1900 日期系统：serial 1 = 1900-01-01（1900-02-29 不存在，serial 60 视为非法）；
  * - 1904 日期系统：serial 0 = 1904-01-01；
- * - 纯日期（date 语义）输出业务日期 yyyy-mm-dd；
- * - 日期时间（datetime 语义）按「本机业务时区」确定性解释：把 serial 的
- *   墙钟字段视为业务本地时间，再携带本机时区偏移输出 ISO 时间；
+ * - **业务时间统一视为业务日期（date 语义）**：接受 Excel serial、纯日期、
+ *   带 Z/显式偏移 ISO、无偏移本地 datetime，一律输出 yyyy-mm-dd（design D30）；
+ * - datetime 语义（审计等精确时间）仍按本机业务时区携带偏移输出 ISO；
  * - 金额：十进制字符串 → 分整数（BigInt，HALF_UP），再规范化为两位小数字符串；
  *   全程不使用二进制浮点。
  */
@@ -97,11 +98,16 @@ const SERIAL_RE = /^\d+(\.\d+)?$/;
 
 /**
  * 文本/数值单元格 → 规范日期值。
- * - 已是 yyyy-mm-dd（date 语义）→ 原样返回；
- * - 已是带偏移 ISO → 原样返回（校验格式）；
- * - 无偏移本地墙钟文本 → 按本机业务时区携带偏移；
+ *
+ * date 语义（目标业务时间统一视为业务日期，design D30）：
+ * - 纯日期 yyyy-mm-dd → 原样返回；
+ * - 带 Z/显式偏移 ISO → 按冻结本机 IANA 时区转 yyyy-mm-dd；
+ * - 无偏移本地墙钟文本 → 视为本地墙钟取日期部分；
  * - 纯数值 → 视为 Excel serial，按 dateSystem 转换；
  * - 其余 → null（调用方保留原文，由校验阶段报日期错误，不猜测）。
+ *
+ * datetime 语义（审计/精确时间）：原行为不变——已带偏移 ISO 原样返回、
+ * 无偏移本地墙钟按本机业务时区携带偏移、纯日期拒绝。
  */
 export function normalizeDateValue(
   value: string,
@@ -110,11 +116,19 @@ export function normalizeDateValue(
 ): string | null {
   const trimmed = value.trim();
   if (trimmed === '') return null;
+  if (semantics === 'date') {
+    const businessDate = normalizeBusinessDateText(trimmed);
+    if (businessDate !== null) return businessDate;
+    if (SERIAL_RE.test(trimmed)) {
+      return serializeExcelSerial(Number(trimmed), dateSystem, 'date');
+    }
+    return null;
+  }
   if (DATE_ONLY_RE.test(trimmed)) {
-    return semantics === 'date' ? trimmed : null;
+    return null;
   }
   if (ISO_DATETIME_RE.test(trimmed)) {
-    return semantics === 'datetime' ? trimmed : null;
+    return trimmed;
   }
   const local = LOCAL_DATETIME_RE.exec(trimmed);
   if (local !== null) {
@@ -129,7 +143,7 @@ export function normalizeDateValue(
     return toIsoWithOffset(date);
   }
   if (SERIAL_RE.test(trimmed)) {
-    return serializeExcelSerial(Number(trimmed), dateSystem, semantics);
+    return serializeExcelSerial(Number(trimmed), dateSystem, 'datetime');
   }
   return null;
 }
