@@ -8,14 +8,14 @@ import { applyInitialSchema } from '../../src/domain/capabilities/local-data-per
 import { cleanupTempDir, makeTempDir, makeTempDbPath } from '../helpers/tmp-db';
 
 describe('schema 迁移（tasks 1.10 / D17）', () => {
-  it('成功迁移：v0 → v13 应用初始 schema、归属快照列、迁移来源列、导入记录审计、正式库身份与业务修订触发器、v2 读取索引、业务日期化并写入 user_version', () => {
+  it('成功迁移：v0 → v14 应用初始 schema、归属快照列、迁移来源列、导入记录审计、正式库身份与业务修订触发器、v2 读取索引、业务日期化并写入 user_version', () => {
     const dir = makeTempDir();
     try {
       const { db, migrationResult } = bootstrapDatabase({ dataDir: dir });
       expect(migrationResult.fromVersion).toBe(0);
-      expect(migrationResult.toVersion).toBe(13);
-      expect(migrationResult.applied).toHaveLength(13);
-      expect(readSchemaVersion(db)).toBe(13);
+      expect(migrationResult.toVersion).toBe(14);
+      expect(migrationResult.applied).toHaveLength(14);
+      expect(readSchemaVersion(db)).toBe(14);
       // v2 补充的账号归属快照列存在（tasks 3.x 手工事实归属）
       const workCols = db
         .prepare('PRAGMA table_info(work_facts)')
@@ -71,7 +71,7 @@ describe('schema 迁移（tasks 1.10 / D17）', () => {
 
       const second = bootstrapDatabase({ dataDir: dir });
       expect(second.migrationResult.applied).toHaveLength(0);
-      expect(readSchemaVersion(second.db)).toBe(13);
+      expect(readSchemaVersion(second.db)).toBe(14);
       closeDatabase(second.db);
     } finally {
       cleanupTempDir(dir);

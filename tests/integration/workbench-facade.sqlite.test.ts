@@ -52,8 +52,7 @@ function wizard(overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPay
     contractEndDate: '2027-07-31',
     oldSiteAddress: '旧址',
     newSiteAddress: '新址',
-    instrumentName: '仪器',
-    ups: false,
+    instrumentCount: 1,
     siteConfirmed: false,
     ...overrides,
   };
@@ -81,9 +80,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         ecc: 'ECC-UI-001',
         contractAmount: '100000',
         finalAmount: '100000',
-        instrumentName: '质谱仪',
-        model: 'MS-1',
-        ups: true,
+        instrumentCount: 1,
         oldSiteContact: '旧址王工',
         newSiteContact: '新址李工',
         serviceOrderNo: 'SO-WIZ-001',
@@ -209,8 +206,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         contractAmount: '2000',
         finalAmount: '2000',
         actualInstallDoneAt: '2026-08-08',
-        instrumentName: '质谱仪',
-        ups: true,
+        instrumentCount: 1,
       }),
     });
     const projectId = projectIdOf(created);
@@ -571,14 +567,21 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       }),
     ).toThrow(/物流费用申请（登记）日期必填/);
 
-    // 非法价格：成交价 0 → 报错
+    // 非法价格：预算价 0 报错；成交价 0 允许（已确认语义：成交价可 0、预算价仍 > 0）
     expect(() =>
       facade.v2Mutate({
         op: 'submit_action',
         projectId,
-        action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '0' } },
+        action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', appliedAt: '2026-08-09', budgetPrice: '0', dealPrice: '11000' } },
       }),
-    ).toThrow(/物流成交价/);
+    ).toThrow(/合同预算价/);
+    expect(() =>
+      facade.v2Mutate({
+        op: 'submit_action',
+        projectId,
+        action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '-1' } },
+      }),
+    ).toThrow(/物流成交价|不得为负数/);
 
     // 原子性：批次已创建后报价校验失败（日期格式非法）→ 同一事务整体回滚
     expect(() =>

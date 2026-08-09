@@ -6,7 +6,7 @@ import {
 } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { closeDatabase, openDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { runMigrations } from '../../src/domain/capabilities/local-data-persistence/migration';
-import { BUSINESS_DATE_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v13';
+import { SUPPLEMENT_FIELDS_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v14';
 import { cleanupTempDir, makeTempDir, makeTempDbPath } from '../helpers/tmp-db';
 
 /**
@@ -57,13 +57,13 @@ function seedV11(dir: string): { db: DatabaseSync; dbPath: string } {
 }
 
 describe('schema v12：只加支撑索引的迁移（Oracle #10）', () => {
-  it('v11 存量库升级到 v13：版本写入 13、数据完整保留、15 个索引全部建立', () => {
+  it('v11 存量库升级到最新版本：版本写入最新、数据完整保留、15 个索引全部建立', () => {
     const dir = makeTempDir();
     try {
       const { db } = seedV11(dir);
 
       runMigrations(db, { migrations: [...MIGRATIONS], backupDir: `${dir}/migration-backups` });
-      expect(readSchemaVersion(db)).toBe(13);
+      expect(readSchemaVersion(db)).toBe(SUPPLEMENT_FIELDS_MIGRATION_VERSION);
       const row = db
         .prepare('SELECT status, region FROM projects WHERE id = ?')
         .get('p-legacy') as { status: string; region: string };
@@ -83,13 +83,13 @@ describe('schema v12：只加支撑索引的迁移（Oracle #10）', () => {
     }
   });
 
-  it('全新库直接引导到 v13：迁移序列为 1..13', () => {
+  it('全新库直接引导到最新版本：迁移序列为 1..最新', () => {
     const dir = makeTempDir();
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(db)).toBe(BUSINESS_DATE_MIGRATION_VERSION);
+      expect(readSchemaVersion(db)).toBe(SUPPLEMENT_FIELDS_MIGRATION_VERSION);
       expect(MIGRATIONS.map((m) => m.version)).toEqual(
-        Array.from({ length: 13 }, (_, i) => i + 1),
+        Array.from({ length: SUPPLEMENT_FIELDS_MIGRATION_VERSION }, (_, i) => i + 1),
       );
       expect(namesOf(db).length).toBeGreaterThanOrEqual(V12_INDEXES.length);
       closeDatabase(db);

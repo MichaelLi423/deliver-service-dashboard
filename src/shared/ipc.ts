@@ -422,6 +422,11 @@ export interface WorkbenchV2ProjectPageRequest extends WorkbenchV2PageRequest {
   query?: string | null;
   /** 提醒过滤：any=有提醒；overdue/today/upcoming=到期分类（与纯函数同口径）。 */
   reminder?: 'any' | 'overdue' | 'today' | 'upcoming' | null;
+  /**
+   * 维修伪筛选：open=存在开放维修事项（与项目行 repairsPending 同口径：
+   * 事项状态未修复且未关闭未修复），不是项目主状态。
+   */
+  repair?: 'open' | null;
   sort?: 'updated' | 'created' | 'temp' | 'reminder' | null;
 }
 
@@ -448,6 +453,8 @@ export interface WorkbenchV2OverviewDto {
     reminderToday: number;
     pendingAcceptance: number;
     pendingInvoice: number;
+    /** 存在开放维修事项（事项状态未修复且未关闭未修复）的项目数（EXISTS 口径）。 */
+    openRepairProjects: number;
     /** 待掉票金额（已进单项目 最终可确认金额-累计有效掉票 之和），十进制字符串。 */
     pendingAmount: string;
   };
@@ -484,6 +491,8 @@ export interface WorkbenchV2ProjectDetailDto {
     planVisitAt: string | null;
     /** 计划运输日期（业务日期 yyyy-mm-dd）。 */
     planTransportAt: string | null;
+    /** 计划装机完成日期（业务日期 yyyy-mm-dd；独立字段，不触发生命周期）。 */
+    plannedInstallDoneAt: string | null;
     siteConfirmed: boolean;
     /** 实际装机完成日期（业务日期 yyyy-mm-dd）。 */
     actualInstallDoneAt: string | null;
@@ -537,6 +546,8 @@ export type WorkbenchV2SectionRow =
       batchId: string | null;
       name: string;
       model: string | null;
+      manufacturer: string | null;
+      serviceLevel: string | null;
       serialNo: string | null;
       ups: boolean;
       qrRequested: boolean;
@@ -701,12 +712,14 @@ export interface WorkbenchV2LookupPageDto {
 
 /**
  * v2 普通写动作（复用现有写逻辑，绝不调用 snapshot；返回有界 mutation 结果）。
- * 覆盖：新建项目 / 资料更新 / submitAction / 提醒 / 状态 / 取消 / Ship-to complete /
- * 掉票编辑与撤销 / 搬迁批次编辑（batch_edit）。
+ * 覆盖：新建项目 / 资料更新 / 补齐资料 / 提交动作 / 提醒 / 状态 / 取消 / Ship-to
+ * complete / 掉票编辑与撤销 / 搬迁批次编辑（batch_edit）/ 仪器批量导入 /
+ * 损坏事项更新（damage_update）。
  */
 export type WorkbenchV2MutationOp =
   | 'create_project'
   | 'update_project'
+  | 'supplement_project'
   | 'submit_action'
   | 'set_reminder'
   | 'clear_reminder'
@@ -715,7 +728,9 @@ export type WorkbenchV2MutationOp =
   | 'ship_to_complete'
   | 'invoice_edit'
   | 'invoice_revoke'
-  | 'batch_edit';
+  | 'batch_edit'
+  | 'instrument_bulk_import'
+  | 'damage_update';
 
 /** 写后失效标签：告知新 UI 哪些有界缓存需重读。 */
 export type WorkbenchV2InvalidateTag =
@@ -732,8 +747,10 @@ export interface WorkbenchV2MutationRequest {
   op: WorkbenchV2MutationOp;
   /** submit_action / adjust_status / cancel_project / set_reminder 等需要。 */
   projectId?: string;
-  /** create_project（ProjectWizardPayload）/ update_project（ProjectUpdatePayload）/ batch_edit（BatchEditPayload）。 */
-  payload?: ProjectWizardPayload | ProjectUpdatePayload | BatchEditPayload;
+  /** create_project（ProjectWizardPayload）/ update_project（ProjectUpdatePayload）/
+   *  supplement_project（ProjectSupplementPayload）/ batch_edit（BatchEditPayload）/
+   *  instrument_bulk_import（InstrumentBulkImportPayload）。 */
+  payload?: ProjectWizardPayload | ProjectUpdatePayload | ProjectSupplementPayload | BatchEditPayload | InstrumentBulkImportPayload;
   /** submit_action。 */
   action?: WorkbenchActionPayload;
   /** set_reminder：提醒日期（业务日期 yyyy-mm-dd）。 */
@@ -752,6 +769,46 @@ export interface WorkbenchV2MutationRequest {
   /** invoice_edit：掉票日期（业务日期 yyyy-mm-dd）。 */
   invoicedAt?: string;
   amount?: string;
+  /** damage_update：损坏/维修事项更新（复用 updateIssueStatus/setPartStatus/updatePart）。 */
+  damageId?: string;
+  /** damage_update：事项处理状态（未处理/处理中/已修复/已关闭未修复）。 */
+  issueStatus?: string;
+  /** damage_update：已关闭未修复的关闭原因（必填）。 */
+  closeReason?: string | null;
+  /** damage_update：备件处理状态（待提交/处理中/已到件/已使用）。 */
+  partStatus?: string;
+  /** damage_update：备件号（updatePart）。 */
+  partNumber?: string;
+  /** damage_update：备件数量（正整数）。 */
+  partQuantity?: number;
+  /** damage_update：备件金额（十进制字符串，> 0）。 */
+  partAmount?: string;
+  /** damage_update：备件币种（USD/RMB）。 */
+  partCurrency?: string;
+  /** damage_update：备件申请日期（业务日期 yyyy-mm-dd）。 */
+  partRequestedAt?: string | null;
+  /** damage_update：维修过程备注（null = 清空）。 */
+  repairNote?: string | null;
+}
+
+/**
+ * 仪器批量导入行（.xlsx 5 列：仪器名称/厂商/型号/序列号/服务级别）。
+ * renderer 解析 Excel 后经强类型 mutation 整批提交；只有仪器名称必填，
+ * 其余列选填并去除首尾空白；非空序列号在 payload 内与库内同一项目均不得重复。
+ */
+export interface InstrumentBulkImportRow {
+  /** 仪器名称（必填）。 */
+  name: string;
+  manufacturer?: string | null;
+  model?: string | null;
+  serialNo?: string | null;
+  serviceLevel?: string | null;
+}
+
+/** 仪器批量导入请求：append 语义（追加登记，不替换既有仪器），整批事务原子落库。 */
+export interface InstrumentBulkImportPayload {
+  projectId: string;
+  rows: readonly InstrumentBulkImportRow[];
 }
 
 export interface WorkbenchV2MutationResult {
@@ -765,6 +822,8 @@ export interface WorkbenchV2MutationResult {
     status?: string;
     accountId?: string | null;
     created?: boolean;
+    /** instrument_bulk_import：实际登记仪器数。 */
+    importedCount?: number;
   } | null;
 }
 
@@ -777,15 +836,18 @@ export interface ProjectWizardPayload {
   region: string;
   oldSiteContact?: string;
   newSiteContact?: string;
-  /** 合同开始日期（业务日期 yyyy-mm-dd）。 */
-  contractStartDate: string;
-  /** 合同截止日期（业务日期 yyyy-mm-dd）。 */
-  contractEndDate: string;
-  oldSiteAddress: string;
-  newSiteAddress: string;
-  instrumentName: string;
-  model?: string;
-  ups: boolean;
+  /** 合同开始日期（业务日期 yyyy-mm-dd；可空/可清除，后补字段）。 */
+  contractStartDate?: string | null;
+  /** 合同截止日期（业务日期 yyyy-mm-dd；可空/可清除，后补字段）。 */
+  contractEndDate?: string | null;
+  oldSiteAddress?: string;
+  newSiteAddress?: string;
+  /**
+   * 暂定仪器数量（正整数，必填）：新建项目只记录数量、不生成虚拟仪器
+   * （不再通过 instrumentName/model/ups 创建单台占位仪器，仪器经单条录入或
+   * .xlsx 批量导入登记）。
+   */
+  instrumentCount?: number;
   /**
    * 合同 USD 含税金额：十进制字符串（如 "100000.50"），由主进程按 Money 精确解析为分。
    * 渲染层禁止 Number(value)*100 与浮点金额计算；空字符串 = 未录入。
@@ -797,7 +859,9 @@ export interface ProjectWizardPayload {
   planVisitAt?: string;
   /** 计划运输日期（业务日期 yyyy-mm-dd）。 */
   planTransportAt?: string;
-  siteConfirmed: boolean;
+  /** 计划装机完成日期（业务日期 yyyy-mm-dd；独立字段，不触发生命周期）。 */
+  plannedInstallDoneAt?: string;
+  siteConfirmed?: boolean;
   /** 实际装机完成日期（业务日期 yyyy-mm-dd）。 */
   actualInstallDoneAt?: string;
   serviceOrderNo?: string;
@@ -827,9 +891,9 @@ export interface ProjectUpdatePayload {
   customerName?: string;
   /** 区域：去除首尾空白后精确分组；空串 = 清空区域。 */
   region?: string;
-  /** 合同开始日期（yyyy-mm-dd；截止不得早于开始，由主进程校验）；null = 保留现值。 */
+  /** 合同开始日期（yyyy-mm-dd；可空/可清除，null 或空串 = 清空；与截止同有值时不得早于截止）。 */
   contractStartDate?: string | null;
-  /** 合同截止日期（yyyy-mm-dd）。 */
+  /** 合同截止日期（yyyy-mm-dd；可空/可清除，null 或空串 = 清空）。 */
   contractEndDate?: string | null;
   /** 旧址联系人；null = 清空。 */
   oldSiteContact?: string | null;
@@ -843,6 +907,8 @@ export interface ProjectUpdatePayload {
   plannedVisitAt?: string | null;
   /** 计划运输日期（yyyy-mm-dd）；null = 清空。 */
   plannedTransportAt?: string | null;
+  /** 计划装机完成日期（yyyy-mm-dd；独立字段不触发生命周期）；null = 清空。 */
+  plannedInstallDoneAt?: string | null;
   /** 场地确认状态；显式 false = 清除确认。 */
   siteConfirmed?: boolean;
   /** 已正式进单项目更正：ECC（去除首尾空白后全局唯一，必填非空；null 视为未提交）。 */
@@ -861,6 +927,75 @@ export interface ProjectUpdatePayload {
 }
 
 /**
+ * 补齐资料输入（v2 supplement_project，随请求 payload 提交）。
+ *
+ * 面向尚未正式进单（待进单/未进单先执行）项目补齐新建项目全部可后补字段，
+ * 并在同一事务内支持可选正式进单（携带非空 ECC → formalEntry）与可选搬迁开单
+ * （携带服务单号 → 原子创建搬迁开单，客户信息从项目客户读取/派生）。
+ *
+ * 三态语义与 update_project 一致：`undefined` = 未提交保持现值；`null` = 显式清空
+ * （仅可空字段）；有值 = 覆盖。全部经现有领域校验入口落库，不绕过正式进单校验
+ * （缺合同/客户/搬迁范围时 formalEntry 按领域规则拒绝）。
+ */
+export interface ProjectSupplementPayload {
+  /** 目标项目 id。 */
+  projectId: string;
+  /** 客户重关联：按去除首尾空白后的名称全局唯一匹配，不存在则登记新客户并关联。 */
+  customerName?: string;
+  /** 区域：去除首尾空白后精确分组；空串 = 清空区域。 */
+  region?: string;
+  /** 合同开始日期（yyyy-mm-dd；null 或空串 = 清空）。 */
+  contractStartDate?: string | null;
+  /** 合同截止日期（yyyy-mm-dd；null 或空串 = 清空）。 */
+  contractEndDate?: string | null;
+  oldSiteContact?: string | null;
+  newSiteContact?: string | null;
+  oldSiteAddress?: string | null;
+  newSiteAddress?: string | null;
+  /** 计划上门日期（yyyy-mm-dd）；null = 清空。 */
+  plannedVisitAt?: string | null;
+  /** 计划运输日期（yyyy-mm-dd）；null = 清空。 */
+  plannedTransportAt?: string | null;
+  /** 计划装机完成日期（yyyy-mm-dd；独立字段不触发生命周期）；null = 清空。 */
+  plannedInstallDoneAt?: string | null;
+  /**
+   * 实际装机完成日期（yyyy-mm-dd）：在正式进单之前记录实际装机事实并触发
+   * 正常状态重算（formalEntry 后按既有实际完成/验收事实得出主状态，例如自动待验收）。
+   * null 或空串 = 未提交保持现值（实际装机完成事实不可清除，仅可补录/修正日期）。
+   */
+  actualInstallDoneAt?: string | null;
+  /** 场地确认状态；显式 false = 清除确认。 */
+  siteConfirmed?: boolean;
+  /**
+   * 补齐搬迁范围数量（正整数）：提供时必须为正整数，调用现有
+   * setTemporaryInstrumentCount 记录暂定数量并确认搬迁范围（confirmScope），
+   * 确保同一事务内随后的可选正式进单（携带 ECC）能通过 SCOPE_REQUIRED 校验；
+   * 未提供时保持现值。
+   */
+  instrumentCount?: number;
+  /** 未进单先执行经理批复原因（携带时 setPreEntryExecution；正式进单后忽略）。 */
+  approvalReason?: string | null;
+  missingItems?: string | null;
+  /**
+   * 可选正式进单：携带非空 ECC → 同一事务内完成正式进单（补建合同、校验
+   * 客户/搬迁范围、锁定金额快照、清除未进单先执行标签）；缺合同/客户/范围时
+   * 由领域校验拒绝，不绕过。null 或空串 = 不执行正式进单。
+   */
+  ecc?: string | null;
+  /** 进单日期（业务日期 yyyy-mm-dd；正式进单时缺省当前日期）。 */
+  entryAt?: string | null;
+  /** 合同 USD 含税金额（十进制字符串，允许 0、拒绝负数；先于正式进单设置）。 */
+  contractAmount?: string | null;
+  /** 最终可确认金额（十进制字符串；缺省取合同金额，由领域校验决定）。 */
+  finalAmount?: string | null;
+  /** 可选搬迁开单：携带服务单号 → 同一事务内创建搬迁开单（工程师必填，客户取项目客户）。 */
+  serviceOrderNo?: string | null;
+  /** 参与工程师（服务单号必填）。 */
+  engineers?: string | null;
+  serviceOrderNote?: string | null;
+}
+
+/**
  * 搬迁批次编辑输入（v2 batch_edit，随请求 payload 提交）。
  *
  * 仅两个价格口径（与快速记录搬迁批次一致）：
@@ -869,7 +1004,8 @@ export interface ProjectUpdatePayload {
  *   fee.logisticsCostCents（物流成交价即最终实际费用）。
  *
  * 三态语义：`undefined` = 未提交保持现值；`null` = 显式清空（仅计划运输日期/运输公司）；
- * 价格字段 `undefined` = 保持现值，有值 = 覆盖（必须 > 0，由主进程/领域校验）。
+ * 价格字段 `undefined` = 保持现值，有值 = 覆盖（合同预算价必须 > 0；物流成交价允许显式 0
+ * 但必填——空串视为缺失报错、不得静默当 0，由主进程/领域校验）。
  *
  * 不允许修改 `appliedAt`（物流费用申请/登记时间）：契约不含该字段，
  * 底层 updateLogisticsFee 亦不更新申请时间，编辑前后归属月份不变。
@@ -882,9 +1018,9 @@ export interface BatchEditPayload {
   planTransportDate?: string | null;
   /** 运输公司；null = 清空。 */
   transportCompany?: string | null;
-  /** 合同预算价（十进制字符串）→ batch.originalPriceCents + fee.budgetPriceCents。 */
+  /** 合同预算价（十进制字符串，必填且 > 0）→ batch.originalPriceCents + fee.budgetPriceCents。 */
   budgetPrice?: string;
-  /** 物流成交价（十进制字符串）→ batch.discountedPriceCents + fee.dealPriceCents + fee.logisticsCostCents。 */
+  /** 物流成交价（十进制字符串，必填但允许显式 0）→ batch.discountedPriceCents + fee.dealPriceCents + fee.logisticsCostCents。 */
   dealPrice?: string;
 }
 

@@ -37,8 +37,7 @@ function wizard(overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPay
     contractEndDate: '2027-07-31',
     oldSiteAddress: '旧址',
     newSiteAddress: '新址',
-    instrumentName: '仪器',
-    ups: false,
+    instrumentCount: 1,
     siteConfirmed: false,
     ...overrides,
   };

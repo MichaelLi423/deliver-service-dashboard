@@ -112,7 +112,7 @@ describe('workbench-todos SQLite 集成（6.5）', () => {
     const dir = makeTempDir();
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(db)).toBe(13);
+      expect(readSchemaVersion(db)).toBe(14);
       const cols = db.prepare('PRAGMA table_info(projects)').all() as { name: string }[];
       expect(cols.map((c) => c.name)).toContain('reminder_account_id');
       expect(cols.map((c) => c.name)).toContain('reminder_username_snapshot');

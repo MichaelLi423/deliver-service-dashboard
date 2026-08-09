@@ -66,8 +66,7 @@ const wizard = (overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPay
   contractEndDate: '2027-07-31',
   oldSiteAddress: '旧址',
   newSiteAddress: '新址',
-  instrumentName: '仪器',
-  ups: false,
+  instrumentCount: 1,
   siteConfirmed: false,
   ...overrides,
 });
@@ -106,6 +105,8 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
       projectId,
       action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-05', transportCompany: '紧急运输', appliedAt: '2026-08-04', budgetPrice: '1000', dealPrice: '1000' } },
     });
+    // 单条登记仪器（新建项目只记录 instrumentCount，不生成虚拟仪器）
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'instrument', projectId, values: { name: '搬迁仪器', ups: false, qrRequested: false } } });
     const instrumentId = String(facade.v2SectionPage({ projectId, kind: 'instruments' }).rows[0].id);
     facade.v2Mutate({
       op: 'submit_action',
@@ -146,8 +147,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
       payload: wizard({
         customerName: '自动待验收客户A',
         ecc: 'ECC-AUTO-001',
-        instrumentName: '质谱仪',
-        ups: true,
+        instrumentCount: 1,
         contractAmount: '100000',
         finalAmount: '100000',
         planVisitAt: '2026-08-09',
@@ -164,8 +164,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
       payload: wizard({
         customerName: '自动待验收客户B',
         ecc: 'ECC-AUTO-002',
-        instrumentName: '质谱仪',
-        ups: true,
+        instrumentCount: 1,
         contractAmount: '100000',
         finalAmount: '100000',
         actualInstallDoneAt: '2026-08-08',
@@ -209,7 +208,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     // 项目 A：无任何掉票历史 → 可取消
     const a = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '可取消客户', ecc: 'ECC-CANCEL-01', region: '西南', contractAmount: '50000', finalAmount: '50000', instrumentName: '仪器A' }),
+      payload: wizard({ customerName: '可取消客户', ecc: 'ECC-CANCEL-01', region: '西南', contractAmount: '50000', finalAmount: '50000', instrumentCount: 1 }),
     });
     const projectIdA = projectIdOf(a);
     facade.v2Mutate({ op: 'cancel_project', projectId: projectIdA, time: '2026-08-12', reason: '客户业务调整取消' });
@@ -222,7 +221,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     // 项目 B：登记掉票后 → 存在掉票历史 → 禁止取消
     const b = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '有掉票历史客户', ecc: 'ECC-CANCEL-02', region: '西南', contractAmount: '50000', finalAmount: '50000', instrumentName: '仪器B' }),
+      payload: wizard({ customerName: '有掉票历史客户', ecc: 'ECC-CANCEL-02', region: '西南', contractAmount: '50000', finalAmount: '50000', instrumentCount: 1 }),
     });
     const projectIdB = projectIdOf(b);
     facade.v2Mutate({ op: 'submit_action', projectId: projectIdB, action: { type: 'invoice', projectId: projectIdB, values: { invoicedAt: '2026-08-11', amount: '10000' } } });
@@ -285,12 +284,13 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
       }),
     ).toThrow(/最终可确认金额/);
 
-    // 合同金额 0 且已录入仪器：可登记损坏，但禁止标记备件已使用（TBD-15）
+    // 合同金额 0 且已登记仪器：可登记损坏，但禁止标记备件已使用（TBD-15）
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '零合同维修客户', ecc: 'ECC-ZERO-02', contractAmount: '0', finalAmount: '5000', instrumentName: '仪器X' }),
+      payload: wizard({ customerName: '零合同维修客户', ecc: 'ECC-ZERO-02', contractAmount: '0', finalAmount: '5000', instrumentCount: 1 }),
     });
     const projectId = projectIdOf(created);
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'instrument', projectId, values: { name: '待修仪器', ups: false, qrRequested: false } } });
     const instrumentId = String(facade.v2SectionPage({ projectId, kind: 'instruments' }).rows[0].id);
     // 登记损坏（允许）：备件未标记已使用
     facade.v2Mutate({
@@ -398,7 +398,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     const facade = await ctx.init();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '序列号地址客户', ecc: 'ECC-SERIAL-001', region: '华北', contractAmount: '30000', finalAmount: '30000', instrumentName: '串号仪器' }),
+      payload: wizard({ customerName: '序列号地址客户', ecc: 'ECC-SERIAL-001', region: '华北', contractAmount: '30000', finalAmount: '30000', instrumentCount: 1 }),
     });
     const projectId = projectIdOf(created);
     // 登记带序列号的搬迁仪器（向导创建的仪器无序列号，需先补登序列号仪器）

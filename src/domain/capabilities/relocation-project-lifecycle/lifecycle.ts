@@ -18,8 +18,9 @@ import {
  * - 标记验收报告并填写报告形成日期 → 自动置为待掉票（不要求当前状态已待验收，
  *   只要有效验收报告事实即生效；已取消拒绝）
  * - 录入实际装机完成时间 → 自动置为待验收（TBD-07）
- * - 待掉票/已完成之间按累计掉票金额与最终可确认金额自动重算（TBD-11，
- *   该区间内金额闭环优先于验收触发）
+ * - 待掉票/已完成之间按掉票事实自动重算（已确认语义：任意成功登记一笔掉票
+ *   （累计有效 > 0）即视为闭环完成，撤销最后有效掉票后回到待掉票；
+ *   无 0 金额闭环：最终可确认金额为空或 0 时不产生闭环判定）
  *
  * 约束校验：
  * - 目标状态必须为合法状态之一
@@ -78,13 +79,17 @@ function reject(currentStatus: ProjectStatusOrCancelled, errors: string[]): Tran
   return { ok: false, status: currentStatus, errors };
 }
 
-/** 金额闭环：final 有值且 > 0 时，累计 >= 最终可确认金额即进入已完成（无 0 金额闭环）。 */
+/**
+ * 金额闭环：final 有值且 > 0 时，任意成功登记一笔掉票（累计有效掉票 > 0）即进入
+ * 已完成（已确认语义：不再等累计金额足额）；累计有效掉票归 0（撤销最后有效掉票）
+ * 时回到待掉票。无 0 金额闭环：final 为空/0 时不产生任何闭环判定。
+ */
 function closureTarget(amounts: AmountClosureFacts): ProjectStatusOrCancelled | null {
   const final = amounts.finalConfirmableAmountCents;
   if (final === null || final <= 0n) {
     return null;
   }
-  return amounts.confirmedAmountCents >= final ? 'completed' : 'pending_invoice';
+  return amounts.confirmedAmountCents > 0n ? 'completed' : 'pending_invoice';
 }
 
 export function resolveStatus(context: TransitionContext): TransitionResult {
@@ -166,9 +171,9 @@ export function resolveStatus(context: TransitionContext): TransitionResult {
         '无法直接调整为已完成：无 0 金额闭环，须先录入大于 0 的最终可确认金额',
       ]);
     }
-    if (context.amounts.confirmedAmountCents < final) {
+    if (context.amounts.confirmedAmountCents <= 0n) {
       return reject(currentStatus, [
-        '无法直接调整为已完成：累计掉票金额尚未达到最终可确认金额',
+        '无法直接调整为已完成：尚无任何有效掉票，须先登记一笔大于 0 的掉票',
       ]);
     }
     return ok('completed', 'manual');

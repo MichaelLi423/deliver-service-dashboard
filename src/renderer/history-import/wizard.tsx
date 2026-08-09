@@ -28,13 +28,13 @@ const STEPS: readonly { id: WizardStepId; number: string; label: string; note: s
   { id: 'orders', number: '03', label: '开单记录', note: '四类服务单据' },
   { id: 'finance', number: '04', label: '掉票与物流费用', note: '金额与发生时间' },
   { id: 'serials', number: '05', label: '序列号地址更新', note: '逐台实际地址' },
-  { id: 'requests', number: '06', label: '二维码与 Ship-to 申请', note: '独立申请记录' },
+  { id: 'requests', number: '06', label: '二维码与 Account ID 申请', note: '独立申请记录' },
   { id: 'review', number: '07', label: '校验摘要与确认', note: '封存后整体提交' },
 ];
 
 const CATEGORY_LABEL: Record<HistoryImportCategory, string> = {
   projects: '项目与合同', serviceOrders: '开单记录', invoices: '掉票记录', logistics: '物流费用',
-  serialAddresses: '序列号地址更新', qrRequests: '二维码申请', shipToRequests: 'Ship-to 申请',
+  serialAddresses: '序列号地址更新', qrRequests: '二维码申请', shipToRequests: 'Account ID 申请',
 };
 
 const STEP_CATEGORIES: Record<WizardStepId, readonly HistoryImportCategory[]> = {

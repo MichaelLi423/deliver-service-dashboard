@@ -148,7 +148,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
   },
   {
     key: 'ship_to_request_workload',
-    label: 'Ship-to 申请工作量',
+    label: 'Account ID 申请工作量',
     timeAttribution: '首次实际提交时间（submitted_at）所属月份；待提交草稿不计、状态更新不重复计数',
     factSource: 'ship_to_requests（首次提交记录；按提交时持久化的账号内部 ID 与用户名快照归属责任人）',
     filters: ['monthFrom', 'monthTo', 'operator'],

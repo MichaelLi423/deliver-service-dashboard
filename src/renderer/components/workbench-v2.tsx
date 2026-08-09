@@ -6,10 +6,14 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import ExcelJS from "exceljs";
 import type {
   AccountSessionInfo,
   AdjustableProjectStatus,
+  InstrumentBulkImportRow,
   ProjectStatus,
+  ProjectSupplementPayload,
+  ProjectUpdatePayload,
   ProjectWizardPayload,
   ReportDto,
   ReportFilterDto,
@@ -73,16 +77,16 @@ const STAGES: AdjustableProjectStatus[] = [
 const TABS = [
   "项目总览",
   "搬迁仪器",
-  "搬迁批次",
-  "上门活动",
+  "物流费用登记",
+  "开单记录",
   "费用与掉票",
   "申请与维修",
 ] as const;
 type DetailTab = (typeof TABS)[number];
 const TAB_SECTION: Partial<Record<DetailTab, WorkbenchV2SectionKind>> = {
   搬迁仪器: "instruments",
-  搬迁批次: "batches",
-  上门活动: "activities",
+  物流费用登记: "batches",
+  开单记录: "orders",
   费用与掉票: "invoices",
   申请与维修: "damage_items",
 };
@@ -93,7 +97,7 @@ const ACTIONS: Array<{
 }> = [
   {
     type: "batch",
-    label: "搬迁批次",
+    label: "物流费用登记",
     help: "一次登记运输安排、费用日期和两项价格",
   },
   {
@@ -101,12 +105,7 @@ const ACTIONS: Array<{
     label: "搬迁仪器",
     help: "名称、型号、序列号、UPS 与二维码标记",
   },
-  {
-    type: "visit",
-    label: "上门活动",
-    help: "同页记录拆机、装机、维修与其他工作",
-  },
-  { type: "order", label: "开单记录", help: "搬迁、认证、单寄备件或 PM 开单" },
+  { type: "order", label: "开单记录", help: "记录开单日期、工程师、类型和服务单号" },
   {
     type: "acceptance",
     label: "验收报告",
@@ -115,7 +114,7 @@ const ACTIONS: Array<{
   { type: "invoice", label: "掉票", help: "按 ECC 登记发生日期与金额" },
   {
     type: "ship_to",
-    label: "Ship-to 申请",
+    label: "Account ID 申请",
     help: "客户名称、新址地址与线性状态",
   },
   {
@@ -182,6 +181,7 @@ function decimalOf(cents: bigint): string {
 
 interface Filters {
   status: ProjectStatus | "";
+  repair: "" | "open";
   reminder: "" | "any" | "overdue" | "today" | "upcoming";
   region: string;
   query: string;
@@ -197,30 +197,14 @@ type LayerState =
   | {
       kind: "batch-edit";
       batch: Extract<WorkbenchV2SectionRow, { kind: "batches" }>;
+    }
+  | {
+      kind: "damage-update";
+      damage: Extract<WorkbenchV2SectionRow, { kind: "damage_items" }>;
     };
 
-type ProjectUpdatePayload = {
-  projectId: string;
-  customerName?: string;
-  region?: string;
-  contractStartDate?: string | null;
-  contractEndDate?: string | null;
-  oldSiteContact?: string | null;
-  newSiteContact?: string | null;
-  oldSiteAddress?: string | null;
-  newSiteAddress?: string | null;
-  plannedVisitAt?: string | null;
-  plannedTransportAt?: string | null;
-  siteConfirmed?: boolean;
-  ecc?: string | null;
-  entryAt?: string | null;
-  contractUsdTaxAmount?: string | null;
-  finalConfirmableAmount?: string | null;
-};
-
 function updateProjectRequest(payload: ProjectUpdatePayload): WorkbenchV2MutationRequest {
-  // update_project 的共享类型由后端 lane 补齐；renderer 先按已约定 IPC 契约发出请求。
-  return { op: "update_project", payload } as unknown as WorkbenchV2MutationRequest;
+  return { op: "update_project", payload };
 }
 
 type BatchEditValues = {
@@ -235,6 +219,26 @@ function batchEditRequest(
   batchEdit: BatchEditValues,
 ): WorkbenchV2MutationRequest {
   return { op: "batch_edit", payload: { batchId, ...batchEdit } };
+}
+
+function instrumentBulkImportRequest(
+  projectId: string,
+  rows: InstrumentBulkImportRow[],
+): WorkbenchV2MutationRequest {
+  return { op: "instrument_bulk_import", payload: { projectId, rows } };
+}
+
+function damageUpdateRequest(
+  damageId: string,
+  issueStatus: string,
+  closeReason?: string,
+): WorkbenchV2MutationRequest {
+  return {
+    op: "damage_update",
+    damageId,
+    issueStatus,
+    ...(issueStatus === "closed_unrepaired" ? { closeReason } : {}),
+  };
 }
 
 export function WorkbenchV2({
@@ -252,6 +256,7 @@ export function WorkbenchV2({
     useState<WorkbenchV2ProjectPageDto | null>(null);
   const [filters, setFilters] = useState<Filters>({
     status: "",
+    repair: "",
     reminder: "",
     region: "",
     query: "",
@@ -344,6 +349,7 @@ export function WorkbenchV2({
         reminder: effective.reminder || null,
         region: effective.region.trim() || null,
         query: effective.query.trim() || null,
+        repair: effective.repair || null,
       });
       if (
         id !== requests.current.projects ||
@@ -435,7 +441,7 @@ export function WorkbenchV2({
   useEffect(() => {
     setCursorStack([null]);
     void loadProjects(null, 0);
-  }, [filters.status, filters.reminder, filters.region, filters.query]);
+  }, [filters.status, filters.repair, filters.reminder, filters.region, filters.query]);
   useEffect(() => {
     setDetail(null);
     setSectionPage(null);
@@ -504,7 +510,7 @@ export function WorkbenchV2({
         result.changed.projectId
       ) {
         // 新建成功：清除可能隐藏新项目的筛选、回到首屏，并钉住返回的项目 id 自动选中。
-        cleared = { status: "", reminder: "", region: "", query: "" };
+        cleared = { status: "", repair: "", reminder: "", region: "", query: "" };
         selectionPin.current = result.changed.projectId;
         setDraftFilters(cleared);
         setFilters(cleared);
@@ -526,7 +532,7 @@ export function WorkbenchV2({
     setFilters({ ...draftFilters });
   }
   function resetFilters(): void {
-    const next: Filters = { status: "", reminder: "", region: "", query: "" };
+    const next: Filters = { status: "", repair: "", reminder: "", region: "", query: "" };
     selectionPin.current = "";
     setDraftFilters(next);
     setFilters(next);
@@ -537,8 +543,8 @@ export function WorkbenchV2({
     const query = item.ecc ?? item.tempNo ?? item.customerName;
     // 钉住提醒目标：即使新筛选下不在当前页，也保持选中并继续按 id 读取详情。
     selectionPin.current = item.projectId;
-    setFilters({ status: "", reminder: "any", region: "", query });
-    setDraftFilters({ status: "", reminder: "any", region: "", query });
+    setFilters({ status: "", repair: "", reminder: "any", region: "", query });
+    setDraftFilters({ status: "", repair: "", reminder: "any", region: "", query });
     setSelectedId(item.projectId);
     document.getElementById("project-queue")?.focus();
   }
@@ -803,10 +809,10 @@ export function WorkbenchV2({
               className="text-action"
               onClick={() => {
                 selectionPin.current = "";
-                setDraftFilters((old) => ({ ...old, status: "" }));
-                setFilters((old) => ({ ...old, status: "" }));
+                setDraftFilters((old) => ({ ...old, status: "", repair: "" }));
+                setFilters((old) => ({ ...old, status: "", repair: "" }));
               }}
-              aria-pressed={!filters.status}
+              aria-pressed={!filters.status && !filters.repair}
             >
               全部项目
             </button>
@@ -819,8 +825,8 @@ export function WorkbenchV2({
                 aria-pressed={filters.status === item.status}
                 onClick={() => {
                   selectionPin.current = "";
-                  setDraftFilters((old) => ({ ...old, status: item.status }));
-                  setFilters((old) => ({ ...old, status: item.status }));
+                  setDraftFilters((old) => ({ ...old, status: item.status, repair: "" }));
+                  setFilters((old) => ({ ...old, status: item.status, repair: "" }));
                 }}
               >
                 <span>{STATUS_LABEL[item.status]}</span>
@@ -828,6 +834,19 @@ export function WorkbenchV2({
                 <small>平均 {item.averageDays} 天</small>
               </button>
             ))}
+            <button
+              className={`stage repair-stage ${filters.repair === "open" ? "active" : ""}`}
+              aria-pressed={filters.repair === "open"}
+              onClick={() => {
+                selectionPin.current = "";
+                setDraftFilters((old) => ({ ...old, status: "", repair: "open" }));
+                setFilters((old) => ({ ...old, status: "", repair: "open" }));
+              }}
+            >
+              <span>维修中</span>
+              <strong>{String(overview?.metrics.openRepairProjects ?? 0)}</strong>
+              <small>独立事项筛选</small>
+            </button>
           </div>
           {bottleneck && (
             <p className="bottleneck-callout" role="status">
@@ -924,6 +943,7 @@ export function WorkbenchV2({
                   setDraftFilters((old) => ({
                     ...old,
                     status: event.target.value as ProjectStatus | "",
+                    repair: "",
                   }))
                 }
               >
@@ -1147,6 +1167,7 @@ export function WorkbenchV2({
             setLayer({ kind: "invoice-revoke", invoice })
           }
           onBatchEdit={(batch) => setLayer({ kind: "batch-edit", batch })}
+          onDamageUpdate={(damage) => setLayer({ kind: "damage-update", damage })}
         />
       </main>
       {toast && <div className="toast success" role="status">{toast}</div>}
@@ -1158,7 +1179,7 @@ export function WorkbenchV2({
           onClose={() => setLayer(null)}
         >
           {layer.kind === "new" ? (
-            <ProjectCreateForm
+            <ProjectCreateSinglePageForm
               onSave={(payload) =>
                 mutate({ op: "create_project", payload }, "搬迁项目已创建")
               }
@@ -1189,16 +1210,26 @@ export function WorkbenchV2({
             <ActionFormV2
               type={layer.action}
               project={selected}
+              detail={detail?.detail ?? null}
               onSave={(action) =>
                 mutate(
                   { op: "submit_action", projectId: selected.id, action },
                   "业务记录已保存",
                 )
               }
+              onInstrumentBulkImport={(rows) =>
+                mutate(
+                  instrumentBulkImportRequest(selected.id, rows),
+                  `已导入 ${rows.length} 台仪器`,
+                )
+              }
+              onSupplement={(payload) =>
+                mutate({ op: "supplement_project", payload }, "进单资料已补齐")
+              }
               onCompleteShipTo={(requestId, accountId) =>
                 mutate(
                   { op: "ship_to_complete", requestId, accountId },
-                  "Ship-to 申请已完成",
+                  "Account ID 申请已完成",
                 )
               }
             />
@@ -1288,7 +1319,17 @@ export function WorkbenchV2({
               onSave={(batchEdit) =>
                 mutate(
                   batchEditRequest(layer.batch.id, batchEdit),
-                  "搬迁批次已更新",
+                  "物流费用记录已更新",
+                )
+              }
+            />
+          ) : layer.kind === "damage-update" ? (
+            <DamageUpdateForm
+              damage={layer.damage}
+              onSave={(issueStatus, closeReason) =>
+                mutate(
+                  damageUpdateRequest(layer.damage.id, issueStatus, closeReason),
+                  "维修状态已更新",
                 )
               }
             />
@@ -1356,7 +1397,7 @@ function ProjectContext({
             <span className="tag warning">未进单先执行</span>
           )}
           {project.nonBlocking.pendingShipTo > 0 && (
-            <span className="tag neutral">Ship-to 待处理 {project.nonBlocking.pendingShipTo}</span>
+            <span className="tag neutral">Account ID 待处理 {project.nonBlocking.pendingShipTo}</span>
           )}
           {project.nonBlocking.qrUnmarked > 0 && (
             <span className="tag neutral">二维码待标记 {project.nonBlocking.qrUnmarked}</span>
@@ -1444,6 +1485,7 @@ function ProjectDetails({
   onInvoiceEdit,
   onInvoiceRevoke,
   onBatchEdit,
+  onDamageUpdate,
 }: {
   project: WorkbenchProjectRow | null;
   detail: WorkbenchV2ProjectDetailDto | null;
@@ -1469,12 +1511,15 @@ function ProjectDetails({
   onBatchEdit: (
     batch: Extract<WorkbenchV2SectionRow, { kind: "batches" }>,
   ) => void;
+  onDamageUpdate: (
+    damage: Extract<WorkbenchV2SectionRow, { kind: "damage_items" }>,
+  ) => void;
 }): JSX.Element {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const action: Partial<Record<DetailTab, WorkbenchActionType>> = {
     搬迁仪器: "instrument",
-    搬迁批次: "batch",
-    上门活动: "visit",
+    物流费用登记: "batch",
+    开单记录: "order",
     费用与掉票: "invoice",
     申请与维修: "damage",
   };
@@ -1604,9 +1649,9 @@ function ProjectDetails({
               ["所属区域", project.region || "待补"],
               ["合同开始日期", detail?.detail?.contractStartDate || "待补"],
               ["合同截止日期", detail?.detail?.contractEndDate || "待补"],
-              ["搬迁批次", `${project.counts.batches} 个`],
+              ["物流费用登记", `${project.counts.batches} 条`],
               ["搬迁仪器", `${project.counts.instruments} 台`],
-              ["上门活动", `${project.counts.activities} 次`],
+              ["开单记录", `${project.counts.orders} 条`],
               ].map(([label, value]) => (
                 <div key={label}>
                   <span>{label}</span>
@@ -1621,6 +1666,7 @@ function ProjectDetails({
             onInvoiceEdit={onInvoiceEdit}
             onInvoiceRevoke={onInvoiceRevoke}
             onBatchEdit={onBatchEdit}
+            onDamageUpdate={onDamageUpdate}
           />
         )}
       </div>
@@ -1656,6 +1702,7 @@ function SectionTable({
   onInvoiceEdit,
   onInvoiceRevoke,
   onBatchEdit,
+  onDamageUpdate,
 }: {
   page: WorkbenchV2SectionPageDto | null;
   onInvoiceEdit: (
@@ -1666,6 +1713,9 @@ function SectionTable({
   ) => void;
   onBatchEdit: (
     batch: Extract<WorkbenchV2SectionRow, { kind: "batches" }>,
+  ) => void;
+  onDamageUpdate: (
+    damage: Extract<WorkbenchV2SectionRow, { kind: "damage_items" }>,
   ) => void;
 }): JSX.Element {
   if (!page?.rows.length)
@@ -1678,7 +1728,7 @@ function SectionTable({
             {sectionColumns(page.kind).map((column) => (
               <th key={column}>{columnLabel(column)}</th>
             ))}
-            {(page.kind === "invoices" || page.kind === "batches") && (
+            {(page.kind === "invoices" || page.kind === "batches" || page.kind === "damage_items") && (
               <th>操作</th>
             )}
           </tr>
@@ -1726,6 +1776,13 @@ function SectionTable({
                   </button>
                 </td>
               )}
+              {row.kind === "damage_items" && (
+                <td>
+                  <button className="button small" onClick={() => onDamageUpdate(row)}>
+                    更新维修状态
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -1736,7 +1793,7 @@ function SectionTable({
 
 function sectionColumns(kind: WorkbenchV2SectionKind): string[] {
   return kind === "instruments"
-    ? ["name", "model", "serialNo", "batchId", "ups", "qrRequested"]
+    ? ["name", "manufacturer", "model", "serviceLevel", "serialNo", "batchId", "ups", "qrRequested"]
     : kind === "batches"
       ? [
           "planTransportDate",
@@ -1747,6 +1804,8 @@ function sectionColumns(kind: WorkbenchV2SectionKind): string[] {
         ]
       : kind === "activities"
         ? ["visitAt", "engineers"]
+        : kind === "orders"
+          ? ["orderedAt", "engineer", "orderType", "serviceOrderNo"]
         : kind === "invoices"
           ? ["invoicedAt", "amount", "active", "revokedAt"]
           : kind === "damage_items"
@@ -1766,12 +1825,14 @@ function columnLabel(key: string): string {
     (
       {
         name: "仪器名称",
+        manufacturer: "仪器产商",
         model: "型号",
+        serviceLevel: "服务级别",
         serialNo: "序列号",
-        batchId: "搬迁批次",
+        batchId: "物流费用记录",
         ups: "UPS",
         qrRequested: "二维码是否申请",
-        planTransportDate: "计划运输日期",
+        planTransportDate: "运输日期",
         transportCompany: "运输公司",
         budgetPrice: "合同预算价",
         dealPrice: "物流成交价",
@@ -1824,7 +1885,7 @@ function QuickMenu({
   return (
     <div>
       <p className="notice">
-        九类项目动作均写入当前项目。序列号地址更新与二维码申请位于独立导航。
+        八类项目动作均写入当前项目。序列号地址更新与二维码申请位于独立导航。
       </p>
       <div className="quick-grid">
         {ACTIONS.map((action) => (
@@ -1839,20 +1900,197 @@ function QuickMenu({
   );
 }
 
+type InstrumentImportRow = {
+  name: string;
+  manufacturer: string;
+  model: string;
+  serialNo: string;
+  serviceLevel: string;
+};
+
+type ProjectSupplementFormPayload = ProjectSupplementPayload & {
+  /** 后端并行补充中的后补事实字段。 */
+  actualInstallDoneAt?: string;
+};
+
+const INSTRUMENT_IMPORT_HEADERS: Array<[keyof InstrumentImportRow, string]> = [
+  ["name", "仪器名称"],
+  ["manufacturer", "仪器产商"],
+  ["model", "仪器型号"],
+  ["serialNo", "序列号"],
+  ["serviceLevel", "服务级别"],
+];
+
+function excelText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object" && value && "text" in value)
+    return String((value as { text?: unknown }).text ?? "").trim();
+  if (typeof value === "object" && value && "result" in value)
+    return String((value as { result?: unknown }).result ?? "").trim();
+  return String(value).trim();
+}
+
+async function parseInstrumentWorkbook(file: File): Promise<{
+  rows: InstrumentImportRow[];
+  errors: string[];
+}> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(await file.arrayBuffer());
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return { rows: [], errors: ["工作簿没有可读取的工作表"] };
+  const expected = new Map(INSTRUMENT_IMPORT_HEADERS.map(([key, label]) => [label, key]));
+  const columns = new Map<keyof InstrumentImportRow, number>();
+  const headerErrors: string[] = [];
+  sheet.getRow(1).eachCell({ includeEmpty: false }, (cell, column) => {
+    const label = excelText(cell.value);
+    const key = expected.get(label);
+    if (!key) headerErrors.push(`第 1 行：无法识别表头“${label}”`);
+    else if (columns.has(key)) headerErrors.push(`第 1 行：表头“${label}”重复`);
+    else columns.set(key, column);
+  });
+  for (const [key, label] of INSTRUMENT_IMPORT_HEADERS) {
+    if (!columns.has(key)) headerErrors.push(`第 1 行：缺少表头“${label}”`);
+  }
+  if (headerErrors.length) return { rows: [], errors: headerErrors };
+  const rows: InstrumentImportRow[] = [];
+  const errors: string[] = [];
+  for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber += 1) {
+    const row = sheet.getRow(rowNumber);
+    const cell = (key: keyof InstrumentImportRow): string =>
+      excelText(row.getCell(columns.get(key)!).value);
+    const parsed: InstrumentImportRow = {
+      name: cell("name"),
+      manufacturer: cell("manufacturer"),
+      model: cell("model"),
+      serialNo: cell("serialNo"),
+      serviceLevel: cell("serviceLevel"),
+    };
+    if (!Object.values(parsed).some(Boolean)) continue;
+    if (!parsed.name) errors.push(`第 ${rowNumber} 行：仪器名称不能为空`);
+    else rows.push(parsed);
+  }
+  if (!rows.length && !errors.length) errors.push("文件中没有仪器数据");
+  return { rows, errors };
+}
+
+function InstrumentRecordForm({
+  project,
+  onSave,
+  onBulkImport,
+}: {
+  project: WorkbenchProjectRow;
+  onSave: (action: WorkbenchActionPayload) => Promise<void>;
+  onBulkImport: (rows: InstrumentImportRow[]) => Promise<void>;
+}): JSX.Element {
+  const [mode, setMode] = useState<"single" | "bulk">("single");
+  const [fileName, setFileName] = useState("");
+  const [rows, setRows] = useState<InstrumentImportRow[]>([]);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function selectFile(file?: File): Promise<void> {
+    setFileName(file?.name ?? "");
+    setRows([]);
+    setErrors([]);
+    setError("");
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      setErrors(["请选择 .xlsx 文件"]);
+      return;
+    }
+    try {
+      const parsed = await parseInstrumentWorkbook(file);
+      setRows(parsed.rows);
+      setErrors(parsed.errors);
+    } catch (cause) {
+      setErrors([`文件读取失败：${messageOf(cause)}`]);
+    }
+  }
+  async function submitSingle(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    const data = new FormData(event.currentTarget);
+    try {
+      await onSave({
+        type: "instrument",
+        projectId: project.id,
+        values: {
+          name: String(data.get("name") || "").trim(),
+          manufacturer: String(data.get("manufacturer") || "").trim(),
+          model: String(data.get("model") || "").trim(),
+          serialNo: String(data.get("serialNo") || "").trim(),
+          serviceLevel: String(data.get("serviceLevel") || "").trim(),
+          ups: data.get("ups") === "true",
+          qrRequested: data.get("qrRequested") === "true",
+        },
+      });
+    } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); }
+  }
+  async function submitBulk(): Promise<void> {
+    if (!rows.length || errors.length) return;
+    setBusy(true);
+    setError("");
+    try { await onBulkImport(rows); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); }
+  }
+  return (
+    <div className="instrument-record-form">
+      <div className="mode-switch" role="tablist" aria-label="仪器录入方式">
+        <button type="button" role="tab" aria-selected={mode === "single"} onClick={() => setMode("single")}>单条录入</button>
+        <button type="button" role="tab" aria-selected={mode === "bulk"} onClick={() => setMode("bulk")}>Excel 批量导入</button>
+      </div>
+      {mode === "single" ? (
+        <form onSubmit={(event) => void submitSingle(event)}>
+          <div className="form-grid">
+            <Field name="name" label="仪器名称" required autoFocus />
+            <Field name="manufacturer" label="仪器产商" optional />
+            <Field name="model" label="型号" optional />
+            <Field name="serialNo" label="序列号" optional />
+            <Field name="serviceLevel" label="服务级别" optional />
+            <Select name="ups" label="UPS" required options={[["false", "否"], ["true", "是"]]} />
+            <Select name="qrRequested" label="二维码是否申请" required help="仅标记是否申请，不保存二维码地址。" options={[["false", "否"], ["true", "是"]]} />
+          </div>
+          {error && <div className="inline-error" role="alert">{error}</div>}
+          <div className="form-footer"><span>保存一台仪器</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存记录"}</button></div>
+        </form>
+      ) : (
+        <section className="bulk-import" aria-label="Excel 批量导入">
+          <p className="notice">首行只识别：仪器名称、仪器产商、仪器型号、序列号、服务级别。顺序不限，仅仪器名称必填。</p>
+          <label className="file-picker">
+            <span>选择 .xlsx 文件</span>
+            <input type="file" accept=".xlsx" onChange={(event) => void selectFile(event.target.files?.[0])} />
+          </label>
+          {fileName && <div className="import-summary" role="status"><strong>{fileName}</strong><span>有效行数：{rows.length}</span></div>}
+          {errors.length > 0 && <div className="import-errors" role="alert"><strong>请修正文件后重新选择</strong><ul>{errors.map((item) => <li key={item}>{item}</li>)}</ul></div>}
+          {error && <div className="inline-error" role="alert">{error}</div>}
+          <div className="form-footer"><span>确认后整批提交，不逐行保存。</span><button type="button" className="button primary" disabled={busy || !rows.length || errors.length > 0} onClick={() => void submitBulk()}>{busy ? "正在导入…" : `确认导入 ${rows.length} 行`}</button></div>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function ActionFormV2({
   type,
   project,
+  detail,
   onSave,
   onCompleteShipTo,
+  onInstrumentBulkImport,
+  onSupplement,
 }: {
   type: WorkbenchActionType;
   project: WorkbenchProjectRow;
+  detail: WorkbenchV2ProjectDetailDto["detail"];
   onSave: (action: WorkbenchActionPayload) => Promise<void>;
   onCompleteShipTo: (requestId: string, accountId: string) => Promise<void>;
+  onInstrumentBulkImport: (rows: InstrumentImportRow[]) => Promise<void>;
+  onSupplement: (payload: ProjectSupplementFormPayload) => Promise<void>;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  const [damageStatus, setDamageStatus] = useState("untreated");
   const submitLock = useRef(false);
   const optionKind: WorkbenchV2SectionKind | null = [
     "visit",
@@ -1865,6 +2103,15 @@ function ActionFormV2({
     WorkbenchV2LookupRow,
     { kind: "ship_to_requests" }
   > | null>(null);
+  if (type === "instrument") {
+    return (
+      <InstrumentRecordForm
+        project={project}
+        onSave={onSave}
+        onBulkImport={onInstrumentBulkImport}
+      />
+    );
+  }
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (submitLock.current) return;
@@ -1887,14 +2134,32 @@ function ActionFormV2({
       values.instrumentIds = [optionId];
     }
     if (optionKind === "batches" && optionId) values.batchId = optionId;
-    if (type === "instrument") {
-      for (const key of ["ups", "qrRequested"])
-        values[key] = data.get(key) === "true";
-    }
+    if (type === "core" && data.get("siteConfirmed") === "on") values.siteConfirmed = true;
     try {
       if (type === "ship_to" && shipTo)
         await onCompleteShipTo(shipTo.id, String(values.accountId || ""));
-      else await onSave({ type, projectId: project.id, values });
+      else if (type === "core") {
+        const optional = (key: string): string | undefined =>
+          String(values[key] || "").trim() || undefined;
+        const payload: ProjectSupplementFormPayload = { projectId: project.id };
+        const set = <K extends keyof ProjectSupplementFormPayload>(
+          key: K,
+          value: ProjectSupplementFormPayload[K] | undefined,
+        ): void => {
+          if (value !== undefined) Object.assign(payload, { [key]: value });
+        };
+        for (const key of [
+          "customerName", "region", "contractStartDate", "contractEndDate",
+          "oldSiteContact", "newSiteContact", "oldSiteAddress", "newSiteAddress",
+          "plannedVisitAt", "plannedTransportAt", "plannedInstallDoneAt", "actualInstallDoneAt",
+          "approvalReason", "missingItems", "ecc", "entryAt", "contractAmount", "finalAmount",
+          "serviceOrderNo", "engineers", "serviceOrderNote",
+        ] as const) set(key, optional(key));
+        const instrumentCount = optional("instrumentCount");
+        if (instrumentCount) set("instrumentCount", Number(instrumentCount));
+        if (values.siteConfirmed === true) set("siteConfirmed", true);
+        await onSupplement(payload);
+      } else await onSave({ type, projectId: project.id, values });
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -1934,7 +2199,7 @@ function ActionFormV2({
         {type === "ship_to" && (
           <BoundedShipToPicker value={shipTo?.id || ""} onChange={setShipTo} />
         )}
-        {actionFields(type, project, shipTo)}
+        {actionFields(type, project, shipTo, detail, damageStatus, setDamageStatus)}
       </div>
       {error && (
         <div className="inline-error" role="alert">
@@ -1991,7 +2256,7 @@ function BatchEditForm({
   return (
     <form className="project-edit-form" onSubmit={(event) => void submit(event)}>
       <p className="notice">
-        修改本批次的运输安排和价格。费用登记日期保持首次登记月份，不在这里修改。
+        修改本条物流费用的运输安排和价格。费用登记日期保持首次登记月份。
       </p>
       <div className="edit-form-sections">
         <fieldset className="edit-form-section">
@@ -1999,7 +2264,7 @@ function BatchEditForm({
           <div className="form-grid">
             <Field
               name="planTransportDate"
-              label="计划运输日期"
+              label="运输日期"
               type="date"
               defaultValue={batch.planTransportDate ?? ""}
               required
@@ -2030,7 +2295,7 @@ function BatchEditForm({
               label="物流成交价"
               type="number"
               step="0.01"
-              min="0.01"
+              min="0"
               defaultValue={dealPrice}
               required
             />
@@ -2039,11 +2304,49 @@ function BatchEditForm({
       </div>
       {error && <div className="inline-error" role="alert">{error}</div>}
       <div className="form-footer">
-        <span>保存后刷新当前项目的搬迁批次。</span>
+        <span>保存后刷新当前项目的物流费用记录。</span>
         <button className="button primary" disabled={busy}>
           {busy ? "正在保存…" : "保存批次修改"}
         </button>
       </div>
+    </form>
+  );
+}
+
+function DamageUpdateForm({
+  damage,
+  onSave,
+}: {
+  damage: Extract<WorkbenchV2SectionRow, { kind: "damage_items" }>;
+  onSave: (issueStatus: string, closeReason?: string) => Promise<void>;
+}): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [issueStatus, setIssueStatus] = useState(damage.issueStatus);
+  return (
+    <form onSubmit={(event) => {
+      event.preventDefault();
+      const data = new FormData(event.currentTarget);
+      setBusy(true);
+      setError("");
+      void onSave(issueStatus, String(data.get("closeReason") || "").trim() || undefined)
+        .catch((cause) => setError(messageOf(cause)))
+        .finally(() => setBusy(false));
+    }}>
+      <p className="notice">{damage.instrumentName || "仪器名称待补"} · {damage.serialNo || "无序列号"}</p>
+      <div className="form-grid">
+        <Select name="issueStatus" label="维修状态" value={issueStatus} onChange={(event) => setIssueStatus(event.target.value)} required autoFocus options={[
+          ["untreated", "未处理"],
+          ["processing", "维修中"],
+          ["repaired", "已修复"],
+          ["closed_unrepaired", "未修复关闭"],
+        ]} />
+        {issueStatus === "closed_unrepaired" && (
+          <Field name="closeReason" label="关闭原因" required />
+        )}
+      </div>
+      {error && <div className="inline-error" role="alert">{error}</div>}
+      <div className="form-footer"><span>更新当前损坏事项</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存维修状态"}</button></div>
     </form>
   );
 }
@@ -2054,14 +2357,17 @@ function actionFields(
   shipTo: Extract<
     WorkbenchV2LookupRow,
     { kind: "ship_to_requests" }
-  > | null = null,
+  > | null,
+  detail: WorkbenchV2ProjectDetailDto["detail"],
+  damageStatus: string,
+  onDamageStatus: (status: string) => void,
 ): ReactNode {
   if (type === "batch")
     return (
       <>
         <Field
           name="planTransportDate"
-          label="计划运输日期"
+          label="运输日期"
           type="date"
           required
           autoFocus
@@ -2086,36 +2392,9 @@ function actionFields(
           label="物流成交价"
           type="number"
           step="0.01"
-          min="0.01"
+          min="0"
           required
           help="物流成交价高于合同预算价时会提示确认，但仍允许记录。"
-        />
-      </>
-    );
-  if (type === "instrument")
-    return (
-      <>
-        <Field name="name" label="仪器名称" required autoFocus />
-        <Field name="model" label="型号" optional />
-        <Field name="serialNo" label="序列号" optional help="无序列号时可先占位；同一搬迁项目内非空序列号不得重复。" />
-        <Select
-          name="ups"
-          label="UPS"
-          required
-          options={[
-            ["false", "否"],
-            ["true", "是"],
-          ]}
-        />
-        <Select
-          name="qrRequested"
-          label="二维码是否申请"
-          required
-          help="由负责人按仪器手工标记，不保存二维码地址。"
-          options={[
-            ["false", "否"],
-            ["true", "是"],
-          ]}
         />
       </>
     );
@@ -2180,12 +2459,6 @@ function actionFields(
           required
         />
         <Field name="engineer" label="工程师" required help="填写服务单号时必须在同一次保存中填写执行工程师。" />
-        <Field
-          name="customerName"
-          label="客户单位"
-          defaultValue={project.customerName}
-          required
-        />
       </>
     );
   if (type === "acceptance")
@@ -2298,13 +2571,18 @@ function actionFields(
         <Select
           name="issueStatus"
           label="事项处理状态"
+          value={damageStatus}
+          onChange={(event) => onDamageStatus(event.target.value)}
           options={[
             ["untreated", "未处理"],
-            ["repairing", "维修中"],
+            ["processing", "维修中"],
             ["repaired", "已修复"],
             ["closed_unrepaired", "未修复关闭"],
           ]}
         />
+        {damageStatus === "closed_unrepaired" && (
+          <Field name="closeReason" label="关闭原因" required />
+        )}
         <Field
           name="registeredAt"
           label="登记日期"
@@ -2315,29 +2593,52 @@ function actionFields(
     );
   return (
     <>
+      <div className="form-group-title full">项目与进单</div>
+      <Field name="customerName" label="客户名称" defaultValue={project.customerName} optional />
+      <Field name="region" label="区域" defaultValue={project.region || ""} optional />
       <Field
         name="ecc"
         label="ECC"
         defaultValue={project.ecc || ""}
-        required
+        optional
         autoFocus
       />
-      <Field name="entryAt" label="进单日期" type="date" required />
+      <Field name="entryAt" label="进单日期" type="date" defaultValue={businessDate(project.entryAt)} optional />
+      <Field name="contractStartDate" label="合同开始日期" type="date" defaultValue={detail?.contractStartDate ?? ""} optional />
+      <Field name="contractEndDate" label="合同截止日期" type="date" defaultValue={detail?.contractEndDate ?? ""} optional />
       <Field
         name="contractAmount"
         label="合同 USD 含税金额"
         type="number"
         step="0.01"
         help="合同金额为 0 时，正式进单须另填大于 0 的最终可确认金额。"
-        required
+        defaultValue={project.contractAmount ?? ""}
+        optional
       />
       <Field
         name="finalAmount"
         label="最终可确认金额"
         type="number"
         step="0.01"
+        defaultValue={project.finalAmount ?? ""}
         optional
       />
+      <Field name="instrumentCount" label="仪器数量" type="number" min="1" step="1" defaultValue={detail?.temporaryInstrumentCount ?? ""} optional />
+      <div className="form-group-title full">地点与联系人</div>
+      <Field name="oldSiteContact" label="旧址联系人" defaultValue={detail?.oldSiteContact ?? ""} optional />
+      <Field name="newSiteContact" label="新址联系人" defaultValue={detail?.newSiteContact ?? ""} optional />
+      <Field name="oldSiteAddress" label="旧址地址" defaultValue={detail?.oldSiteAddress ?? ""} optional />
+      <Field name="newSiteAddress" label="新址地址" defaultValue={detail?.newSiteAddress ?? ""} optional />
+      <div className="form-group-title full">执行准备</div>
+      <Field name="plannedVisitAt" label="计划上门日期" type="date" defaultValue={businessDate(detail?.planVisitAt)} optional />
+      <Field name="plannedTransportAt" label="计划运输日期" type="date" defaultValue={businessDate(detail?.planTransportAt)} optional />
+      <Field name="plannedInstallDoneAt" label="计划装机完成日期" type="date" defaultValue={businessDate(detail?.plannedInstallDoneAt)} optional />
+      <Field name="actualInstallDoneAt" label="实际装机完成日期" type="date" defaultValue={businessDate(detail?.actualInstallDoneAt)} optional />
+      <label className="confirm-check full"><input name="siteConfirmed" type="checkbox" defaultChecked={detail?.siteConfirmed ?? false} />现场条件已确认</label>
+      <div className="form-group-title full">可选服务单</div>
+      <Field name="serviceOrderNo" label="服务单号" optional />
+      <Field name="engineers" label="工程师" optional help="填写服务单号时请同时填写工程师。" />
+      <TextArea name="serviceOrderNote" label="开单备注" optional />
     </>
   );
 }
@@ -2383,7 +2684,7 @@ function BoundedSectionPicker({
   return (
     <div className="field full bounded-picker">
       <label htmlFor={`v2-${kind}-picker`}>
-        {kind === "instruments" ? "搬迁仪器" : "搬迁批次"}{" "}
+        {kind === "instruments" ? "搬迁仪器" : "物流费用记录"}{" "}
         {required && <b>必填</b>}
       </label>
       <select
@@ -2481,10 +2782,10 @@ function BoundedShipToPicker({
     ) ?? [];
   return (
     <div className="field full bounded-picker">
-      <label htmlFor="v2-ship-to-request">已有 Ship-to 申请</label>
+      <label htmlFor="v2-ship-to-request">已有 Account ID 申请</label>
       <div className="lookup-search">
         <input
-          aria-label="查找 Ship-to 申请"
+          aria-label="查找 Account ID 申请"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="客户名称或新址"
@@ -2886,6 +3187,7 @@ function ProjectEditForm({
           newSiteAddress: nullable(data, "newSiteAddress"),
           plannedVisitAt: nullable(data, "plannedVisitAt"),
           plannedTransportAt: nullable(data, "plannedTransportAt"),
+          plannedInstallDoneAt: nullable(data, "plannedInstallDoneAt"),
           siteConfirmed: data.has("siteConfirmed"),
         });
       } else {
@@ -2960,6 +3262,7 @@ function ProjectEditForm({
           <div className="form-grid">
             <Field name="plannedVisitAt" label="计划上门日期" type="date" defaultValue={businessDate(detail?.planVisitAt)} optional />
             <Field name="plannedTransportAt" label="计划运输日期" type="date" defaultValue={businessDate(detail?.planTransportAt)} optional />
+            <Field name="plannedInstallDoneAt" label="计划装机完成日期" type="date" defaultValue={businessDate(detail?.plannedInstallDoneAt)} optional />
             <label className="confirm-check full">
               <input name="siteConfirmed" type="checkbox" defaultChecked={detail?.siteConfirmed ?? false} />
               现场条件已确认
@@ -2976,333 +3279,64 @@ function ProjectEditForm({
   );
 }
 
-function ProjectCreateForm({
-  onSave,
-}: {
-  onSave: (payload: ProjectWizardPayload) => Promise<void>;
-}): JSX.Element {
-  const [step, setStep] = useState(1);
-  const [draft, setDraft] = useState<Record<string, string>>(() => ({
-    entryAt: todayDate(),
-  }));
-  const [eccValue, setEccValue] = useState("");
+function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWizardPayload) => Promise<void> }): JSX.Element {
+  const [ecc, setEcc] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const hasEcc = Boolean(eccValue.trim());
-  function collect(form: HTMLFormElement): Record<string, string> {
-    const next = { ...draft };
-    new FormData(form).forEach((value, key) => {
-      next[key] = String(value);
-    });
-    setDraft(next);
-    return next;
-  }
-  async function save(event: FormEvent<HTMLFormElement>): Promise<void> {
+  const hasEcc = Boolean(ecc.trim());
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const values = collect(event.currentTarget);
-    if (step < 4) {
-      setStep((value) => value + 1);
-      return;
-    }
-    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
-    const intent = (submitter?.value || "formal") as ProjectWizardPayload["intent"];
-    if (intent === "formal" && !values.ecc?.trim()) {
-      setError("正式进单必须填写 ECC；如暂未取得 ECC，请选择“未进单先执行”。");
-      return;
-    }
-    if (intent === "pre_entry_execution" && values.ecc?.trim()) {
-      setError("已填写 ECC，请直接选择“正式进单”，不能标记为未进单先执行。");
-      return;
-    }
-    if (intent === "pre_entry_execution" && !values.approvalReason?.trim()) {
-      setError("未进单先执行必须填写经理批复原因。");
-      return;
-    }
-    if (values.serviceOrderNo?.trim() && !values.engineers?.trim()) {
-      setError("已填写服务单号，请先补齐参与工程师；项目与开单均未保存。");
-      return;
-    }
-    setBusy(true);
-    setError("");
+    const data = new FormData(event.currentTarget);
+    const value = (key: string) => String(data.get(key) || "").trim();
+    const button = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const intent = (button?.value || "formal") as ProjectWizardPayload["intent"];
+    if (intent === "formal" && !value("ecc")) { setError("正式进单必须填写 ECC。"); return; }
+    if (intent === "pre_entry_execution" && value("ecc")) { setError("已填写 ECC，请选择正式进单。"); return; }
+    if (intent === "pre_entry_execution" && !value("approvalReason")) { setError("未进单先执行必须填写经理批复原因。"); return; }
+    if (value("serviceOrderNo") && !value("engineers")) { setError("已填写服务单号，请先补齐工程师。"); return; }
+    setBusy(true); setError("");
     try {
       await onSave({
-        intent,
-        customerName: values.customerName || "",
-        ecc: values.ecc,
-        entryAt: values.entryAt,
-        region: values.region || "",
-        oldSiteContact: values.oldSiteContact,
-        newSiteContact: values.newSiteContact,
-        contractStartDate: values.contractStartDate || "",
-        contractEndDate: values.contractEndDate || "",
-        oldSiteAddress: values.oldSiteAddress || "",
-        newSiteAddress: values.newSiteAddress || "",
-        instrumentName: values.instrumentName || "",
-        model: values.model,
-        ups: values.ups === "true",
-        contractAmount: values.contractAmount,
-        finalAmount: values.finalAmount,
-        planVisitAt: values.planVisitAt,
-        planTransportAt: values.planTransportAt,
-        siteConfirmed: values.siteConfirmed === "on",
-        actualInstallDoneAt: values.actualInstallDoneAt,
-        serviceOrderNo: values.serviceOrderNo,
-        engineers: values.engineers,
-        serviceOrderNote: values.serviceOrderNote,
-        approvalReason: values.approvalReason,
-        missingItems: values.missingItems,
+        intent, customerName: value("customerName"), ecc: value("ecc"), entryAt: value("entryAt"), region: value("region"),
+        contractStartDate: value("contractStartDate") || null, contractEndDate: value("contractEndDate") || null,
+        contractAmount: value("contractAmount"), finalAmount: value("finalAmount"), oldSiteAddress: value("oldSiteAddress"),
+        newSiteAddress: value("newSiteAddress"), oldSiteContact: value("oldSiteContact"), newSiteContact: value("newSiteContact"),
+        instrumentCount: Number(value("instrumentCount")), planVisitAt: value("planVisitAt"), planTransportAt: value("planTransportAt"),
+        plannedInstallDoneAt: value("plannedInstallDoneAt"), siteConfirmed: data.get("siteConfirmed") === "on",
+        serviceOrderNo: value("serviceOrderNo"), engineers: value("engineers"), serviceOrderNote: value("serviceOrderNote"),
+        approvalReason: value("approvalReason"), missingItems: value("missingItems"),
       });
-    } catch (cause) {
-      setError(messageOf(cause));
-    } finally {
-      setBusy(false);
-    }
+    } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); }
   }
-  return (
-    <form onSubmit={(event) => void save(event)}>
-      <p className="notice">标记“可后补”的字段可暂时留空；选择正式进单时仍会按业务条件完整校验。</p>
-      <div className="wizard-steps" aria-label="新建搬迁项目步骤">
-        {["基本信息", "搬迁范围", "执行准备", "确认方式"].map(
-          (label, index) => (
-            <div
-              className={
-                step === index + 1 ? "active" : step > index + 1 ? "done" : ""
-              }
-              key={label}
-            >
-              <span>步骤 {index + 1}</span>
-              <strong>{label}</strong>
-            </div>
-          ),
-        )}
-      </div>
-      <div className="form-grid" key={step}>
-        {step === 1 ? (
-          <>
-            <Field
-              name="customerName"
-              label="客户名称"
-              defaultValue={draft.customerName}
-              required
-              autoFocus
-            />
-            <Field
-              name="region"
-              label="区域"
-              defaultValue={draft.region}
-              required
-            />
-            <Field
-              name="entryAt"
-              label="进单日期"
-              type="date"
-              defaultValue={draft.entryAt}
-              optional
-              help="正式进单统计口径；默认今天，可补录或修正，待进单时可留空。"
-            />
-            <Field name="oldSiteContact" label="旧址联系人" defaultValue={draft.oldSiteContact} optional />
-            <Field name="newSiteContact" label="新址联系人" defaultValue={draft.newSiteContact} optional />
-            <Field
-              name="contractAmount"
-              label="合同 USD 含税金额"
-              type="number"
-              step="any"
-              defaultValue={draft.contractAmount}
-              optional
-              help="仅合同 USD 含税金额允许为 0；正式进单且金额为 0 时须补最终可确认金额。"
-            />
-            <Field
-              name="contractStartDate"
-              label="合同开始日期"
-              type="date"
-              defaultValue={draft.contractStartDate}
-              required
-            />
-            <Field
-              name="contractEndDate"
-              label="合同截止日期"
-              type="date"
-              defaultValue={draft.contractEndDate}
-              required
-            />
-          </>
-        ) : step === 2 ? (
-          <>
-            <Field
-              name="oldSiteAddress"
-              label="旧址地址"
-              defaultValue={draft.oldSiteAddress}
-              required
-            />
-            <Field
-              name="newSiteAddress"
-              label="新址地址"
-              defaultValue={draft.newSiteAddress}
-              required
-            />
-            <Field
-              name="instrumentName"
-              label="仪器名称"
-              defaultValue={draft.instrumentName}
-              required
-            />
-            <Field name="model" label="型号" defaultValue={draft.model} optional />
-            <Select
-              name="ups"
-              label="UPS"
-              defaultValue={draft.ups || "false"}
-              options={[
-                ["false", "否"],
-                ["true", "是"],
-              ]}
-            />
-          </>
-        ) : step === 3 ? (
-          <>
-            <Field
-              name="planVisitAt"
-              label="计划上门日期"
-              type="date"
-              defaultValue={draft.planVisitAt}
-              optional
-            />
-            <Field
-              name="planTransportAt"
-              label="计划运输日期"
-              type="date"
-              defaultValue={draft.planTransportAt}
-              optional
-            />
-            <Field
-              name="actualInstallDoneAt"
-              label="实际装机完成日期"
-              type="date"
-              defaultValue={draft.actualInstallDoneAt}
-              optional
-            />
-            <label className="confirm-check full">
-              <input
-                name="siteConfirmed"
-                type="checkbox"
-                defaultChecked={draft.siteConfirmed === "on"}
-              />
-              现场条件已确认
-            </label>
-            <Field
-              name="serviceOrderNo"
-              label="服务单号"
-              defaultValue={draft.serviceOrderNo}
-              optional
-              help="填写后参与工程师必填；项目与搬迁开单将同次创建。"
-            />
-            <Field
-              name="engineers"
-              label="参与工程师"
-              defaultValue={draft.engineers}
-              optional
-              help="填写服务单号时必须补齐，可填写多名工程师。"
-            />
-            <TextArea
-              name="serviceOrderNote"
-              label="开单备注"
-              defaultValue={draft.serviceOrderNote}
-              optional
-              help="可后补；开单日期默认今天。"
-            />
-          </>
-        ) : (
-          <div className="wizard-review full">
-            <div className="wizard-section-head">
-              <div>
-                <h3 id="wizard-summary-title">录入摘要</h3>
-                <p>提交前核对本次项目、执行准备与开单信息。</p>
-              </div>
-              <span>第 4 步 / 共 4 步</span>
-            </div>
-            <dl className="summary-grid" aria-labelledby="wizard-summary-title">
-              {[
-                ["客户 / 区域", `${draft.customerName || "待补"} / ${draft.region || "待补"}`],
-                ["进单日期", draft.entryAt || "待进单时可留空"],
-                ["旧址 / 新址联系人", `${draft.oldSiteContact || "待补"} / ${draft.newSiteContact || "待补"}`],
-                ["合同日期", `${draft.contractStartDate || "待补"} 至 ${draft.contractEndDate || "待补"}`],
-                ["搬迁地址", `${draft.oldSiteAddress || "待补"} → ${draft.newSiteAddress || "待补"}`],
-                ["搬迁仪器", `${draft.instrumentName || "待补"}${draft.model ? ` · ${draft.model}` : ""} · UPS ${draft.ups === "true" ? "是" : "否"}`],
-                ["计划安排", `上门 ${draft.planVisitAt || "待补"} · 运输 ${draft.planTransportAt || "待补"}`],
-                ["实际装机完成", draft.actualInstallDoneAt || "未记录"],
-                ["场地确认", draft.siteConfirmed === "on" ? "已确认" : "未确认"],
-                ["服务单", draft.serviceOrderNo ? `${draft.serviceOrderNo} · ${draft.engineers || "缺工程师"}` : "未填写，不创建开单"],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <dt>{label}</dt>
-                  <dd>{value}</dd>
-                </div>
-              ))}
-            </dl>
-            <div className="confirm-fields form-grid" aria-label="确认方式补充资料">
-              <Field
-                name="ecc"
-                label="ECC"
-                defaultValue={draft.ecc}
-                optional
-                help={hasEcc ? "已填写 ECC，本次只能正式进单。" : "无 ECC 时仅可选择未进单先执行。"}
-                onChange={(event) => {
-                  const ecc = event.currentTarget.value;
-                  setEccValue(ecc);
-                  setDraft((current) => ({ ...current, ecc }));
-                  setError("");
-                }}
-              />
-              <Field name="finalAmount" label="最终可确认金额（USD）" type="number" step="0.01" defaultValue={draft.finalAmount} optional />
-              <Field
-                name="approvalReason"
-                label="经理批复原因"
-                defaultValue={draft.approvalReason}
-                required={!hasEcc}
-                optional={hasEcc}
-                help={hasEcc ? "正式进单无需填写。" : "未进单先执行必须记录经理批复原因。"}
-              />
-              <Field name="missingItems" label="缺失资料" defaultValue={draft.missingItems} optional />
-            </div>
-            <p className="notice" role="status">
-              {hasEcc
-                ? "已取得 ECC：请正式进单，未进单先执行不可选。"
-                : "暂未取得 ECC：项目将显示“未进单先执行”特殊标记，作为待补 ECC 提醒；请填写经理批复原因，并及时补齐 ECC 后正式进单。"}
-            </p>
-            <div className="save-paths" aria-label="保存路径">
-              <button name="intent" value="pre_entry_execution" disabled={busy || hasEcc}>
-                <strong>未进单先执行</strong>
-                <span>{hasEcc ? "已填写 ECC，请改为正式进单。" : "记录经理批复并添加特殊标记，主状态保持待进单。"}</span>
-              </button>
-              <button className="primary-path" name="intent" value="formal" disabled={busy || !hasEcc}>
-                <strong>正式进单</strong>
-                <span>{hasEcc ? "校验进单日期、合同与搬迁范围。" : "请先填写 ECC。"}</span>
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-      {error && (
-        <div className="inline-error" role="alert">
-          {error}
-        </div>
-      )}
-      <div className="form-footer">
-        <button
-          type="button"
-          className="button"
-          disabled={step === 1}
-          onClick={() => setStep((value) => value - 1)}
-        >
-          上一步
-        </button>
-        {step < 4 ? (
-          <button className="button primary" disabled={busy}>下一步</button>
-        ) : (
-          <span>保存路径由 ECC 自动限定；提交时继续执行现有业务校验。</span>
-        )}
-      </div>
-    </form>
-  );
+  return <form className="project-create-form" onSubmit={(event) => void submit(event)}>
+    <p className="notice">四组资料一次填完。标记“可后补”的字段可留空；合同开始和截止日期不必填。</p>
+    <div className="create-form-sections">
+      <fieldset className="edit-form-section"><legend>项目与进单</legend><div className="form-grid">
+        <Field name="customerName" label="客户名称" required autoFocus /><Field name="ecc" label="ECC" optional onChange={(event) => { setEcc(event.currentTarget.value); setError(""); }} />
+        <Field name="region" label="区域" required /><Field name="entryAt" label="进单日期" type="date" defaultValue={todayDate()} optional />
+        <Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="允许为 0；正式进单且金额为 0 时须填写最终可确认金额。" />
+        <Field name="finalAmount" label="最终可确认金额（USD）" type="number" min="0" step="0.01" optional />
+        <Field name="contractStartDate" label="合同开始日期" type="date" optional /><Field name="contractEndDate" label="合同截止日期" type="date" optional />
+      </div></fieldset>
+      <fieldset className="edit-form-section"><legend>搬迁范围</legend><div className="form-grid">
+        <Field name="oldSiteAddress" label="旧址地址" required /><Field name="newSiteAddress" label="新址地址" required />
+        <Field name="oldSiteContact" label="旧址联系人" optional /><Field name="newSiteContact" label="新址联系人" optional />
+        <Field name="instrumentCount" label="仪器数量" type="number" min="1" step="1" required />
+      </div></fieldset>
+      <fieldset className="edit-form-section"><legend>执行准备与服务单</legend><div className="form-grid">
+        <Field name="planVisitAt" label="计划上门日期" type="date" optional /><Field name="planTransportAt" label="计划运输日期" type="date" optional />
+        <Field name="plannedInstallDoneAt" label="计划装机完成日期" type="date" optional /><label className="confirm-check full"><input name="siteConfirmed" type="checkbox" />现场条件已确认</label>
+        <div className="form-group-title full">可选服务单</div><Field name="serviceOrderNo" label="服务单号" optional /><Field name="engineers" label="工程师" optional />
+        <TextArea name="serviceOrderNote" label="开单备注" optional />
+      </div></fieldset>
+      <fieldset className="edit-form-section"><legend>保存方式</legend><div className="form-grid">
+        <Field name="approvalReason" label="经理批复原因" required={!hasEcc} optional={hasEcc} /><Field name="missingItems" label="缺失资料" optional />
+        <p className="notice full" role="status">{hasEcc ? "已取得 ECC：请选择正式进单。" : "暂无 ECC：可按经理批复先执行，项目保持待进单并显示提醒。"}</p>
+        <div className="save-paths full" aria-label="保存路径"><button name="intent" value="pre_entry_execution" disabled={busy || hasEcc}><strong>未进单先执行</strong><span>记录批复原因，主状态保持待进单。</span></button><button className="primary-path" name="intent" value="formal" disabled={busy || !hasEcc}><strong>正式进单</strong><span>{hasEcc ? "按当前资料完成进单校验。" : "请先填写 ECC。"}</span></button></div>
+      </div></fieldset>
+    </div>
+    {error && <div className="inline-error" role="alert">{error}</div>}
+  </form>;
 }
 
 function ReminderFormV2({
@@ -3566,7 +3600,7 @@ function ReportPanelV2(): JSX.Element {
           <h3>有界报表结果</h3>
           {report.sections.map((section) => (
             <article className="report-section" key={section.key}>
-              <strong>{section.label}</strong>
+              <strong>{section.label.replaceAll("Ship-to", "Account ID")}</strong>
               <span>{section.rows.length} 行</span>
               <button className="button small" onClick={() => void drill(section.key)}>查看明细</button>
             </article>
@@ -3788,7 +3822,8 @@ function layerTitle(layer: LayerState): string {
     return layer.module === "serial_address" ? "序列号地址更新" : "二维码申请";
   if (layer.kind === "invoice-edit") return "编辑掉票";
   if (layer.kind === "invoice-revoke") return "撤销掉票";
-  if (layer.kind === "batch-edit") return "编辑搬迁批次";
+  if (layer.kind === "batch-edit") return "编辑物流费用记录";
+  if (layer.kind === "damage-update") return "更新维修状态";
   if (layer.kind === "action")
     return (
       ACTIONS.find((action) => action.type === layer.action)?.label ||
@@ -3800,7 +3835,7 @@ function layerDescription(
   layer: LayerState,
   project: WorkbenchProjectRow | null,
 ): string {
-  if (layer.kind === "new") return "四步完成范围、准备与确认路径";
+  if (layer.kind === "new") return "四组资料在同一页完成";
   if (layer.kind === "edit-project") return project ? `${project.customerName} · 项目级资料` : "项目级资料";
   if (layer.kind === "correct-entry") return project ? `${project.customerName} · 已正式进单项目` : "已正式进单项目";
   if (layer.kind === "report") return "手工月份区间与有界导出";

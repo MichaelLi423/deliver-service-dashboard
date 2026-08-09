@@ -172,7 +172,7 @@ describe('8.16 import_run 运行审计（schema v11 / operation_id 唯一）', (
     const dir = makeTempDir();
     try {
       const { db, close } = openEnv(dir);
-      expect(readSchemaVersion(db)).toBe(13);
+      expect(readSchemaVersion(db)).toBe(14);
       const cols = db.prepare('PRAGMA table_info(import_run)').all() as { name: string }[];
       const names = cols.map((c) => c.name);
       for (const col of [

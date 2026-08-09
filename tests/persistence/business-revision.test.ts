@@ -35,7 +35,7 @@ describe('schema v10：正式库身份与业务修订迁移（tasks 8.15 / D25�
     const dir = makeTempDir();
     try {
       const first = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(first.db)).toBe(13);
+      expect(readSchemaVersion(first.db)).toBe(14);
       const identity = readDatabaseIdentity(first.db);
       expect(identity.databaseInstanceId).toBeTruthy();
       expect(identity.contentGenerationId).toBeTruthy();
@@ -72,7 +72,7 @@ describe('schema v10：正式库身份与业务修订迁移（tasks 8.15 / D25�
 
       // 升级到 v10（含后续 v11~v13）
       runMigrations(db, { migrations: [...MIGRATIONS], backupDir });
-      expect(readSchemaVersion(db)).toBe(13);
+      expect(readSchemaVersion(db)).toBe(14);
       expect(readDatabaseIdentity(db).businessRevision).toBe(0);
       expect(db.prepare('SELECT name FROM customers WHERE id = ?').get('c-legacy')).toMatchObject({
         name: '存量客户',
@@ -153,10 +153,10 @@ describe('schema v10：正式库身份与业务修订迁移（tasks 8.15 / D25�
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
       expect(rev(db)).toBe(0);
-      // 注：v13 已是正式业务日期化迁移；用 v14 自定义迁移验证「后续迁移的 DML 也走触发器」。
+      // 注：v13/v14 已是正式迁移；用 v15 自定义迁移验证「后续迁移的 DML 也走触发器」。
       const seedLater: Migration = {
-        version: 14,
-        name: 'v14-seed-customer',
+        version: 15,
+        name: 'v15-seed-customer',
         up: (d: DatabaseSync) => {
           d.prepare('INSERT INTO customers (id, name, created_at, updated_at) VALUES (?,?,?,?)').run(
             'mig-c',

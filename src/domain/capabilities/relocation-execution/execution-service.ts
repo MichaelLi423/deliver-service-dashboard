@@ -11,6 +11,7 @@ import type {
   Batch,
   BatchQuoteInput,
   Instrument,
+  InstrumentBulkInput,
   InstrumentProgress,
   LogisticsFee,
   LogisticsFeeInput,
@@ -89,7 +90,7 @@ export class ExecutionService {
   /**
    * 记录/更新批次报价：计划运输日期、运输公司与合同预算价/物流成交价
    * （物理字段仍为 originalPriceCents/discountedPriceCents，业务术语见 execution-types）。
-   * 报价有值必须大于 0；报价阶段不作为客户侧物流收入（仅记录）。
+   * 合同预算价有值必须 > 0；物流成交价允许 0（>= 0）；报价阶段不作为客户侧物流收入（仅记录）。
    */
   updateBatchQuote(batchId: string, input: BatchQuoteInput, actor: ActorSnapshot): Batch {
     const batch = this.requireBatch(batchId);
@@ -111,7 +112,7 @@ export class ExecutionService {
     }
     if (input.discountedPriceCents !== undefined) {
       if (input.discountedPriceCents !== null) {
-        assertPositiveAmount(input.discountedPriceCents, '物流成交价');
+        assertNonNegativeAmount(input.discountedPriceCents, '物流成交价');
       }
       batch.discountedPriceCents = input.discountedPriceCents;
     }
@@ -181,6 +182,8 @@ export class ExecutionService {
       batchId: input.batchId ?? null,
       name,
       model: input.model?.trim() === '' ? null : (input.model?.trim() ?? null),
+      manufacturer: input.manufacturer?.trim() === '' ? null : (input.manufacturer?.trim() ?? null),
+      serviceLevel: input.serviceLevel?.trim() === '' ? null : (input.serviceLevel?.trim() ?? null),
       serialNo: serial,
       ups: input.ups ?? false,
       qrRequested: input.qrRequested ?? false,
@@ -192,6 +195,63 @@ export class ExecutionService {
     };
     this.instruments.save(instrument);
     return instrument;
+  }
+
+  /**
+   * 批量登记仪器（.xlsx 5 列整批提交，append 语义）：同一事务内由调用方保证原子性，
+   * 本方法先完成全部行校验再逐行落库——只有仪器名称必填，其余列去除首尾空白选填；
+   * 非空序列号在 payload 内不得重复（给出重复行号），且在同一项目内不得与库内已有
+   * 序列号重复（与 registerInstrument 同一唯一口径）。
+   */
+  bulkRegisterInstruments(
+    projectId: string,
+    rows: InstrumentBulkInput[],
+    actor: ActorSnapshot,
+  ): Instrument[] {
+    if (rows.length === 0) {
+      throw new ValidationError('BULK_EMPTY', '批量导入至少需要一行仪器数据');
+    }
+    // 1) 整批预校验：名称必填 + payload 内序列号去重（清晰行号错误，不落任何行）。
+    const seenSerial = new Map<string, number>();
+    const normalized: Array<{ name: string; serialNo: string | null; manufacturer: string | null; model: string | null; serviceLevel: string | null }> = [];
+    rows.forEach((row, index) => {
+      const line = index + 1;
+      const name = assertRequiredText(row.name, `第 ${line} 行仪器名称`);
+      const rawSerial = row.serialNo === undefined || row.serialNo === null ? null : row.serialNo.trim();
+      const serial = rawSerial === '' ? null : rawSerial;
+      if (serial !== null) {
+        const first = seenSerial.get(serial);
+        if (first !== undefined) {
+          throw new ValidationError(
+            'BULK_SERIAL_DUPLICATE_IN_PAYLOAD',
+            `序列号「${serial}」在导入数据中重复（第 ${first} 行与第 ${line} 行），请修正后重新提交`,
+          );
+        }
+        seenSerial.set(serial, line);
+      }
+      normalized.push({
+        name,
+        serialNo: serial,
+        manufacturer: row.manufacturer?.trim() === '' ? null : (row.manufacturer?.trim() ?? null),
+        model: row.model?.trim() === '' ? null : (row.model?.trim() ?? null),
+        serviceLevel: row.serviceLevel?.trim() === '' ? null : (row.serviceLevel?.trim() ?? null),
+      });
+    });
+    // 2) 库内唯一预校验：与 registerInstrument 同一口径（同一项目内非空序列号唯一）。
+    for (const row of normalized) {
+      if (row.serialNo === null) continue;
+      const existing = this.instruments.findByProjectAndSerial(projectId, row.serialNo);
+      if (existing) {
+        throw new UniquenessError(
+          'SERIAL_UNIQUE_IN_PROJECT',
+          `序列号「${row.serialNo}」在该合同/搬迁项目内已存在，跨合同可重复`,
+        );
+      }
+    }
+    // 3) 逐行登记（调用方整体事务；本方法不做部分写入）。
+    return normalized.map((row) =>
+      this.registerInstrument(projectId, { ...row, ups: false, qrRequested: false }, actor),
+    );
   }
 
   /**
@@ -396,7 +456,7 @@ export class ExecutionService {
 
   /**
    * 登记物流费用：每批次仅一笔；申请（登记）时间必填默认当天、首次登记决定
-   * 归属月份；合同预算价与物流成交价必填、人民币且 > 0（物流成交价即最终实际费用，
+   * 归属月份；合同预算价必填且 > 0，物流成交价允许 0（>= 0，即最终实际费用，
    * logisticsCostCents 旧列现行业务与物流成交价同值，仅历史兼容）；
    * 物流成交价 > 合同预算价仅警告。
    */
@@ -408,8 +468,8 @@ export class ExecutionService {
     const appliedAt = input.appliedAt === undefined ? this.today() : input.appliedAt;
     assertValidBusinessDate(appliedAt, '物流费用申请（登记）时间');
     assertPositiveAmount(input.budgetPriceCents, '合同预算价');
-    assertPositiveAmount(input.dealPriceCents, '物流成交价');
-    assertPositiveAmount(input.logisticsCostCents, '实际物流费用（历史兼容，现行业务与物流成交价同值）');
+    assertNonNegativeAmount(input.dealPriceCents, '物流成交价');
+    assertNonNegativeAmount(input.logisticsCostCents, '实际物流费用（历史兼容，现行业务与物流成交价同值）');
     const now = this.now();
     const fee: LogisticsFee = {
       id: newInternalId(),
@@ -434,8 +494,8 @@ export class ExecutionService {
   updateLogisticsFee(feeId: string, input: LogisticsFeeInput, actor: ActorSnapshot): LogisticsFeeResult {
     const fee = this.requireFee(feeId);
     assertPositiveAmount(input.budgetPriceCents, '合同预算价');
-    assertPositiveAmount(input.dealPriceCents, '物流成交价');
-    assertPositiveAmount(input.logisticsCostCents, '实际物流费用（历史兼容，现行业务与物流成交价同值）');
+    assertNonNegativeAmount(input.dealPriceCents, '物流成交价');
+    assertNonNegativeAmount(input.logisticsCostCents, '实际物流费用（历史兼容，现行业务与物流成交价同值）');
     // 申请（登记）时间保持不变：appliedAt 不在此更新
     fee.budgetPriceCents = input.budgetPriceCents;
     fee.dealPriceCents = input.dealPriceCents;
@@ -525,5 +585,12 @@ export class ExecutionService {
 function assertPositiveAmount(cents: bigint | null | undefined, fieldName: string): asserts cents is bigint {
   if (cents === null || cents === undefined || cents <= 0n) {
     throw new ValidationError('AMOUNT_MUST_BE_POSITIVE', `${fieldName} 有值时必须大于 0`);
+  }
+}
+
+/** 允许 0 的金额（物流成交价/实际费用口径）：拒绝负数。 */
+function assertNonNegativeAmount(cents: bigint | null | undefined, fieldName: string): asserts cents is bigint {
+  if (cents === null || cents === undefined || cents < 0n) {
+    throw new ValidationError('AMOUNT_NON_NEGATIVE', `${fieldName} 不得为负数`);
   }
 }

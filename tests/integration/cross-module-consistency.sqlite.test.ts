@@ -101,15 +101,15 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
       // 项目提醒（workbench-todos 消费提醒字段）
       ctx.reminder.setReminder(p1, { at: '2026-08-20', note: '跟踪回款资料' }, ACTOR);
 
-      // 掉票 6000 → 达到最终可确认金额 10000 的 60%，状态仍待掉票
+      // 掉票 6000（< 最终可确认 10000）→ 已确认语义：任意成功登记一笔掉票即进入已完成
       const inv = ctx.financial.recordInvoice(p1, { amountCents: 600000n, invoicedAt: '2026-07-15' }, ACTOR);
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
-      expect(ctx.projects.findById(p1)!.status).toBe('pending_invoice');
+      expect(ctx.projects.findById(p1)!.status).toBe('completed');
       expect(ctx.reporting.buildReport(month).monthlyInvoices[0].amountCents).toBe(600000n);
 
       // 编辑掉票 → 报表实时更新；主状态与项目提醒不受影响
       ctx.financial.editInvoice(inv.id, { amountCents: 1000000n, invoicedAt: '2026-07-16' }, ACTOR);
-      // 累计 10000 = 最终可确认 10000 → 金额闭环自动进入已完成（经 lifecycle 校验入口）
+      // 累计 10000 = 最终可确认 10000 → 仍已完成（金额闭环经 lifecycle 校验入口）
       expect(ctx.projects.findById(p1)!.status).toBe('completed');
       expect(ctx.reporting.buildReport(month).monthlyInvoices[0].amountCents).toBe(1000000n);
       expect(ctx.projects.findById(p1)!.reminderNote).toBe('跟踪回款资料'); // 项目提醒不因金额/状态变化改变

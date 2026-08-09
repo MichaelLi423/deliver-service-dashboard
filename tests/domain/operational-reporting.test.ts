@@ -46,6 +46,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     contractEndDate: null,
     planVisitAt: null,
     planTransportAt: null,
+    plannedInstallDoneAt: null,
     siteConfirmed: false,
     actualInstallDoneAt: null,
     acceptanceReport: false,

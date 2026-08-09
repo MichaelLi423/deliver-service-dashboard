@@ -64,16 +64,18 @@ export interface FormalEntryInput {
   finalConfirmableAmountCents?: bigint | null;
 }
 
-/** 项目基础字段（2.6）：旧址/新址联系人、默认旧址/新址、合同起止日期。 */
+/** 项目基础字段（2.6）：旧址/新址联系人、默认旧址/新址、合同起止日期。
+ * 合同起止日期可空/可清除（补齐资料场景）：仅提交的字段生效，缺省保持现值；
+ * 两者同时有值时必须校验截止不得早于开始。 */
 export interface BasicInfoInput {
   oldSiteContact?: string | null;
   newSiteContact?: string | null;
   oldSiteAddress?: string | null;
   newSiteAddress?: string | null;
-  /** 合同开始日期（必填，yyyy-mm-dd）。 */
-  contractStartDate: string;
-  /** 合同截止日期（必填，yyyy-mm-dd，不得早于开始日期）。 */
-  contractEndDate: string;
+  /** 合同开始日期（可空/可清除；yyyy-mm-dd）。 */
+  contractStartDate?: string | null;
+  /** 合同截止日期（可空/可清除；yyyy-mm-dd，有值且开始有值时不得早于开始）。 */
+  contractEndDate?: string | null;
 }
 
 /** 执行准备（2.3）：计划上门/运输日期与场地确认（均不触发状态流转）。 */
@@ -403,23 +405,56 @@ export class ProjectService {
 
   // ---- 2.6 项目基础字段与合同日期 ----
 
-  /** 更新基础字段与合同起止日期：两者必填，截止不得早于开始。 */
+  /**
+   * 更新基础字段与合同起止日期。
+   * 合同起止日期可空/可清除（补齐资料语义）：仅提交的字段生效，缺省保持现值；
+   * 两者同时有值时必须校验截止不得早于开始。
+   */
   updateBasicInfo(projectId: string, input: BasicInfoInput): Project {
     const project = this.requireProject(projectId);
-    assertValidDateOnly(input.contractStartDate, '合同开始日期');
-    assertValidDateOnly(input.contractEndDate, '合同截止日期');
-    if (input.contractEndDate < input.contractStartDate) {
+    const start =
+      input.contractStartDate !== undefined
+        ? input.contractStartDate === '' ? null : input.contractStartDate
+        : project.contractStartDate;
+    const end =
+      input.contractEndDate !== undefined
+        ? input.contractEndDate === '' ? null : input.contractEndDate
+        : project.contractEndDate;
+    // 先校验再落库：避免校验失败产生部分写入。
+    if (start !== null) assertValidDateOnly(start, '合同开始日期');
+    if (end !== null) assertValidDateOnly(end, '合同截止日期');
+    if (start !== null && end !== null && end < start) {
       throw new ValidationError(
         'CONTRACT_DATE_ORDER',
         '合同截止日期不得早于合同开始日期',
       );
     }
-    project.oldSiteContact = input.oldSiteContact ?? null;
-    project.newSiteContact = input.newSiteContact ?? null;
-    project.oldSiteAddress = input.oldSiteAddress ?? null;
-    project.newSiteAddress = input.newSiteAddress ?? null;
-    project.contractStartDate = input.contractStartDate;
-    project.contractEndDate = input.contractEndDate;
+    if (input.oldSiteContact !== undefined) {
+      project.oldSiteContact = input.oldSiteContact?.trim() === '' ? null : (input.oldSiteContact?.trim() ?? null);
+    }
+    if (input.newSiteContact !== undefined) {
+      project.newSiteContact = input.newSiteContact?.trim() === '' ? null : (input.newSiteContact?.trim() ?? null);
+    }
+    if (input.oldSiteAddress !== undefined) {
+      project.oldSiteAddress = input.oldSiteAddress?.trim() === '' ? null : (input.oldSiteAddress?.trim() ?? null);
+    }
+    if (input.newSiteAddress !== undefined) {
+      project.newSiteAddress = input.newSiteAddress?.trim() === '' ? null : (input.newSiteAddress?.trim() ?? null);
+    }
+    project.contractStartDate = start;
+    project.contractEndDate = end;
+    project.updatedAt = this.now();
+    this.projects.save(project);
+    return project;
+  }
+
+  /** 计划装机完成日期（独立字段）：仅计划展示，不触发生命周期流转。 */
+  setPlannedInstallDoneAt(projectId: string, at: BusinessDate | null): Project {
+    const project = this.requireProject(projectId);
+    if (at !== null) {
+      assertValidBusinessDate(at, '计划装机完成日期');
+    }
+    project.plannedInstallDoneAt = at;
     project.updatedAt = this.now();
     this.projects.save(project);
     return project;

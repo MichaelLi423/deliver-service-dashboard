@@ -115,19 +115,31 @@ describe('project-financial-closure SQLite 集成（5.12）', () => {
     }
   });
 
-  it('金额闭环状态落库：累计达到最终可确认金额 → 已完成，撤销 → 待掉票', () => {
+  it('金额闭环状态落库：任意有效掉票即已完成；撤销最后有效掉票 → 待掉票', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
       const projectId = preparePendingInvoice(ctx, '8000'); // final 800000
+      // 已确认语义：第一笔 600000（< final 800000）即已完成，不再等累计金额足额。
       ctx.financial.recordInvoice(projectId, { amountCents: 600000n, invoicedAt: '2026-08-01' }, ACTOR);
+      expect(
+        ctx.db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)?.status,
+      ).toBe('completed');
       ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02' }, ACTOR);
       expect(
         ctx.db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)?.status,
       ).toBe('completed');
 
+      // 撤销其中一笔：仍有其他有效掉票 → 保持已完成。
       const second = ctx.financial.listInvoices(projectId).find((i) => i.amountCents === 200000n)!;
       ctx.financial.revokeInvoice(second.id, { revokedAt: '2026-08-05', revokeReason: '撤销' }, ACTOR);
+      expect(
+        ctx.db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)?.status,
+      ).toBe('completed');
+
+      // 撤销最后有效掉票：累计归 0 → 回到待掉票。
+      const first = ctx.financial.listInvoices(projectId).find((i) => i.amountCents === 600000n)!;
+      ctx.financial.revokeInvoice(first.id, { revokedAt: '2026-08-06', revokeReason: '撤销' }, ACTOR);
       expect(
         ctx.db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)?.status,
       ).toBe('pending_invoice');

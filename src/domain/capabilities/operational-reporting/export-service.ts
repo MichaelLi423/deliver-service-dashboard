@@ -182,7 +182,7 @@ export function buildExportSections(report: ReportModel): ExportSection[] {
 
   sections.push({
     key: 'ship_to_request_workload',
-    title: 'Ship-to 申请工作量（首次实际提交）',
+    title: 'Account ID 申请工作量（首次实际提交）',
     header: ['月份', '责任人', '首次提交数'],
     rows: report.shipToWorkload.map((r) => [
       r.month,

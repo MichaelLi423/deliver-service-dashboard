@@ -57,6 +57,8 @@ function addInstrument(ctx: ReturnType<typeof setup>, id: string, projectId = 'p
     batchId: null,
     name: `仪器-${id}`,
     model: null,
+    manufacturer: null,
+    serviceLevel: null,
     serialNo: `SN-${id}`,
     ups: false,
     qrRequested: false,

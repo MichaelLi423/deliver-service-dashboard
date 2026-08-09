@@ -55,14 +55,20 @@ function makeFacade(): Ctx {
       contractEndDate: '2027-07-31',
       oldSiteAddress: '旧址',
       newSiteAddress: '新址',
-      instrumentName: '质谱仪',
-      ups: true,
+      instrumentCount: 1,
       contractAmount: '100000',
       finalAmount: '100000',
       siteConfirmed: false,
     },
   });
-  return { db, facade, projectId: created.changed!.projectId! };
+  const projectId = created.changed!.projectId!;
+  // 新建项目只记录 instrumentCount，不生成虚拟仪器：显式登记一台仪器供子记录测试。
+  facade.v2Mutate({
+    op: 'submit_action',
+    projectId,
+    action: { type: 'instrument', projectId, values: { name: '质谱仪', ups: true, qrRequested: false } },
+  });
+  return { db, facade, projectId };
 }
 
 function reader(ctx: Ctx, today = '2026-08-08', windowDays = 7): WorkbenchReadRepository {
@@ -472,8 +478,7 @@ describe('工作台 v2 独立模块 + lookup 分页（Oracle #10）', () => {
         contractEndDate: '2027-07-31',
         oldSiteAddress: '旧址',
         newSiteAddress: '新址',
-        instrumentName: '仪器',
-        ups: false,
+        instrumentCount: 1,
         contractAmount: '1000',
         finalAmount: '1000',
         siteConfirmed: false,
@@ -672,8 +677,7 @@ describe('工作台 v2 mutation（Oracle #10：复用写逻辑，无 snapshot）
         contractEndDate: '2027-07-31',
         oldSiteAddress: '旧址',
         newSiteAddress: '新址',
-        instrumentName: '仪器',
-        ups: false,
+        instrumentCount: 1,
         contractAmount: '50000',
         finalAmount: '50000',
         siteConfirmed: false,
@@ -789,8 +793,7 @@ describe('工作台 v2 BigInt 金额（Oracle #10 精度）', () => {
           contractEndDate: '2027-07-31',
           oldSiteAddress: '旧址',
           newSiteAddress: '新址',
-          instrumentName: '质谱仪',
-          ups: true,
+          instrumentCount: 1,
           contractAmount: BIG,
           finalAmount: BIG,
           actualInstallDoneAt: '2026-08-08',

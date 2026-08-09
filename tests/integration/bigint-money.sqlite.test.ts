@@ -90,6 +90,8 @@ function makeInstrument(projectId: string): Instrument {
     batchId: null,
     name: '仪器A',
     model: null,
+    manufacturer: null,
+    serviceLevel: null,
     serialNo: 'SN-1',
     ups: false,
     qrRequested: false,

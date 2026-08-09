@@ -31,6 +31,13 @@ export function mapConstraintError(err: unknown, message: string): Error {
 export class SqliteCustomerRepository implements CustomerRepository {
   constructor(private readonly db: DatabaseSync) {}
 
+  findById(id: string): Customer | undefined {
+    const row = this.db.prepare('SELECT * FROM customers WHERE id = ?').get(id) as
+      | Record<string, unknown>
+      | undefined;
+    return row ? (row as unknown as Customer) : undefined;
+  }
+
   findByName(name: string): Customer | undefined {
     const row = this.db.prepare('SELECT * FROM customers WHERE name = ?').get(name) as
       | Record<string, unknown>
@@ -80,11 +87,12 @@ export class SqliteProjectRepository implements ProjectRepository {
              customer_id, contract_id, entry_at,
              region, old_site_contact, new_site_contact, old_site_address, new_site_address,
              contract_start_date, contract_end_date, plan_visit_at, plan_transport_at,
-             site_confirmed, actual_install_done_at, acceptance_report, acceptance_report_date,
+             planned_install_done_at, site_confirmed, actual_install_done_at,
+             acceptance_report, acceptance_report_date,
              cancelled_at, cancel_reason, reminder_at, reminder_note,
              reminder_account_id, reminder_username_snapshot, temporary_instrument_count,
              created_at, updated_at
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET
              status=excluded.status, pre_entry_execution=excluded.pre_entry_execution,
              scope_confirmed=excluded.scope_confirmed,
@@ -96,6 +104,7 @@ export class SqliteProjectRepository implements ProjectRepository {
              old_site_address=excluded.old_site_address, new_site_address=excluded.new_site_address,
              contract_start_date=excluded.contract_start_date, contract_end_date=excluded.contract_end_date,
              plan_visit_at=excluded.plan_visit_at, plan_transport_at=excluded.plan_transport_at,
+             planned_install_done_at=excluded.planned_install_done_at,
              site_confirmed=excluded.site_confirmed, actual_install_done_at=excluded.actual_install_done_at,
              acceptance_report=excluded.acceptance_report, acceptance_report_date=excluded.acceptance_report_date,
              cancelled_at=excluded.cancelled_at, cancel_reason=excluded.cancel_reason,
@@ -126,6 +135,7 @@ export class SqliteProjectRepository implements ProjectRepository {
           project.contractEndDate,
           project.planVisitAt,
           project.planTransportAt,
+          project.plannedInstallDoneAt,
           project.siteConfirmed ? 1 : 0,
           project.actualInstallDoneAt,
           project.acceptanceReport ? 1 : 0,
@@ -346,6 +356,7 @@ function rowToProject(row: Record<string, unknown>): Project {
     contractEndDate: row.contract_end_date === null ? null : String(row.contract_end_date),
     planVisitAt: row.plan_visit_at === null ? null : String(row.plan_visit_at),
     planTransportAt: row.plan_transport_at === null ? null : String(row.plan_transport_at),
+    plannedInstallDoneAt: row.planned_install_done_at === null ? null : String(row.planned_install_done_at),
     siteConfirmed: toBool(row.site_confirmed),
     actualInstallDoneAt: row.actual_install_done_at === null ? null : String(row.actual_install_done_at),
     acceptanceReport: toBool(row.acceptance_report),

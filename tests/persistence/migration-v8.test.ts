@@ -55,7 +55,7 @@ function seedV2(db: DatabaseSync): void {
 }
 
 function assertMigratedToV10(db: DatabaseSync): void {
-  expect(readSchemaVersion(db)).toBe(13);
+  expect(readSchemaVersion(db)).toBe(14);
   // project_id 已按 instrument 回填
   const row = db.prepare('SELECT project_id FROM damage_repair_items WHERE id = ?').get('d1') as {
     project_id: string;
@@ -111,7 +111,7 @@ describe('schema v8：damage_repair_items.project_id 回填并 NOT NULL（Oracle
       seedV1(db);
 
       const result = runMigrations(db, { migrations: [...MIGRATIONS], backupDir });
-      expect(result.applied.map((m) => m.version)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+      expect(result.applied.map((m) => m.version)).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
       assertMigratedToV10(db);
       closeDatabase(db);
     } finally {

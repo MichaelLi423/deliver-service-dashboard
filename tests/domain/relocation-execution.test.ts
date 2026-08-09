@@ -168,8 +168,7 @@ describe('搬迁仪器字段（3.2）', () => {
       { name: '仪器E', qrRequested: true },
       ACTOR,
     );
-    expect(requested.qrRequested).toBe(true);
-    // 手工标记后保存原值，不发生自动改写
+    expect(requested.qrRequested).toBe(true);    // 手工标记后保存原值，不发生自动改写
     expect(notRequested.qrRequested).toBe(false);
 
     // 负责人可手工维护：由未申请改为已申请，再改回
@@ -178,6 +177,93 @@ describe('搬迁仪器字段（3.2）', () => {
     const toggledBack = service.updateInstrumentFields(notRequested.id, { qrRequested: false }, ACTOR);
     expect(toggledBack.qrRequested).toBe(false);
     expect(toggledBack.name).toBe('仪器D');
+  });
+
+  it('厂商与服务级别选填：登记与更新均去除首尾空白', () => {
+    const { service, projectService } = setup();
+    const project = projectService.createPendingProject();
+    const instrument = service.registerInstrument(
+      project.id,
+      { name: '仪器F', manufacturer: ' 安捷伦 ', serviceLevel: ' 金牌 ' },
+      ACTOR,
+    );
+    expect(instrument.manufacturer).toBe('安捷伦');
+    expect(instrument.serviceLevel).toBe('金牌');
+    const updated = service.updateInstrumentFields(instrument.id, { model: 'MS-2' }, ACTOR);
+    expect(updated.manufacturer).toBe('安捷伦');
+    expect(updated.serviceLevel).toBe('金牌');
+    // 空串视为未填
+    const blank = service.registerInstrument(
+      project.id,
+      { name: '仪器G', manufacturer: '   ', serviceLevel: '' },
+      ACTOR,
+    );
+    expect(blank.manufacturer).toBeNull();
+    expect(blank.serviceLevel).toBeNull();
+  });
+});
+
+describe('仪器批量导入（.xlsx 5 列 / append / 整批事务）', () => {
+  it('append 登记 5 列：名称/厂商/型号/序列号/服务级别，只有名称必填', () => {
+    const { service, projectService, instruments } = setup();
+    const project = projectService.createPendingProject();
+    const rows = [
+      { name: '仪器1', manufacturer: '厂商甲', model: 'M1', serialNo: 'SN-1', serviceLevel: '金牌' },
+      { name: '仪器2', serialNo: 'SN-2' }, // 其余列可空
+      { name: ' 仪器3 ', manufacturer: ' 厂商乙 ', model: ' M2 ', serviceLevel: ' 标准 ' },
+    ];
+    const saved = service.bulkRegisterInstruments(project.id, rows, ACTOR);
+    expect(saved).toHaveLength(3);
+    const all = instruments.listByProject(project.id);
+    expect(all).toHaveLength(3);
+    const byName = new Map(all.map((i) => [i.name, i]));
+    expect(byName.get('仪器1')).toMatchObject({ manufacturer: '厂商甲', model: 'M1', serialNo: 'SN-1', serviceLevel: '金牌' });
+    expect(byName.get('仪器2')).toMatchObject({ manufacturer: null, model: null, serviceLevel: null });
+    expect(byName.get('仪器3')).toMatchObject({ manufacturer: '厂商乙', model: 'M2', serviceLevel: '标准' });
+  });
+
+  it('名称必填：空行名称缺失整体拒绝且零写入', () => {
+    const { service, projectService, instruments } = setup();
+    const project = projectService.createPendingProject();
+    expect(() =>
+      service.bulkRegisterInstruments(project.id, [
+        { name: '仪器A', serialNo: 'SN-A' },
+        { name: '  ', serialNo: 'SN-B' },
+      ], ACTOR),
+    ).toThrow(/第 2 行仪器名称/);
+    expect(instruments.listByProject(project.id)).toHaveLength(0);
+  });
+
+  it('payload 内序列号重复：明确报重复行号且零写入', () => {
+    const { service, projectService, instruments } = setup();
+    const project = projectService.createPendingProject();
+    expect(() =>
+      service.bulkRegisterInstruments(project.id, [
+        { name: '仪器A', serialNo: 'SN-DUP' },
+        { name: '仪器B', serialNo: 'SN-OK' },
+        { name: '仪器C', serialNo: 'SN-DUP' },
+      ], ACTOR),
+    ).toThrow(/SN-DUP.*第 1 行与第 3 行/);
+    expect(instruments.listByProject(project.id)).toHaveLength(0);
+  });
+
+  it('与库内序列号重复：同一项目内唯一口径，整体拒绝', () => {
+    const { service, projectService, instruments } = setup();
+    const project = projectService.createPendingProject();
+    service.registerInstrument(project.id, { name: '既有仪器', serialNo: 'SN-EXIST' }, ACTOR);
+    expect(() =>
+      service.bulkRegisterInstruments(project.id, [
+        { name: '新仪器1', serialNo: 'SN-EXIST' },
+        { name: '新仪器2', serialNo: 'SN-NEW' },
+      ], ACTOR),
+    ).toThrow(/SN-EXIST/);
+    expect(instruments.listByProject(project.id)).toHaveLength(1); // 仅既有仪器
+  });
+
+  it('空批次拒绝（至少一行）', () => {
+    const { service, projectService } = setup();
+    const project = projectService.createPendingProject();
+    expect(() => service.bulkRegisterInstruments(project.id, [], ACTOR)).toThrow(/至少需要一行/);
   });
 });
 
@@ -395,7 +481,7 @@ describe('物流报价记录（3.6）', () => {
     expect(saved.discountedPriceCents).toBe(90000n);
   });
 
-  it('合同预算价/物流成交价有值时必须大于 0，可清空为 null', () => {
+  it('合同预算价有值必须大于 0；物流成交价允许 0（仅拒绝负数），可清空为 null', () => {
     const { service, projectService, batches } = setup();
     const project = projectService.createPendingProject();
     const batch = service.createBatch(project.id, ACTOR);
@@ -404,12 +490,14 @@ describe('物流报价记录（3.6）', () => {
     ).toThrow(/大于 0/);
     expect(() =>
       service.updateBatchQuote(batch.id, { discountedPriceCents: -100n }, ACTOR),
-    ).toThrow(/大于 0/);
-    // 清空报价（null）允许
+    ).toThrow(/不得为负数/);
+    // 物流成交价允许 0（已确认语义：成交价可 0、预算价仍 > 0）。
     service.updateBatchQuote(batch.id, {
       originalPriceCents: 100000n,
-      discountedPriceCents: 90000n,
+      discountedPriceCents: 0n,
     }, ACTOR);
+    expect(batches.findById(batch.id)!.discountedPriceCents).toBe(0n);
+    // 清空报价（null）允许
     service.updateBatchQuote(batch.id, {
       originalPriceCents: null,
       discountedPriceCents: null,
@@ -468,7 +556,7 @@ describe('实际物流费用记录（3.7 / TBD-14）', () => {
     expect(fees.findByBatchId(batch.id)?.appliedAt).toBe('2026-08-07');
   });
 
-  it('三项金额必填且大于 0：未填写/0/负数拒绝', () => {
+  it('合同预算价必填且大于 0；物流成交价允许 0（负数拒绝）', () => {
     const { service, batch } = makeBatch();
     expect(() =>
       service.recordLogisticsFee(batch.id, {
@@ -480,17 +568,25 @@ describe('实际物流费用记录（3.7 / TBD-14）', () => {
     expect(() =>
       service.recordLogisticsFee(batch.id, {
         budgetPriceCents: 10000n,
-        dealPriceCents: 0n,
+        dealPriceCents: -1n,
         logisticsCostCents: 11000n,
       }, ACTOR),
-    ).toThrow(/大于 0/);
+    ).toThrow(/不得为负数/);
     expect(() =>
       service.recordLogisticsFee(batch.id, {
         budgetPriceCents: 10000n,
         dealPriceCents: 12000n,
         logisticsCostCents: -1n,
       }, ACTOR),
-    ).toThrow(/大于 0/);
+    ).toThrow(/不得为负数/);
+    // 物流成交价允许 0（已确认语义：成交价可 0、预算价仍 > 0）。
+    const { fee } = service.recordLogisticsFee(batch.id, {
+      appliedAt: '2026-08-01',
+      budgetPriceCents: 10000n,
+      dealPriceCents: 0n,
+      logisticsCostCents: 0n,
+    }, ACTOR);
+    expect(fee.dealPriceCents).toBe(0n);
   });
 
   it('物流成交价大于合同预算价仅警告，仍允许保存且不自动创建项目提醒', () => {

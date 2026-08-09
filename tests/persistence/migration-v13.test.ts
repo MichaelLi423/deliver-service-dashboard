@@ -11,7 +11,8 @@ import {
   projectSnapshotHash,
   targetSnapshotHash,
 } from '../../src/domain/capabilities/local-data-persistence/target-snapshot';
-import { BUSINESS_DATE_COLUMNS, BUSINESS_DATE_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v13';
+import { BUSINESS_DATE_COLUMNS } from '../../src/domain/capabilities/local-data-persistence/schema-v13';
+import { SUPPLEMENT_FIELDS_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v14';
 import { runImport } from '../../src/domain/capabilities/historical-data-import/migration-service';
 import { MAPPING_V1, SOURCE_TABLE_FILES } from '../../src/domain/capabilities/historical-data-import/mapping';
 import type { SourceRow } from '../../src/domain/capabilities/historical-data-import/source-model';
@@ -45,12 +46,12 @@ function openV12(dir: string): { db: DatabaseSync; dbPath: string; backupDir: st
 }
 
 describe('schema v13：业务日期化迁移（design D30）', () => {
-  it('全新库引导到 v13：白名单字段声明完整、版本写入 13', () => {
+  it('全新库引导到最新版本：白名单字段声明完整、迁移序列 1..14、版本写入 14', () => {
     const dir = makeTempDir();
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(db)).toBe(BUSINESS_DATE_MIGRATION_VERSION);
-      expect(MIGRATIONS.map((m) => m.version)).toEqual(Array.from({ length: 13 }, (_, i) => i + 1));
+      expect(readSchemaVersion(db)).toBe(SUPPLEMENT_FIELDS_MIGRATION_VERSION);
+      expect(MIGRATIONS.map((m) => m.version)).toEqual(Array.from({ length: 14 }, (_, i) => i + 1));
       // 白名单覆盖 D30 全部业务时间字段（projects 提醒/执行字段、各子表业务日期）。
       const cols = new Set(BUSINESS_DATE_COLUMNS.map((c) => `${c.table}.${c.column}`));
       for (const key of [

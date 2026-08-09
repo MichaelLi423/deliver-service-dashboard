@@ -119,11 +119,13 @@ export class SqliteInstrumentRepository implements InstrumentRepository {
       this.db
         .prepare(
           `INSERT INTO instruments (
-             id, project_id, batch_id, name, model, serial_no, ups, qr_requested,
+             id, project_id, batch_id, name, model, manufacturer, service_level,
+             serial_no, ups, qr_requested,
              destination_ship_to_id, account_id, username_snapshot, created_at, updated_at
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET
              batch_id=excluded.batch_id, name=excluded.name, model=excluded.model,
+             manufacturer=excluded.manufacturer, service_level=excluded.service_level,
              serial_no=excluded.serial_no, ups=excluded.ups, qr_requested=excluded.qr_requested,
              destination_ship_to_id=excluded.destination_ship_to_id,
              account_id=excluded.account_id, username_snapshot=excluded.username_snapshot,
@@ -136,6 +138,8 @@ export class SqliteInstrumentRepository implements InstrumentRepository {
           instrument.batchId,
           instrument.name,
           instrument.model,
+          instrument.manufacturer,
+          instrument.serviceLevel,
           instrument.serialNo,
           instrument.ups ? 1 : 0,
           instrument.qrRequested ? 1 : 0,
@@ -402,6 +406,8 @@ function rowToInstrument(row: Record<string, unknown>): Instrument {
     batchId: row.batch_id === null ? null : String(row.batch_id),
     name: String(row.name),
     model: row.model === null ? null : String(row.model),
+    manufacturer: row.manufacturer === null ? null : String(row.manufacturer),
+    serviceLevel: row.service_level === null ? null : String(row.service_level),
     serialNo: row.serial_no === null ? null : String(row.serial_no),
     ups: toBool(row.ups),
     qrRequested: toBool(row.qr_requested),

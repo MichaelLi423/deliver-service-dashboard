@@ -28,7 +28,7 @@ export interface Batch {
    */
   originalPriceCents: bigint | null;
   /**
-   * 物流成交价（分整数；有值必须 > 0；即最终实际费用）。
+   * 物流成交价（分整数；有值必须 >= 0，允许 0；即最终实际费用）。
    * 物理字段名 discountedPriceCents 沿用历史命名（旧「折后价」口径），业务术语为「物流成交价」。
    */
   discountedPriceCents: bigint | null;
@@ -63,6 +63,10 @@ export interface Instrument {
   name: string;
   /** 型号（选填）。 */
   model: string | null;
+  /** 厂商（选填；批量导入列之一）。 */
+  manufacturer: string | null;
+  /** 服务级别（选填；批量导入列之一）。 */
+  serviceLevel: string | null;
   /** 非空序列号在同一合同/其唯一搬迁项目内唯一、跨合同可重复（TBD-02）。 */
   serialNo: string | null;
   /** UPS 是/否。 */
@@ -143,8 +147,8 @@ export interface InstrumentProgress {
 
 /**
  * 实际物流费用记录（tasks 3.7）：每批次仅一笔；物流费用申请（登记）时间必填
- * 默认当天、首次登记决定归属月份；合同预算价与物流成交价均必填、以人民币记录且
- * > 0；物流成交价即最终实际费用；物流成交价 > 合同预算价仅警告。
+ * 默认当天、首次登记决定归属月份；合同预算价必填且 > 0，物流成交价允许 0
+ * （>= 0，即最终实际费用）；物流成交价 > 合同预算价仅警告。
  */
 export interface LogisticsFee {
   id: string;
@@ -153,7 +157,7 @@ export interface LogisticsFee {
   appliedAt: BusinessDate;
   /** 合同预算价（分整数，必填且 > 0）。 */
   budgetPriceCents: bigint;
-  /** 物流成交价（分整数，必填且 > 0；即最终实际费用）。 */
+  /** 物流成交价（分整数，允许 0；即最终实际费用）。 */
   dealPriceCents: bigint;
   /**
    * 历史兼容旧列（旧「实际物流费用」口径）：现行业务与 dealPriceCents 恒同值
@@ -173,6 +177,10 @@ export interface RegisterInstrumentInput {
   name: string;
   /** 型号（选填）。 */
   model?: string | null;
+  /** 厂商（选填）。 */
+  manufacturer?: string | null;
+  /** 服务级别（选填）。 */
+  serviceLevel?: string | null;
   /** 非空序列号在同一项目内唯一；空序列号 = 占位仪器。 */
   serialNo?: string | null;
   /** UPS 是/否（默认否）。 */
@@ -181,6 +189,23 @@ export interface RegisterInstrumentInput {
   qrRequested?: boolean;
   /** 所属批次（可空，运输开始前可改批）。 */
   batchId?: string | null;
+}
+
+/**
+ * 仪器批量导入行（.xlsx 5 列：仪器名称/厂商/型号/序列号/服务级别，renderer 解析后整批提交）。
+ * 只有仪器名称必填；其余列选填并去除首尾空白。
+ */
+export interface InstrumentBulkInput {
+  /** 仪器名称（必填，去除首尾空白）。 */
+  name: string;
+  /** 厂商（选填）。 */
+  manufacturer?: string | null;
+  /** 型号（选填）。 */
+  model?: string | null;
+  /** 序列号（选填；payload 内及库内同一项目均不得重复）。 */
+  serialNo?: string | null;
+  /** 服务级别（选填）。 */
+  serviceLevel?: string | null;
 }
 
 /** 批次报价输入（3.6）：计划运输日期、运输公司、合同预算价/物流成交价。 */
@@ -193,7 +218,7 @@ export interface BatchQuoteInput {
    */
   originalPriceCents?: bigint | null;
   /**
-   * 物流成交价（分整数；有值必须 > 0；即最终实际费用）。
+   * 物流成交价（分整数；允许 0；即最终实际费用）。
    * 物理字段名 discountedPriceCents 沿用历史命名（旧「折后价」口径）。
    */
   discountedPriceCents?: bigint | null;
@@ -205,7 +230,7 @@ export interface LogisticsFeeInput {
   appliedAt?: BusinessDate;
   /** 合同预算价（分整数，必填且 > 0）。 */
   budgetPriceCents: bigint;
-  /** 物流成交价（分整数，必填且 > 0；即最终实际费用）。 */
+  /** 物流成交价（分整数，允许 0；即最终实际费用）。 */
   dealPriceCents: bigint;
   /**
    * 历史兼容旧列（旧「实际物流费用」口径）：现行业务与 dealPriceCents 恒同值

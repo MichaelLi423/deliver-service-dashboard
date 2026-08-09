@@ -255,13 +255,14 @@ describe('掉票直接编辑并记录最后修改时间（5.8）', () => {
     ).toThrow(/终态/);
   });
 
-  it('编辑后重算项目状态：累计达到最终可确认金额进入已完成', () => {
+  it('编辑后重算项目状态：任意有效掉票即已完成（不再等累计金额足额）', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '8000'); // final 800000
     ctx.financial.recordInvoice(projectId, { amountCents: 600000n, invoicedAt: '2026-08-01' }, ACTOR);
     const inv2 = ctx.financial.recordInvoice(projectId, { amountCents: 100000n, invoicedAt: '2026-08-02' }, ACTOR);
-    expect(ctx.projects.findById(projectId)!.status).toBe('pending_invoice');
-    // 编辑第二笔金额 100000 → 200000：累计 800000 = final → 已完成
+    // 已确认语义：登记第一笔掉票后立即进入已完成（累计 600000 < final 800000 也已完成）。
+    expect(ctx.projects.findById(projectId)!.status).toBe('completed');
+    // 编辑金额不改变已完成状态（仍存在有效掉票）。
     ctx.financial.editInvoice(inv2.id, { amountCents: 200000n, invoicedAt: '2026-08-03' }, ACTOR);
     expect(ctx.projects.findById(projectId)!.status).toBe('completed');
   });
@@ -315,15 +316,30 @@ describe('掉票撤销终态而非删除（5.9 / TBD-19）', () => {
   });
 });
 
-describe('待掉票与已完成状态按金额闭环重算（5.10 / TBD-11）', () => {
-  it('累计掉票达到最终可确认金额进入已完成', () => {
+describe('待掉票与已完成状态按金额闭环重算（5.10 / TBD-11，已确认语义）', () => {
+  it('任意成功登记一笔掉票即进入已完成（不再等累计金额足额）', () => {
     const ctx = setup();
     const projectId = preparePendingInvoice(ctx, '8000'); // final 800000
     ctx.financial.recordInvoice(projectId, { amountCents: 600000n, invoicedAt: '2026-08-01' }, ACTOR);
-    expect(ctx.projects.findById(projectId)!.status).toBe('pending_invoice');
+    // 累计 600000 < final 800000 仍立即完成。
+    expect(ctx.projects.findById(projectId)!.status).toBe('completed');
     ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02' }, ACTOR);
     expect(ctx.projects.findById(projectId)!.status).toBe('completed');
     expect(ctx.financial.countActiveInvoices(projectId)).toBe(2);
+  });
+
+  it('撤销最后有效掉票后回到待掉票（合理回退）；仍有其他有效掉票时保持已完成', () => {
+    const ctx = setup();
+    const projectId = preparePendingInvoice(ctx, '8000');
+    const inv1 = ctx.financial.recordInvoice(projectId, { amountCents: 400000n, invoicedAt: '2026-08-01' }, ACTOR);
+    const inv2 = ctx.financial.recordInvoice(projectId, { amountCents: 200000n, invoicedAt: '2026-08-02' }, ACTOR);
+    expect(ctx.projects.findById(projectId)!.status).toBe('completed');
+    // 撤销其中一笔：仍有有效掉票 → 保持已完成。
+    ctx.financial.revokeInvoice(inv1.id, { revokedAt: '2026-08-03', revokeReason: '撤销' }, ACTOR);
+    expect(ctx.projects.findById(projectId)!.status).toBe('completed');
+    // 撤销最后有效掉票：累计归 0 → 回到待掉票。
+    ctx.financial.revokeInvoice(inv2.id, { revokedAt: '2026-08-04', revokeReason: '撤销' }, ACTOR);
+    expect(ctx.projects.findById(projectId)!.status).toBe('pending_invoice');
   });
 
   it('已完成项目因撤销掉票回到待掉票', () => {

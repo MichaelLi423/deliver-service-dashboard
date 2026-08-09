@@ -58,6 +58,10 @@ import {
   applyBusinessDateMigration,
   BUSINESS_DATE_MIGRATION_VERSION,
 } from './schema-v13';
+import {
+  applySupplementFieldsMigration,
+  SUPPLEMENT_FIELDS_MIGRATION_VERSION,
+} from './schema-v14';
 
 /** 初始迁移：v1 创建覆盖 14 个能力的核心表/事实表。 */
 export const INITIAL_MIGRATION: Migration = {
@@ -150,6 +154,13 @@ export const BUSINESS_DATE_MIGRATION: Migration = {
   up: (db) => applyBusinessDateMigration(db),
 };
 
+/** v14 迁移：补齐资料/批量导入新增字段（计划装机完成日期、仪器厂商与服务级别）。 */
+export const SUPPLEMENT_FIELDS_MIGRATION: Migration = {
+  version: SUPPLEMENT_FIELDS_MIGRATION_VERSION,
+  name: 'supplement-and-bulk-import-fields',
+  up: (db) => applySupplementFieldsMigration(db),
+};
+
 /** 当前迁移序列（后续 schema 升级追加新 Migration，不修改已发布迁移）。 */
 export const MIGRATIONS: readonly Migration[] = [
   INITIAL_MIGRATION,
@@ -165,6 +176,7 @@ export const MIGRATIONS: readonly Migration[] = [
   IMPORT_RUN_AUDIT_MIGRATION,
   READ_INDEX_MIGRATION,
   BUSINESS_DATE_MIGRATION,
+  SUPPLEMENT_FIELDS_MIGRATION,
 ];
 
 export interface BootstrapOptions {

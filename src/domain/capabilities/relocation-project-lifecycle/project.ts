@@ -45,6 +45,8 @@ export interface Project {
   planVisitAt: BusinessDate | null;
   /** 执行准备占位：计划运输日期（不触发状态流转）。 */
   planTransportAt: BusinessDate | null;
+  /** 执行准备占位：计划装机完成日期（独立字段，不触发状态流转）。 */
+  plannedInstallDoneAt: BusinessDate | null;
   /** 执行准备占位：场地确认状态（不触发状态流转）。 */
   siteConfirmed: boolean;
   /** 执行准备占位：实际装机完成日期（录入后由 lifecycle 自动置为待验收）。 */
@@ -109,6 +111,7 @@ export function createPendingProject(input: CreateProjectInput = {}): Project {
     contractEndDate: null,
     planVisitAt: null,
     planTransportAt: null,
+    plannedInstallDoneAt: null,
     siteConfirmed: false,
     actualInstallDoneAt: null,
     acceptanceReport: false,

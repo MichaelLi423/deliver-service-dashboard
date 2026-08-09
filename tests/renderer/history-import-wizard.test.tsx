@@ -183,13 +183,13 @@ describe('准备数据、业务网格与问题处理', () => {
     render(<HistoryImportWizard provider={provider} />);
     fireEvent.click(await screen.findByRole('button', { name: '继续草稿' }));
     await screen.findByRole('navigation', { name: '导入步骤' });
-    const checks: [string, string][] = [['项目与合同', '合同 USD 含税金额'], ['开单记录', '执行工程师'], ['掉票与物流费用', '掉票金额（USD）'], ['序列号地址更新', '序列号'], ['二维码与 Ship-to 申请', '申请类型']];
+    const checks: [string, string][] = [['项目与合同', '合同 USD 含税金额'], ['开单记录', '执行工程师'], ['掉票与物流费用', '掉票金额（USD）'], ['序列号地址更新', '序列号'], ['二维码与 Account ID 申请', '申请类型']];
     for (const [step, column] of checks) {
       fireEvent.click(within(screen.getByRole('navigation', { name: '导入步骤' })).getByRole('button', { name: new RegExp(step) }));
       expect(await screen.findByRole('columnheader', { name: column })).toBeInTheDocument();
     }
-    fireEvent.click(screen.getByRole('tab', { name: /Ship-to 申请/ }));
-    expect(screen.getByText('本次不导入Ship-to 申请')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /Account ID 申请/ }));
+    expect(screen.getByText('本次不导入Account ID 申请')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '有数据' }));
     expect(await screen.findByRole('columnheader', { name: 'Account ID' })).toBeInTheDocument();
     expect(provider.getGridProvider).toHaveBeenCalled();

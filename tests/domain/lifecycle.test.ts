@@ -135,25 +135,38 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
   });
 
   it('自动触发 3：金额闭环在待掉票/已完成之间自动重算（优先于人工值）', () => {
+    // 已确认语义：任意成功登记一笔掉票（累计有效 > 0）即进入已完成，不再等累计金额足额。
     const toCompleted = resolveStatus(
       ctx({
         currentStatus: 'pending_invoice',
         requestedStatus: 'pending_invoice',
-        amounts: { confirmedAmountCents: 800000n, finalConfirmableAmountCents: 800000n },
+        amounts: { confirmedAmountCents: 100n, finalConfirmableAmountCents: 800000n },
       }),
     );
     expectStatus(toCompleted, 'completed');
     expectReason(toCompleted, 'auto_amount_closure');
 
+    // 撤销最后有效掉票后累计归 0 → 回到待掉票。
     const backToPending = resolveStatus(
       ctx({
         currentStatus: 'completed',
         requestedStatus: 'completed',
-        amounts: { confirmedAmountCents: 600000n, finalConfirmableAmountCents: 800000n },
+        amounts: { confirmedAmountCents: 0n, finalConfirmableAmountCents: 800000n },
       }),
     );
     expectStatus(backToPending, 'pending_invoice');
     expectReason(backToPending, 'auto_amount_closure');
+
+    // 无 0 金额闭环：final 为空/0 时不产生闭环判定。
+    const noClosure = resolveStatus(
+      ctx({
+        currentStatus: 'pending_invoice',
+        requestedStatus: 'pending_invoice',
+        amounts: { confirmedAmountCents: 500000n, finalConfirmableAmountCents: 0n },
+      }),
+    );
+    expectStatus(noClosure, 'pending_invoice');
+    expectReason(noClosure, 'unchanged');
   });
 
   it('项目未处于待掉票/已完成时金额修改不改变主状态', () => {

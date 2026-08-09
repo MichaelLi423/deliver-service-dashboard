@@ -166,6 +166,14 @@ export class WorkbenchReadRepository {
       reminderToday: count('SELECT COUNT(*) AS n FROM projects WHERE reminder_at IS NOT NULL AND substr(reminder_at,1,10) = ?', today),
       pendingAcceptance: count("SELECT COUNT(*) AS n FROM projects WHERE status = 'pending_acceptance'"),
       pendingInvoice: count("SELECT COUNT(*) AS n FROM projects WHERE status = 'pending_invoice'"),
+      // 开放维修项目数：与项目行 repairsPending 同口径（EXISTS：存在事项状态未修复且未关闭未修复）。
+      openRepairProjects: count(
+        `SELECT COUNT(*) AS n FROM projects p
+         WHERE EXISTS (
+           SELECT 1 FROM damage_repair_items d
+           WHERE d.project_id = p.id AND d.issue_status NOT IN ('repaired','closed_unrepaired')
+         )`,
+      ),
       pendingAmount: formatCents(BigInt(String(pendingAmountRow.pending_cents))),
     };
 
@@ -302,6 +310,7 @@ export class WorkbenchReadRepository {
         contractEndDate: nullString(row.contract_end_date),
         planVisitAt: nullString(row.plan_visit_at),
         planTransportAt: nullString(row.plan_transport_at),
+        plannedInstallDoneAt: nullString(row.planned_install_done_at),
         siteConfirmed: toBool(row.site_confirmed),
         actualInstallDoneAt: nullString(row.actual_install_done_at),
         acceptanceReport: toBool(row.acceptance_report),
@@ -590,6 +599,15 @@ export class WorkbenchReadRepository {
           break;
       }
     }
+    // 维修伪筛选：open=存在开放维修事项（与 repairsPending 同口径），非项目主状态。
+    if (request.repair === 'open') {
+      clauses.push(
+        `EXISTS (
+           SELECT 1 FROM damage_repair_items dr
+           WHERE dr.project_id = p.id AND dr.issue_status NOT IN ('repaired','closed_unrepaired')
+         )`,
+      );
+    }
     return { sql: clauses.length ? ` AND ${clauses.join(' AND ')}` : '', params };
   }
 
@@ -800,6 +818,8 @@ export class WorkbenchReadRepository {
           batchId: nullString(r.batch_id),
           name: String(r.name),
           model: nullString(r.model),
+          manufacturer: nullString(r.manufacturer),
+          serviceLevel: nullString(r.service_level),
           serialNo: nullString(r.serial_no),
           ups: toBool(r.ups),
           qrRequested: toBool(r.qr_requested),
@@ -896,6 +916,7 @@ const PROJECT_BASE_SELECT = `
     p.manager_approval_reason, p.manager_approval_missing,
     p.old_site_contact, p.new_site_contact, p.old_site_address, p.new_site_address,
     p.contract_start_date, p.contract_end_date, p.plan_visit_at, p.plan_transport_at,
+    p.planned_install_done_at,
     p.site_confirmed, p.actual_install_done_at, p.acceptance_report, p.acceptance_report_date,
     p.cancelled_at, p.cancel_reason, p.temporary_instrument_count,
     p.created_at, p.customer_id, p.contract_id,
@@ -922,7 +943,7 @@ const SECTION_SPECS: Record<
   },
   instruments: {
     baseSql:
-      'SELECT i.id, i.project_id, i.batch_id, i.name, i.model, i.serial_no, i.ups, i.qr_requested, i.destination_ship_to_id, i.created_at FROM instruments i WHERE i.project_id = ?',
+      'SELECT i.id, i.project_id, i.batch_id, i.name, i.model, i.manufacturer, i.service_level, i.serial_no, i.ups, i.qr_requested, i.destination_ship_to_id, i.created_at FROM instruments i WHERE i.project_id = ?',
     countSql: 'SELECT COUNT(*) AS n FROM instruments WHERE project_id = ?',
     orderSql: 'ORDER BY i.created_at DESC, i.id DESC',
     cursorSql: '(i.created_at, i.id) < (?, ?)',
