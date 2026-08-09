@@ -663,10 +663,11 @@ export interface WorkbenchV2LookupPageDto {
 
 /**
  * v2 普通写动作（复用现有写逻辑，绝不调用 snapshot；返回有界 mutation 结果）。
- * 覆盖：新建项目 / submitAction / 提醒 / 状态 / 取消 / Ship-to complete / 掉票编辑与撤销。
+ * 覆盖：新建项目 / 资料更新 / submitAction / 提醒 / 状态 / 取消 / Ship-to complete / 掉票编辑与撤销。
  */
 export type WorkbenchV2MutationOp =
   | 'create_project'
+  | 'update_project'
   | 'submit_action'
   | 'set_reminder'
   | 'clear_reminder'
@@ -691,8 +692,8 @@ export interface WorkbenchV2MutationRequest {
   op: WorkbenchV2MutationOp;
   /** submit_action / adjust_status / cancel_project / set_reminder 等需要。 */
   projectId?: string;
-  /** create_project。 */
-  payload?: ProjectWizardPayload;
+  /** create_project（ProjectWizardPayload）/ update_project（ProjectUpdatePayload）。 */
+  payload?: ProjectWizardPayload | ProjectUpdatePayload;
   /** submit_action。 */
   action?: WorkbenchActionPayload;
   /** set_reminder。 */
@@ -756,6 +757,59 @@ export interface ProjectWizardPayload {
   serviceOrderNote?: string;
   approvalReason?: string;
   missingItems?: string;
+}
+
+/**
+ * 项目资料更新输入（v2 update_project，随请求 payload 提交，renderer 契约字段名）。
+ *
+ * 三态语义（明确区分“未提交”与“清空”，禁止 truthy 判断丢失 false/空值）：
+ * - `undefined` = 未提交该字段，保持现值；
+ * - `null` = 显式清空（仅允许可空字段：联系人/地址/计划时间/区域空串；
+ *   ECC/进单时间等业务必填字段不可清空，null 视为未提交）；
+ * - 有值 = 覆盖（`siteConfirmed` 等布尔字段必须显式传 false 表示清除）。
+ *
+ * 已正式进单项目才可更正 ECC / 进单时间 / 合同金额 / 最终可确认金额；待进单项目
+ * 保留现有 core/formalEntry 语义，update_project 不绕过正式进单校验。
+ * 不提供仪器名称 / 序列号 / 服务单号修改。
+ */
+export interface ProjectUpdatePayload {
+  /** 目标项目 id（renderer 打包进 payload，与请求顶层 projectId 等价）。 */
+  projectId: string;
+  /** 客户重关联：按去除首尾空白后的名称全局唯一匹配，不存在则登记新客户并关联。 */
+  customerName?: string;
+  /** 区域：去除首尾空白后精确分组；空串 = 清空区域。 */
+  region?: string;
+  /** 合同开始日期（yyyy-mm-dd；截止不得早于开始，由主进程校验）；null = 保留现值。 */
+  contractStartAt?: string | null;
+  /** 合同截止日期（yyyy-mm-dd）。 */
+  contractEndAt?: string | null;
+  /** 旧址联系人；null = 清空。 */
+  oldSiteContact?: string | null;
+  /** 新址联系人；null = 清空。 */
+  newSiteContact?: string | null;
+  /** 项目默认旧址地址；null = 清空。 */
+  oldSiteAddress?: string | null;
+  /** 项目默认新址地址；null = 清空。 */
+  newSiteAddress?: string | null;
+  /** 计划上门时间（ISO 字符串）；null = 清空。 */
+  plannedVisitAt?: string | null;
+  /** 计划运输时间（ISO 字符串）；null = 清空。 */
+  plannedTransportAt?: string | null;
+  /** 场地确认状态；显式 false = 清除确认。 */
+  siteConfirmed?: boolean;
+  /** 已正式进单项目更正：ECC（去除首尾空白后全局唯一，必填非空；null 视为未提交）。 */
+  ecc?: string | null;
+  /** 已正式进单项目更正：进单时间（业务时间，允许补录修正；null 视为未提交）。 */
+  enteredAt?: string | null;
+  /**
+   * 已正式进单项目更正：合同 USD 含税金额（十进制字符串，允许 0、拒绝负数，
+   * 由主进程按 Money 精确解析为分；渲染层禁止 Number 参与金额计算）。
+   * 空串/null = 0（合同金额允许 0，由领域校验决定是否接受）。
+   */
+  contractUsdTaxAmount?: string | null;
+  /** 已正式进单项目更正：最终可确认金额（十进制字符串，必须 > 0 且不低于累计有效掉票；
+   *  空串/null = 0，由领域校验拒绝非法清空）。 */
+  finalConfirmableAmount?: string | null;
 }
 
 export type WorkbenchActionType =

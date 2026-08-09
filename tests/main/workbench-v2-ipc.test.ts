@@ -221,4 +221,48 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     } as WorkbenchV2ProjectPageRequest)) as { projects: Array<{ reminderNote: string | null }> };
     expect(page.projects[0].reminderNote).toBe('跟进');
   });
+
+  it('update_project 经 IPC 通道：资料更新落库并返回 bounded 失效标签', async () => {
+    const ctx = await loggedIn();
+    const created = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'create_project',
+      payload: {
+        intent: 'formal',
+        customerName: 'IPC 更新客户',
+        ecc: 'ECC-UPD-IPC',
+        region: '华东',
+        contractStartDate: '2026-08-01',
+        contractEndDate: '2027-07-31',
+        oldSiteAddress: '旧址',
+        newSiteAddress: '新址',
+        instrumentName: '仪器',
+        ups: false,
+        contractAmount: '1000',
+        finalAmount: '1000',
+        siteConfirmed: false,
+      },
+    } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
+    const projectId = created.changed.projectId;
+    const before = readBusinessRevision(ctx.db());
+
+    const result = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'update_project',
+      payload: { projectId, region: '华南', oldSiteContact: '旧址王工', siteConfirmed: false },
+    } as WorkbenchV2MutationRequest)) as { businessRevision: number; invalidated: string[]; changed: { projectId: string } };
+    expect(Object.keys(result).sort()).toEqual(['businessRevision', 'changed', 'invalidated']);
+    expect(result.businessRevision).toBeGreaterThan(before);
+    expect(result.changed).toEqual({ projectId });
+    expect(result.invalidated).toEqual(
+      expect.arrayContaining(['overview', 'projects', `project:${projectId}`, `sections:${projectId}`]),
+    );
+
+    const detail = (await ctx.bus.invoke(
+      IPC_CHANNELS.workbenchV2ProjectDetail,
+      100,
+      projectId,
+    )) as { project: { region: string | null }; detail: { oldSiteContact: string | null; siteConfirmed: boolean } | null };
+    expect(detail.project.region).toBe('华南');
+    expect(detail.detail?.oldSiteContact).toBe('旧址王工');
+    expect(detail.detail?.siteConfirmed).toBe(false);
+  });
 });

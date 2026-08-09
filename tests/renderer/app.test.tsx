@@ -364,6 +364,95 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'submit_action', action: expect.objectContaining({ type: 'qr_request', values: expect.objectContaining({ types: ['A', 'logistics_management'] }) }) })));
   });
 
+  it('项目总览编辑资料预填分组字段，显式提交 false/空值并在成功后关闭刷新详情', async () => {
+    const row = { ...project(1), customerName: '预填客户', region: '华南' };
+    const loaded = detailOf(row);
+    loaded.detail = {
+      ...loaded.detail!, contractStartDate: '2026-01-01', contractEndDate: '2026-12-31',
+      oldSiteContact: '旧址王工', newSiteContact: '新址李工', oldSiteAddress: '旧址 A', newSiteAddress: '新址 B',
+      planVisitAt: '2026-08-10T09:00:00+08:00', planTransportAt: '2026-08-11T10:00:00+08:00', siteConfirmed: true,
+    };
+    let detailReads = 0;
+    let resolveMutation!: (value: { businessRevision: number; invalidated: string[]; changed: { projectId: string } }) => void;
+    const api = mockApi({
+      v2ProjectPage: vi.fn().mockResolvedValue(page([row], null, 1)),
+      v2ProjectDetail: vi.fn().mockImplementation(() => Promise.resolve({ ...loaded, businessRevision: ++detailReads > 1 ? 2 : 1 })),
+      v2Mutate: vi.fn().mockImplementation(() => new Promise((resolve) => { resolveMutation = resolve; })),
+    });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    await screen.findByRole('region', { name: '预填客户' });
+    fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
+    const dialog = screen.getByRole('dialog', { name: '编辑项目资料' });
+    expect(within(dialog).getByRole('group', { name: '基本信息' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('group', { name: '地点与联系人' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('group', { name: '执行准备' })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/客户名称/)).toHaveValue('预填客户');
+    await waitFor(() => expect(within(dialog).getByLabelText(/客户名称/)).toHaveFocus());
+    expect(within(dialog).getByLabelText(/合同开始日期/)).toHaveValue('2026-01-01');
+    expect(within(dialog).getByLabelText(/计划上门时间/)).toHaveValue('2026-08-10T09:00');
+    const siteConfirmed = within(dialog).getByRole('checkbox', { name: '现场条件已确认' });
+    expect(siteConfirmed).toBeChecked();
+    fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '  更新客户  ' } });
+    fireEvent.change(within(dialog).getByLabelText(/新址联系人/), { target: { value: '' } });
+    fireEvent.change(within(dialog).getByLabelText(/新址地址/), { target: { value: '' } });
+    fireEvent.change(within(dialog).getByLabelText(/计划上门时间/), { target: { value: '' } });
+    fireEvent.click(siteConfirmed);
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存项目资料' }));
+    expect(within(dialog).getByRole('button', { name: '正在保存…' })).toBeDisabled();
+    expect(api.v2Mutate).toHaveBeenCalledWith({
+      op: 'update_project',
+      payload: {
+        projectId: 'p-1', customerName: '更新客户', region: '华南',
+        contractStartAt: '2026-01-01', contractEndAt: '2026-12-31',
+        oldSiteContact: '旧址王工', newSiteContact: null, oldSiteAddress: '旧址 A', newSiteAddress: null,
+        plannedVisitAt: null, plannedTransportAt: '2026-08-11T10:00', siteConfirmed: false,
+      },
+    });
+    resolveMutation({ businessRevision: 2, invalidated: ['project:p-1'], changed: { projectId: 'p-1' } });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目资料' })).not.toBeInTheDocument());
+    await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledTimes(2));
+  });
+
+  it('正式进单项目谨慎更正进单合同资料，预填金额并在错误时保留表单反馈', async () => {
+    const row = { ...project(1), entryAt: '2026-08-01T08:30:00+08:00', contractAmount: '0.00', finalAmount: '125000.50' };
+    const api = mockApi({
+      v2ProjectPage: vi.fn().mockResolvedValue(page([row], null, 1)),
+      v2ProjectDetail: vi.fn().mockResolvedValue(detailOf(row)),
+      v2Mutate: vi.fn().mockRejectedValue(new Error('ECC 已存在，未保存更正')),
+    });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    await screen.findByRole('region', { name: row.customerName });
+    fireEvent.click(screen.getByRole('button', { name: '更正进单/合同资料' }));
+    const dialog = screen.getByRole('dialog', { name: '更正进单/合同资料' });
+    expect(dialog).toHaveTextContent('进单金额快照保留正式进单当时的口径');
+    expect(within(dialog).getByLabelText(/^ECC/)).toHaveValue(row.ecc);
+    expect(within(dialog).getByLabelText(/进单时间/)).toHaveValue('2026-08-01T08:30');
+    expect(within(dialog).getByLabelText(/合同 USD 含税金额/)).toHaveValue(0);
+    expect(within(dialog).getByLabelText(/最终可确认金额/)).toHaveValue(125000.5);
+    expect(within(dialog).queryByLabelText(/仪器名称|序列号|服务单号/)).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/最终可确认金额/), { target: { value: '' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存更正' }));
+    await waitFor(() => expect(within(dialog).getByRole('alert')).toHaveTextContent('ECC 已存在，未保存更正'));
+    expect(screen.getByRole('dialog', { name: '更正进单/合同资料' })).toBeInTheDocument();
+    expect(api.v2Mutate).toHaveBeenCalledWith({
+      op: 'update_project',
+      payload: { projectId: 'p-1', ecc: row.ecc, enteredAt: '2026-08-01T08:30', contractUsdTaxAmount: '0.00', finalConfirmableAmount: null },
+    });
+  });
+
+  it('待进单项目不显示更正入口，继续使用补齐进单核心资料路径', async () => {
+    const pending = { ...project(2), formallyEntered: false, status: 'pending_entry' as const, ecc: null, entryAt: null };
+    const api = mockApi({
+      v2ProjectPage: vi.fn().mockResolvedValue(page([pending], null, 1)),
+      v2ProjectDetail: vi.fn().mockResolvedValue(detailOf(pending)),
+    });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    await screen.findByRole('region', { name: pending.customerName });
+    expect(screen.queryByRole('button', { name: '更正进单/合同资料' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '补齐进单核心资料' }));
+    expect(screen.getByRole('dialog', { name: '补齐进单核心资料' })).toBeInTheDocument();
+  });
+
   it('提醒跨页选择且详情失败时详情面板不消失，稳定显示错误与重试并可在重试后恢复', async () => {
     const crossRow = { ...project(51), id: 'p-51', customerName: '跨页客户', ecc: 'ECC-000051', status: 'pending_entry' as const };
     const findProject = (id: string): WorkbenchProjectRow | null =>

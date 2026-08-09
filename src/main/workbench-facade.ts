@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { Money, formatCents } from '../domain/core/money';
 import { ValidationError } from '../domain/core/errors';
 import { SystemClock } from '../domain/core/time';
-import { CustomerService, ProjectService, type ProjectStatusOrCancelled } from '../domain/capabilities/relocation-project-lifecycle';
+import { CustomerService, ProjectService, isFormallyEntered, type ProjectStatusOrCancelled } from '../domain/capabilities/relocation-project-lifecycle';
 import { ExecutionService, type WorkType } from '../domain/capabilities/relocation-execution';
 import { ServiceOrderService } from '../domain/capabilities/service-order-recording';
 import { ReminderService } from '../domain/capabilities/workbench-todos';
@@ -26,7 +26,7 @@ import {
 } from '../domain/capabilities/local-data-persistence';
 import { readBusinessRevision } from '../domain/capabilities/local-data-persistence/identity';
 import type {
-  AccountSessionInfo, ProjectWizardPayload, ReportDto, ReportFilterDto, ShipToRequestDto,
+  AccountSessionInfo, ProjectUpdatePayload, ProjectWizardPayload, ReportDto, ReportFilterDto, ShipToRequestDto,
   ShipToRequestInputDto, ShipToRequestResultDto, ShipToRequestStatus, WorkbenchActionPayload,
   WorkbenchV2IndependentPageDto, WorkbenchV2IndependentPageRequest, WorkbenchV2InvalidateTag,
   WorkbenchV2LookupPageDto, WorkbenchV2LookupPageRequest, WorkbenchV2MutationRequest,
@@ -151,8 +151,18 @@ export class WorkbenchFacade {
     let extraTags: WorkbenchV2InvalidateTag[] = [];
     switch (request.op) {
       case 'create_project': {
-        const ref = this.writeCreateProject(request.payload!);
+        const ref = this.writeCreateProject(request.payload as ProjectWizardPayload);
         changed = { projectId: ref.projectId, created: true };
+        break;
+      }
+      case 'update_project': {
+        const update = request.payload as ProjectUpdatePayload;
+        const ref = this.writeUpdateProject(update.projectId, update);
+        changed = { projectId: ref.projectId };
+        if (update.customerName !== undefined) {
+          // 客户重关联可能登记新客户，客户 lookup 需要重读。
+          extraTags.push('lookup:customers');
+        }
         break;
       }
       case 'submit_action': {
@@ -261,6 +271,88 @@ export class WorkbenchFacade {
       if (input.intent === 'pre_entry_execution') projectService.setPreEntryExecution(project.id, { reason:input.approvalReason ?? '', missingItems:input.missingItems ?? '' });
       if (input.intent === 'formal') projectService.formalEntry(project.id, { ecc:input.ecc ?? '', entryAt:input.entryAt ? new Date(input.entryAt).toISOString() : undefined, finalConfirmableAmountCents: (input.finalAmount ?? '') === '' ? undefined : parseAmountInput(input.finalAmount) });
       if (input.actualInstallDoneAt) projectService.recordActualInstallDone(project.id, new Date(input.actualInstallDoneAt).toISOString());
+    });
+    return { projectId };
+  }
+
+  /**
+   * 更新项目资料（v2 update_project）：同一事务内复用现有领域命令原子落库。
+   * - 普通资料（客户重关联/区域/联系人/地址/合同起止/计划上门运输/现场确认）任何状态可更新；
+   * - ECC / 进单时间 / 合同金额 / 最终可确认金额更正仅允许已正式进单项目（待进单项目必须走
+   *   core/formalEntry 语义，update_project 不绕过正式进单校验，避免绕过财务闭环）；
+   * - 已取消项目禁止任何资料更新（终态）；
+   * - 三态输入：undefined=未提交、null=显式清空（仅可空字段；ECC/进单时间 null 视为未提交，
+   *   金额 null 解析为 0 交由领域校验决定是否接受）、有值=覆盖；布尔显式传 false。
+   */
+  private writeUpdateProject(projectId: string, update: ProjectUpdatePayload): { projectId: string } {
+    this.transaction(() => {
+      const projectService = this.projectService();
+      const project = this.projects.findById(projectId);
+      if (!project) {
+        throw new ValidationError('PROJECT_NOT_FOUND', `项目不存在: ${projectId}`);
+      }
+      if (project.status === 'cancelled') {
+        throw new ValidationError('CANCELLED_PROJECT', '已取消项目禁止修改项目资料');
+      }
+      const formallyEntered = isFormallyEntered(project);
+
+      // 客户重关联：按去除首尾空白后的名称全局唯一匹配，不存在则登记新客户并关联。
+      if (update.customerName !== undefined) {
+        const name = update.customerName.trim();
+        if (name === '') {
+          throw new ValidationError('CUSTOMER_NAME_REQUIRED', '客户名称必填');
+        }
+        const customerRepo = new SqliteCustomerRepository(this.db);
+        const customer = customerRepo.findByName(name) ?? new CustomerService(customerRepo).register(name);
+        projectService.linkCustomer(projectId, customer.id);
+      }
+
+      // 基础字段与合同起止日期（缺省取现值合并；截止不得早于开始由领域校验）。
+      if (
+        update.oldSiteContact !== undefined || update.newSiteContact !== undefined ||
+        update.oldSiteAddress !== undefined || update.newSiteAddress !== undefined ||
+        update.contractStartAt !== undefined || update.contractEndAt !== undefined
+      ) {
+        const current = this.projects.findById(projectId)!;
+        projectService.updateBasicInfo(projectId, {
+          oldSiteContact: update.oldSiteContact !== undefined ? update.oldSiteContact : current.oldSiteContact,
+          newSiteContact: update.newSiteContact !== undefined ? update.newSiteContact : current.newSiteContact,
+          oldSiteAddress: update.oldSiteAddress !== undefined ? update.oldSiteAddress : current.oldSiteAddress,
+          newSiteAddress: update.newSiteAddress !== undefined ? update.newSiteAddress : current.newSiteAddress,
+          contractStartDate: update.contractStartAt ?? current.contractStartDate ?? '',
+          contractEndDate: update.contractEndAt ?? current.contractEndDate ?? '',
+        });
+      }
+
+      if (update.region !== undefined) projectService.setRegion(projectId, update.region);
+
+      // 执行准备：计划上门/运输时间（null=清空）与现场确认（显式 false=清除）。
+      if (update.plannedVisitAt !== undefined || update.plannedTransportAt !== undefined || update.siteConfirmed !== undefined) {
+        projectService.updateExecutionPreparation(projectId, {
+          planVisitAt: update.plannedVisitAt === undefined ? undefined : update.plannedVisitAt === null ? null : new Date(update.plannedVisitAt).toISOString(),
+          planTransportAt: update.plannedTransportAt === undefined ? undefined : update.plannedTransportAt === null ? null : new Date(update.plannedTransportAt).toISOString(),
+          siteConfirmed: update.siteConfirmed,
+        });
+      }
+
+      // 以下更正仅允许已正式进单项目；待进单项目必须走 core/formalEntry 语义。
+      if (
+        !formallyEntered &&
+        (update.ecc !== undefined || update.enteredAt !== undefined || update.contractUsdTaxAmount !== undefined || update.finalConfirmableAmount !== undefined)
+      ) {
+        throw new ValidationError(
+          'UPDATE_REQUIRES_FORMAL_ENTRY',
+          'ECC、进单时间、合同金额与最终可确认金额更正仅允许已正式进单项目；待进单项目请使用正式进单/补齐核心资料',
+        );
+      }
+
+      // ECC/进单时间为必填业务字段，null 视为未提交（不可清空）。
+      if (update.ecc != null) projectService.updateEcc(projectId, update.ecc);
+      if (update.enteredAt != null) projectService.setEntryAt(projectId, new Date(update.enteredAt).toISOString());
+      // 合同金额允许 0、拒绝负数（领域 5.1）；最终可确认金额必须 > 0 且不低于累计有效掉票（领域 5.4），
+      // 空串/null 解析为 0，由领域校验拒绝非法清空。
+      if (update.contractUsdTaxAmount !== undefined) this.financialService().setContractUsdTaxAmount(projectId, parseAmountInput(update.contractUsdTaxAmount));
+      if (update.finalConfirmableAmount !== undefined) this.financialService().setFinalConfirmableAmount(projectId, parseAmountInput(update.finalConfirmableAmount));
     });
     return { projectId };
   }

@@ -36,6 +36,23 @@ import {
 } from "../history-import";
 
 const PAGE_SIZE = 50;
+const QR_REQUEST_TYPES = [
+  { code: "A", label: "A" },
+  { code: "B", label: "B" },
+  { code: "C", label: "C" },
+  { code: "D", label: "D" },
+  {
+    code: "precise_instrument_packing_only",
+    label: "仅打包搬运精密仪器",
+  },
+  { code: "oem_equipment", label: "OEM 设备" },
+  { code: "temporary_label", label: "临时标签" },
+  { code: "project_acceptance_form", label: "项目验收单" },
+  { code: "logistics_management", label: "物流管理" },
+] as const;
+const QR_REQUEST_TYPE_LABEL = new Map<string, string>(
+  QR_REQUEST_TYPES.map(({ code, label }) => [code, label]),
+);
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   pending_entry: "待进单",
   pending_execution: "待执行",
@@ -174,13 +191,37 @@ interface Filters {
   query: string;
 }
 type LayerState =
-  | { kind: "new" | "quick" | "reminder" | "cancel" | "report" }
+  | { kind: "new" | "quick" | "reminder" | "cancel" | "report" | "edit-project" | "correct-entry" }
   | { kind: "action"; action: WorkbenchActionType }
   | { kind: "independent"; module: WorkbenchV2IndependentKind }
   | {
       kind: "invoice-edit" | "invoice-revoke";
       invoice: Extract<WorkbenchV2SectionRow, { kind: "invoices" }>;
     };
+
+type ProjectUpdatePayload = {
+  projectId: string;
+  customerName?: string;
+  region?: string;
+  contractStartAt?: string | null;
+  contractEndAt?: string | null;
+  oldSiteContact?: string | null;
+  newSiteContact?: string | null;
+  oldSiteAddress?: string | null;
+  newSiteAddress?: string | null;
+  plannedVisitAt?: string | null;
+  plannedTransportAt?: string | null;
+  siteConfirmed?: boolean;
+  ecc?: string | null;
+  enteredAt?: string | null;
+  contractUsdTaxAmount?: string | null;
+  finalConfirmableAmount?: string | null;
+};
+
+function updateProjectRequest(payload: ProjectUpdatePayload): WorkbenchV2MutationRequest {
+  // update_project 的共享类型由后端 lane 补齐；renderer 先按已约定 IPC 契约发出请求。
+  return { op: "update_project", payload } as unknown as WorkbenchV2MutationRequest;
+}
 
 export function WorkbenchV2({
   session,
@@ -1067,6 +1108,9 @@ export function WorkbenchV2({
             else void loadDetail(selectedId);
           }}
           onAction={(action) => setLayer({ kind: "action", action })}
+          onEditProject={() => setLayer({ kind: "edit-project" })}
+          onCorrectEntry={() => setLayer({ kind: "correct-entry" })}
+          onCompleteEntry={() => setLayer({ kind: "action", action: "core" })}
           onNext={() => {
             if (!sectionPage?.nextCursor || !selectedId) return;
             const next = [...sectionCursors, sectionPage.nextCursor];
@@ -1107,6 +1151,24 @@ export function WorkbenchV2({
             <ProjectCreateForm
               onSave={(payload) =>
                 mutate({ op: "create_project", payload }, "搬迁项目已创建")
+              }
+            />
+          ) : layer.kind === "edit-project" && selected ? (
+            <ProjectEditForm
+              mode="project"
+              project={selected}
+              detail={detail?.detail ?? null}
+              onSave={(payload) =>
+                mutate(updateProjectRequest(payload), "项目资料已更新")
+              }
+            />
+          ) : layer.kind === "correct-entry" && selected && selected.formallyEntered ? (
+            <ProjectEditForm
+              mode="entry"
+              project={selected}
+              detail={detail?.detail ?? null}
+              onSave={(payload) =>
+                mutate(updateProjectRequest(payload), "进单与合同资料已更正")
               }
             />
           ) : layer.kind === "quick" ? (
@@ -1354,6 +1416,9 @@ function ProjectDetails({
   onTab,
   onRetry,
   onAction,
+  onEditProject,
+  onCorrectEntry,
+  onCompleteEntry,
   onNext,
   onPrevious,
   onInvoiceEdit,
@@ -1369,6 +1434,9 @@ function ProjectDetails({
   onTab: (tab: DetailTab) => void;
   onRetry: () => void;
   onAction: (action: WorkbenchActionType) => void;
+  onEditProject: () => void;
+  onCorrectEntry: () => void;
+  onCompleteEntry: () => void;
   onNext: () => void;
   onPrevious: () => void;
   onInvoiceEdit: (
@@ -1485,8 +1553,23 @@ function ProjectDetails({
             正在读取当前项目数据…
           </div>
         ) : tab === "项目总览" ? (
-          <div className="fact-grid">
-            {[
+          <div className="project-overview">
+            <div className="overview-edit-actions" aria-label="项目资料维护">
+              <div>
+                <strong>项目资料维护</strong>
+                <span>仅维护项目、地点、联系人和执行准备，不编辑仪器、序列号或服务单。</span>
+              </div>
+              <div className="row-actions">
+                <button className="button" onClick={onEditProject}>编辑项目资料</button>
+                {project.formallyEntered ? (
+                  <button className="button" onClick={onCorrectEntry}>更正进单/合同资料</button>
+                ) : (
+                  <button className="button primary" onClick={onCompleteEntry}>补齐进单核心资料</button>
+                )}
+              </div>
+            </div>
+            <div className="fact-grid">
+              {[
               ["主状态", STATUS_LABEL[project.status]],
               [
                 "进单时间",
@@ -1500,12 +1583,13 @@ function ProjectDetails({
               ["搬迁批次", `${project.counts.batches} 个`],
               ["搬迁仪器", `${project.counts.instruments} 台`],
               ["上门活动", `${project.counts.activities} 次`],
-            ].map(([label, value]) => (
-              <div key={label}>
-                <span>{label}</span>
-                <strong>{value}</strong>
-              </div>
-            ))}
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </div>
           </div>
         ) : (
           <SectionTable
@@ -2357,6 +2441,7 @@ function IndependentModuleV2({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [instrumentId, setInstrumentId] = useState("");
+  const [qrTypes, setQrTypes] = useState<string[]>(["A", "B"]);
   const sequence = useRef(0);
   async function load(cursor: string | null): Promise<void> {
     const id = ++sequence.current;
@@ -2383,17 +2468,12 @@ function IndependentModuleV2({
     const data = new FormData(event.currentTarget);
     const values: WorkbenchActionPayload["values"] = {};
     data.forEach((value, key) => {
-      if (key === "types") {
-        const current = values.types;
-        values.types = [
-          ...(Array.isArray(current) ? current : []),
-          String(value),
-        ];
-      } else values[key] = String(value);
+      if (key !== "types") values[key] = String(value);
     });
+    if (kind === "qr_request") values.types = [...new Set(qrTypes)];
     if (kind === "serial_address") values.instrumentId = instrumentId;
     try {
-      if (kind === "qr_request" && !Array.isArray(values.types)) {
+      if (kind === "qr_request" && qrTypes.length === 0) {
         throw new Error("请至少选择一种二维码申请类型");
       }
       await onSave({
@@ -2402,6 +2482,7 @@ function IndependentModuleV2({
         values,
       });
       await load(stack.at(-1) ?? null);
+      if (kind === "qr_request") setQrTypes(["A", "B"]);
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -2409,8 +2490,13 @@ function IndependentModuleV2({
     }
   }
   return (
-    <div className="module-layout v2-independent">
-      <form onSubmit={(event) => void submit(event)}>
+    <div
+      className={`module-layout v2-independent ${kind === "qr_request" ? "qr-request-module" : ""}`}
+    >
+      <form
+        className={kind === "qr_request" ? "qr-request-form" : undefined}
+        onSubmit={(event) => void submit(event)}
+      >
         <div className="form-grid">
           {kind === "serial_address" ? (
             <>
@@ -2446,7 +2532,13 @@ function IndependentModuleV2({
             </>
           ) : (
             <>
-              <Field name="applicant" label="申请人" required autoFocus />
+              <Field
+                name="applicant"
+                label="申请人"
+                defaultValue="搬迁负责人"
+                required
+                autoFocus
+              />
               <Field
                 name="requestedAt"
                 label="申请时间"
@@ -2456,19 +2548,44 @@ function IndependentModuleV2({
               />
               <div className="field full" role="group" aria-labelledby="v2-qr-types-label">
                 <span className="field-label" id="v2-qr-types-label">
-                  申请类型 <b>必填，可多选</b>
+                  申请类型 <b>至少一类</b>
                 </span>
-                <div className="choice-grid">
-                  {[
-                    ["A", "仪器服务"],
-                    ["project_acceptance_form", "项目验收单"],
-                    ["logistics_management", "物流管理"],
-                  ].map(([value, label]) => (
-                    <label key={value}>
-                      <input type="checkbox" name="types" value={value} />
+                <div className="choice-grid qr-type-grid">
+                  {QR_REQUEST_TYPES.map(({ code, label }) => (
+                    <label key={code}>
+                      <input
+                        type="checkbox"
+                        name="types"
+                        value={code}
+                        checked={qrTypes.includes(code)}
+                        onChange={(event) =>
+                          setQrTypes((current) =>
+                            event.target.checked
+                              ? [...current, code]
+                              : current.filter((item) => item !== code),
+                          )
+                        }
+                      />
                       {label}
                     </label>
                   ))}
+                </div>
+                <small>
+                  类型只用于分类和计数；同一条记录内去重，不关联搬迁仪器或搬迁项目。
+                </small>
+              </div>
+              <div className="field full qr-workload-preview" aria-live="polite">
+                <div>
+                  <span>本条记录</span>
+                  <strong>1 条</strong>
+                </div>
+                <div>
+                  <span>去重类型</span>
+                  <strong>{new Set(qrTypes).size} 类</strong>
+                </div>
+                <div>
+                  <span>计入工作量</span>
+                  <strong>{new Set(qrTypes).size}</strong>
                 </div>
               </div>
             </>
@@ -2480,16 +2597,33 @@ function IndependentModuleV2({
           </div>
         )}
         <div className="form-footer">
-          <span>保存后仅刷新当前独立模块</span>
+          <span>
+            {kind === "qr_request"
+              ? "每条记录按去重后的选中类型计工作量"
+              : "保存后仅刷新当前独立模块"}
+          </span>
           <button
             className="button primary"
             disabled={busy || (kind === "serial_address" && !instrumentId)}
           >
-            {busy ? "正在保存…" : "保存记录"}
+            {busy
+              ? "正在保存…"
+              : kind === "qr_request"
+                ? "保存申请"
+                : "保存记录"}
           </button>
         </div>
       </form>
       <section className="module-list">
+        {kind === "qr_request" && (
+          <div className="module-list-heading">
+            <div>
+              <h3>申请记录</h3>
+              <p>重复申请独立保留并分别计入工作量。</p>
+            </div>
+            <span>{page?.total ?? 0} 条</span>
+          </div>
+        )}
         <form
           className="module-search"
           onSubmit={(event) => {
@@ -2508,7 +2642,7 @@ function IndependentModuleV2({
           </label>
           <button className="button">查找</button>
         </form>
-        <DataRows rows={page?.rows ?? []} />
+        <DataRows kind={kind} rows={page?.rows ?? []} />
         <div className="queue-pagination">
           <button
             className="button"
@@ -2543,8 +2677,10 @@ function IndependentModuleV2({
 }
 
 function DataRows({
+  kind,
   rows,
 }: {
+  kind: WorkbenchV2IndependentKind;
   rows: WorkbenchV2IndependentPageDto["rows"];
 }): JSX.Element {
   if (!rows.length)
@@ -2552,29 +2688,169 @@ function DataRows({
   return (
     <div className="table-scroll">
       <table className="data-table">
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td>
-                <strong>
-                  {row.kind === "qr_request" ? row.applicant : row.customerName}
-                </strong>
-                <small>
-                  {row.kind === "qr_request"
-                    ? row.types.join("、")
-                    : `${row.serialNo} · ${row.accountId}`}
-                </small>
-              </td>
-              <td>
-                {new Date(
-                  row.kind === "qr_request" ? row.requestedAt : row.updatedAt,
-                ).toLocaleString("zh-CN")}
-              </td>
+        {kind === "qr_request" && (
+          <thead>
+            <tr>
+              <th>申请人</th>
+              <th>申请时间</th>
+              <th>申请类型</th>
+              <th className="numeric">工作量</th>
             </tr>
-          ))}
+          </thead>
+        )}
+        <tbody>
+          {rows.map((row) =>
+            row.kind === "qr_request" ? (
+              <tr key={row.id}>
+                <td><strong>{row.applicant}</strong></td>
+                <td>{new Date(row.requestedAt).toLocaleString("zh-CN")}</td>
+                <td className="qr-type-list">
+                  {row.types.map(
+                    (type) => QR_REQUEST_TYPE_LABEL.get(type) ?? type,
+                  ).join("、")}
+                </td>
+                <td className="numeric qr-workload-cell">{row.workload}</td>
+              </tr>
+            ) : (
+              <tr key={row.id}>
+                <td>
+                  <strong>{row.customerName}</strong>
+                  <small>{`${row.serialNo} · ${row.accountId}`}</small>
+                </td>
+                <td>{new Date(row.updatedAt).toLocaleString("zh-CN")}</td>
+              </tr>
+            ),
+          )}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ProjectEditForm({
+  mode,
+  project,
+  detail,
+  onSave,
+}: {
+  mode: "project" | "entry";
+  project: WorkbenchProjectRow;
+  detail: NonNullable<WorkbenchV2ProjectDetailDto["detail"]> | null;
+  onSave: (payload: ProjectUpdatePayload) => Promise<void>;
+}): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const nullable = (data: FormData, name: string): string | null => {
+    const value = String(data.get(name) ?? "").trim();
+    return value || null;
+  };
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (busy) return;
+    const data = new FormData(event.currentTarget);
+    setBusy(true);
+    setError("");
+    try {
+      if (mode === "project") {
+        await onSave({
+          projectId: project.id,
+          customerName: String(data.get("customerName") ?? "").trim(),
+          region: String(data.get("region") ?? "").trim(),
+          contractStartAt: nullable(data, "contractStartAt"),
+          contractEndAt: nullable(data, "contractEndAt"),
+          oldSiteContact: nullable(data, "oldSiteContact"),
+          newSiteContact: nullable(data, "newSiteContact"),
+          oldSiteAddress: nullable(data, "oldSiteAddress"),
+          newSiteAddress: nullable(data, "newSiteAddress"),
+          plannedVisitAt: nullable(data, "plannedVisitAt"),
+          plannedTransportAt: nullable(data, "plannedTransportAt"),
+          siteConfirmed: data.has("siteConfirmed"),
+        });
+      } else {
+        await onSave({
+          projectId: project.id,
+          ecc: nullable(data, "ecc"),
+          enteredAt: nullable(data, "enteredAt"),
+          contractUsdTaxAmount: nullable(data, "contractUsdTaxAmount"),
+          finalConfirmableAmount: nullable(data, "finalConfirmableAmount"),
+        });
+      }
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (mode === "entry") {
+    return (
+      <form className="project-edit-form" onSubmit={(event) => void submit(event)}>
+        <p className="notice">
+          仅用于更正已经正式进单项目的识别与金额资料。合同金额是当前合同值；进单金额快照保留正式进单当时的口径，不会因本次更正自动改写。
+        </p>
+        <div className="edit-form-sections">
+          <fieldset className="edit-form-section">
+            <legend>进单识别</legend>
+            <div className="form-grid">
+              <Field name="ecc" label="ECC" defaultValue={project.ecc ?? ""} required autoFocus />
+              <Field name="enteredAt" label="进单时间" type="datetime-local" defaultValue={localDateTime(project.entryAt)} required />
+            </div>
+          </fieldset>
+          <fieldset className="edit-form-section">
+            <legend>当前合同与闭环金额</legend>
+            <div className="form-grid">
+              <Field name="contractUsdTaxAmount" label="合同 USD 含税金额" type="number" step="0.01" min="0" defaultValue={project.contractAmount ?? ""} optional help="这是当前合同金额；允许为 0，不会覆盖正式进单时保存的进单金额快照。" />
+              <Field name="finalConfirmableAmount" label="最终可确认金额（USD）" type="number" step="0.01" min="0.01" defaultValue={project.finalAmount ?? ""} optional help="用于当前掉票金额闭环；清空时由业务校验决定是否允许。" />
+            </div>
+          </fieldset>
+        </div>
+        {error && <div className="inline-error" role="alert">{error}</div>}
+        <div className="form-footer">
+          <span>不会修改仪器、序列号或服务单资料。</span>
+          <button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存更正"}</button>
+        </div>
+      </form>
+    );
+  }
+  return (
+    <form className="project-edit-form" onSubmit={(event) => void submit(event)}>
+      <p className="notice">维护项目级资料；留空的可选字段会按空值提交。仪器、序列号和服务单请在各自业务入口维护。</p>
+      <div className="edit-form-sections">
+        <fieldset className="edit-form-section">
+          <legend>基本信息</legend>
+          <div className="form-grid">
+            <Field name="customerName" label="客户名称" defaultValue={project.customerName} required autoFocus />
+            <Field name="region" label="区域" defaultValue={project.region ?? ""} required />
+            <Field name="contractStartAt" label="合同开始日期" type="date" defaultValue={detail?.contractStartDate ?? ""} optional />
+            <Field name="contractEndAt" label="合同截止日期" type="date" defaultValue={detail?.contractEndDate ?? ""} optional />
+          </div>
+        </fieldset>
+        <fieldset className="edit-form-section">
+          <legend>地点与联系人</legend>
+          <div className="form-grid">
+            <Field name="oldSiteAddress" label="旧址地址" defaultValue={detail?.oldSiteAddress ?? ""} optional />
+            <Field name="newSiteAddress" label="新址地址" defaultValue={detail?.newSiteAddress ?? ""} optional />
+            <Field name="oldSiteContact" label="旧址联系人" defaultValue={detail?.oldSiteContact ?? ""} optional />
+            <Field name="newSiteContact" label="新址联系人" defaultValue={detail?.newSiteContact ?? ""} optional />
+          </div>
+        </fieldset>
+        <fieldset className="edit-form-section">
+          <legend>执行准备</legend>
+          <div className="form-grid">
+            <Field name="plannedVisitAt" label="计划上门时间" type="datetime-local" defaultValue={localDateTime(detail?.planVisitAt)} optional />
+            <Field name="plannedTransportAt" label="计划运输时间" type="datetime-local" defaultValue={localDateTime(detail?.planTransportAt)} optional />
+            <label className="confirm-check full">
+              <input name="siteConfirmed" type="checkbox" defaultChecked={detail?.siteConfirmed ?? false} />
+              现场条件已确认
+            </label>
+          </div>
+        </fieldset>
+      </div>
+      {error && <div className="inline-error" role="alert">{error}</div>}
+      <div className="form-footer">
+        <span>保存后刷新当前项目总览。</span>
+        <button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存项目资料"}</button>
+      </div>
+    </form>
   );
 }
 
@@ -3348,6 +3624,8 @@ function Empty({ title, copy }: { title: string; copy: string }): JSX.Element {
 }
 function layerTitle(layer: LayerState): string {
   if (layer.kind === "new") return "新建搬迁项目";
+  if (layer.kind === "edit-project") return "编辑项目资料";
+  if (layer.kind === "correct-entry") return "更正进单/合同资料";
   if (layer.kind === "quick") return "快速记录";
   if (layer.kind === "reminder") return "维护项目提醒";
   if (layer.kind === "cancel") return "取消项目";
@@ -3368,6 +3646,8 @@ function layerDescription(
   project: WorkbenchProjectRow | null,
 ): string {
   if (layer.kind === "new") return "四步完成范围、准备与确认路径";
+  if (layer.kind === "edit-project") return project ? `${project.customerName} · 项目级资料` : "项目级资料";
+  if (layer.kind === "correct-entry") return project ? `${project.customerName} · 已正式进单项目` : "已正式进单项目";
   if (layer.kind === "report") return "手工月份区间与有界导出";
   if (layer.kind === "independent") return "独立模块 · 记录按页读取";
   if (layer.kind === "cancel") return "记录取消时间与原因（终态，不可恢复）";

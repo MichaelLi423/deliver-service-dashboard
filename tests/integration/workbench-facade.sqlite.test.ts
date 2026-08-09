@@ -120,8 +120,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(() => facade.v2Mutate({ op: 'adjust_status', projectId, status: 'completed' })).toThrow();
   });
 
-  it('Ship-to 申请按 requestId 线性推进：创建草稿→提交→完成；重复创建/重复推进不重复申请与工作量', async () => {
-    const { facade } = await makeFacade();
+  it('Ship-to 申请按 requestId 线性推进：创建草稿→提交→完成；重复创建/重复推进不重复申请与工作量', async () => {    const { facade } = await makeFacade();
     // 创建草稿：API 返回该记录（不自动 submit），无提交时间不计工作量
     const created = facade.createShipToRequest({ customerName: 'ShipTo客户', newSiteAddress: '新址甲' });
     expect(created.request.status).toBe('pending_submit');
@@ -298,5 +297,190 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     } finally {
       closeDatabase(db);
     }
+  });
+
+  it('update_project 普通资料更新落库：区域/联系人/地址/合同起止/计划时间/现场确认，返回完整 invalidation tags', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({
+        intent: 'draft',
+        customerName: '资料更新客户',
+        region: '华东',
+        oldSiteContact: '旧址王工',
+        newSiteContact: '新址李工',
+        oldSiteAddress: '旧址甲',
+        newSiteAddress: '新址乙',
+        contractStartDate: '2026-08-01',
+        contractEndDate: '2027-07-31',
+        planVisitAt: '2026-08-10T09:00:00+08:00',
+        planTransportAt: '2026-08-12T09:00:00+08:00',
+        siteConfirmed: true,
+      }),
+    });
+    const projectId = projectIdOf(created);
+
+    const result = facade.v2Mutate({
+      op: 'update_project',
+      payload: {
+        projectId,
+        region: '华南',
+        oldSiteContact: '新旧址张工',
+        newSiteContact: '新新址刘工',
+        oldSiteAddress: '旧址丙',
+        newSiteAddress: '新址丁',
+        contractStartAt: '2026-09-01',
+        contractEndAt: '2027-08-31',
+        plannedVisitAt: '2026-09-05T02:00:00.000Z',
+        plannedTransportAt: null, // 显式清空
+        siteConfirmed: false, // 显式 false，不允许 truthy 丢失
+      },
+    });
+    // 失效标签覆盖 projects/overview/project/sections
+    expect(result.changed).toMatchObject({ projectId });
+    expect(result.invalidated).toEqual(
+      expect.arrayContaining(['overview', 'projects', `project:${projectId}`, `sections:${projectId}`]),
+    );
+    const detail = facade.v2ProjectDetail(projectId);
+    expect(detail.project!.region).toBe('华南');
+    expect(detail.detail).toMatchObject({
+      oldSiteContact: '新旧址张工',
+      newSiteContact: '新新址刘工',
+      oldSiteAddress: '旧址丙',
+      newSiteAddress: '新址丁',
+      contractStartDate: '2026-09-01',
+      contractEndDate: '2027-08-31',
+      planVisitAt: '2026-09-05T02:00:00.000Z',
+      planTransportAt: null,
+      siteConfirmed: false,
+    });
+  });
+
+  it('update_project 客户重关联：按名称匹配既有客户或登记新客户；区域空串=清空，联系人 null=清空', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'draft', customerName: '原客户', region: '华东', oldSiteContact: '旧址王工' }),
+    });
+    const projectId = projectIdOf(created);
+
+    // 重关联到新名称：登记新客户并刷新 lookup 标签
+    const relinked = facade.v2Mutate({
+      op: 'update_project',
+      payload: { projectId, customerName: '新客户甲', oldSiteContact: null },
+    });
+    expect(relinked.invalidated).toContain('lookup:customers');
+    expect(facade.v2ProjectDetail(projectId).project!.customerName).toBe('新客户甲');
+    expect(facade.v2ProjectDetail(projectId).detail!.oldSiteContact).toBeNull();
+
+    // 重关联到已存在的客户名称：不重复登记，仅改挂
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, customerName: '新客户甲' } });
+    expect(facade.v2ProjectDetail(projectId).project!.customerName).toBe('新客户甲');
+    // 区域空串 = 清空
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, region: '' } });
+    expect(facade.v2ProjectDetail(projectId).project!.region).toBeNull();
+  });
+
+  it('update_project 正式进单后更正 ECC/进单时间/合同金额/最终可确认金额', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({
+        customerName: '金额更正客户',
+        ecc: 'ECC-UPD-1',
+        entryAt: '2026-08-01T09:00:00+08:00',
+        contractAmount: '100000',
+        finalAmount: '100000',
+      }),
+    });
+    const projectId = projectIdOf(created);
+    const detail = facade.v2ProjectDetail(projectId);
+    expect(detail.project!.formallyEntered).toBe(true);
+
+    facade.v2Mutate({
+      op: 'update_project',
+      payload: {
+        projectId,
+        ecc: 'ECC-UPD-2',
+        enteredAt: '2026-08-15T02:30:00.000Z',
+        contractUsdTaxAmount: '2000',
+        finalConfirmableAmount: '1500',
+      },
+    });
+    const after = facade.v2ProjectDetail(projectId);
+    expect(after.project!.ecc).toBe('ECC-UPD-2');
+    expect(after.project!.entryAt).toBe('2026-08-15T02:30:00.000Z');
+    expect(after.project!.contractAmount).toBe('2000.00');
+    expect(after.project!.finalAmount).toBe('1500.00');
+  });
+
+  it('update_project 待进单项目拒绝财务/业务标识更正，不绕过正式进单语义', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'draft', customerName: '待进单更正客户' }),
+    });
+    const projectId = projectIdOf(created);
+    expect(() =>
+      facade.v2Mutate({ op: 'update_project', payload: { projectId, contractUsdTaxAmount: '5000' } }),
+    ).toThrow(/仅允许已正式进单项目/);
+    expect(() =>
+      facade.v2Mutate({ op: 'update_project', payload: { projectId, ecc: 'ECC-X' } }),
+    ).toThrow(/仅允许已正式进单项目/);
+    // 普通资料仍可更新
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, region: '华北' } });
+    expect(facade.v2ProjectDetail(projectId).project!.region).toBe('华北');
+  });
+
+  it('update_project 不变量错误不部分落库：区域修改已写入后金额不合法，整体回滚', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({
+        customerName: '原子更正客户',
+        ecc: 'ECC-ATOMIC',
+        contractAmount: '2000',
+        finalAmount: '2000',
+      }),
+    });
+    const projectId = projectIdOf(created);
+    // 掉票 1000 → 最终可确认金额不得低于累计有效掉票
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11T09:00', amount: '1000' } } });
+    expect(facade.v2ProjectDetail(projectId).project!.invoicedAmount).toBe('1000.00');
+
+    // 同一次调用：区域已提交（事务内先写）但 finalAmount 低于累计掉票被领域拒绝 → 整体回滚
+    expect(() =>
+      facade.v2Mutate({
+        op: 'update_project',
+        payload: { projectId, region: '西北', finalConfirmableAmount: '500' },
+      }),
+    ).toThrow(/不得低于累计有效掉票/);
+    const after = facade.v2ProjectDetail(projectId);
+    expect(after.project!.region).toBe('华东');
+    expect(after.project!.finalAmount).toBe('2000.00');
+  });
+
+  it('update_project 尊重不变量：ECC 全局唯一冲突拒绝，且已取消项目禁止任何更新', async () => {
+    const { facade } = await makeFacade();
+    const first = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ customerName: '唯一客户一', ecc: 'ECC-UNIQUE-1', contractAmount: '1000', finalAmount: '1000' }),
+    });
+    const second = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ customerName: '唯一客户二', ecc: 'ECC-UNIQUE-2', contractAmount: '1000', finalAmount: '1000' }),
+    });
+    // ECC 冲突：拒绝且原值保持不变
+    expect(() =>
+      facade.v2Mutate({ op: 'update_project', payload: { projectId: projectIdOf(second), ecc: 'ECC-UNIQUE-1' } }),
+    ).toThrow(/ECC.*已存在/);
+    expect(facade.v2ProjectDetail(projectIdOf(second)).project!.ecc).toBe('ECC-UNIQUE-2');
+
+    // 已取消项目：终态禁止任何资料更新
+    facade.v2Mutate({ op: 'cancel_project', projectId: projectIdOf(first), time: '2026-08-15T09:00', reason: '客户取消' });
+    expect(() =>
+      facade.v2Mutate({ op: 'update_project', payload: { projectId: projectIdOf(first), region: '华北' } }),
+    ).toThrow(/已取消项目禁止修改项目资料/);
+    expect(facade.v2ProjectDetail(projectIdOf(first)).project!.region).toBe('华东');
   });
 });
