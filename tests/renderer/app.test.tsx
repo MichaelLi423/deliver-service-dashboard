@@ -277,10 +277,10 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(dialog).toHaveTextContent('向导客户 / 华东');
     expect(dialog).toHaveTextContent('旧址王工 / 新址李工');
     expect(dialog).toHaveTextContent('SO-WIZ-001 · 工程师甲、乙');
-    expect(within(dialog).getByRole('button', { name: /保存为待进单.*项目保持待进单/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /正式进单.*请先填写 ECC/ })).toBeDisabled();
     expect(within(dialog).getByRole('button', { name: /未进单先执行.*经理批复/ })).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText(/^ECC/), { target: { value: 'ECC-WIZ-001' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: /正式进单.*校验 ECC/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /正式进单.*校验进单日期/ }));
 
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({
       op: 'create_project',
@@ -652,7 +652,8 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.change(within(dialog).getByLabelText(/仪器名称/), { target: { value: '质谱仪' } });
     fireEvent.click(within(dialog).getByRole('button', { name: '下一步' }));
     fireEvent.click(within(dialog).getByRole('button', { name: '下一步' }));
-    fireEvent.click(within(dialog).getByRole('button', { name: /正式进单.*校验 ECC/ }));
+    fireEvent.change(within(dialog).getByLabelText(/^ECC/), { target: { value: 'ECC-NEW-001' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /正式进单.*校验进单日期/ }));
 
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'create_project' })));
     // 弹层关闭，筛选清除并回到首屏。
