@@ -1063,6 +1063,7 @@ export type WorkbenchV2MutationOp =
   | 'submit_action'
   | 'set_reminder'
   | 'clear_reminder'
+  | 'set_window_days'
   | 'adjust_status'
   | 'cancel_project'
   | 'ship_to_complete'
@@ -1096,6 +1097,8 @@ export interface WorkbenchV2MutationRequest {
   /** set_reminder：提醒日期（业务日期 yyyy-mm-dd）。 */
   reminderAt?: string | null;
   reminderNote?: string | null;
+  /** set_window_days：临期窗口天数（整数天）。 */
+  windowDays?: number;
   /** adjust_status（拒绝 cancelled，取消走 cancel_project）。 */
   status?: AdjustableProjectStatus;
   /** cancel_project：取消日期（业务日期 yyyy-mm-dd）。 */

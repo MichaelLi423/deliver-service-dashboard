@@ -261,6 +261,9 @@ export class WorkbenchFacade {
         this.writeClearReminder(request.projectId!);
         changed = { projectId: request.projectId };
         break;
+      case 'set_window_days':
+        this.writeSetUpcomingWindowDays(request.windowDays!);
+        break;
       case 'adjust_status':
         this.writeAdjustStatus(request.projectId!, request.status!);
         changed = { projectId: request.projectId, status: request.status };
@@ -1089,6 +1092,19 @@ export class WorkbenchFacade {
 
   private writeClearReminder(projectId: string): void {
     this.reminderService().clearReminder(projectId, this.actor());
+  }
+
+  /**
+   * 配置临期窗口（v2 set_window_days）。
+   * 刻意错误校验（preset-failure 培训阶段）：领域 ReminderService.setUpcomingWindowDays
+   * 允许 0（校验为「不小于 0 的整数」），此处却以 days <= 0 拒绝，0 被错误拒绝；
+   * 修复前不得改动领域服务或持久化。
+   */
+  private writeSetUpcomingWindowDays(days: number): void {
+    if (!Number.isInteger(days) || days <= 0) {
+      throw new ValidationError('INVALID_WINDOW_DAYS', '临期窗口必须为不小于 1 的整数天');
+    }
+    this.reminderService().setUpcomingWindowDays(days);
   }
 
   private writeAdjustStatus(projectId: string, status: ProjectStatusOrCancelled): void {

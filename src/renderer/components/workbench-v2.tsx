@@ -324,6 +324,9 @@ export function WorkbenchV2({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [toast, setToast] = useState("");
+  const [reminderWindowInput, setReminderWindowInput] = useState("");
+  const [reminderWindowSaving, setReminderWindowSaving] = useState(false);
+  const [reminderWindowError, setReminderWindowError] = useState("");
   const [layer, setLayer] = useState<LayerState | null>(null);
   const [historyImport, setHistoryImport] = useState(false);
   const [independentRefresh, setIndependentRefresh] = useState(0);
@@ -480,6 +483,12 @@ export function WorkbenchV2({
     void loadOverview();
   }, []);
   useEffect(() => {
+    if (overview) {
+      setReminderWindowInput(String(overview.reminderWindowDays));
+      setReminderWindowError("");
+    }
+  }, [overview?.reminderWindowDays]);
+  useEffect(() => {
     setCursorStack([null]);
     void loadProjects(null, 0);
   }, [filters.status, filters.repair, filters.reminder, filters.region, filters.query]);
@@ -564,6 +573,31 @@ export function WorkbenchV2({
       window.setTimeout(() => setToast(""), 2800);
     } catch (cause) {
       throw new Error(mutationErrorMessage(cause));
+    }
+  }
+
+  async function saveReminderWindow(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
+    event.preventDefault();
+    if (reminderWindowSaving) return;
+    const value = reminderWindowInput.trim();
+    const days = Number(value);
+    if (!/^\d+$/.test(value) || !Number.isInteger(days) || days < 1) {
+      setReminderWindowError("临期窗口至少为 1 天");
+      return;
+    }
+    setReminderWindowSaving(true);
+    setReminderWindowError("");
+    try {
+      await mutate(
+        { op: "set_window_days", windowDays: days },
+        `临期窗口已更新为未来 ${days} 天`,
+      );
+    } catch (cause) {
+      setReminderWindowError(messageOf(cause));
+    } finally {
+      setReminderWindowSaving(false);
     }
   }
 
@@ -751,6 +785,13 @@ export function WorkbenchV2({
   const bottleneck = overview?.stages.reduce((current, item) =>
     !current || item.averageDays > current.averageDays ? item : current,
   undefined as WorkbenchV2OverviewDto["stages"][number] | undefined);
+  const reminderWindowCandidate = Number(reminderWindowInput.trim());
+  const reminderWindowChanged = Boolean(
+    overview &&
+      (reminderWindowInput.trim() === "" ||
+        !Number.isInteger(reminderWindowCandidate) ||
+        reminderWindowCandidate !== overview.reminderWindowDays),
+  );
 
   return (
     <div className="app-shell workbench-v2">
@@ -930,23 +971,67 @@ export function WorkbenchV2({
             className="panel reminder-panel"
             aria-labelledby="reminder-title"
           >
-            <div className="panel-head">
+            <div className="panel-head reminder-panel-head">
               <div>
                 <h2 id="reminder-title">
                   项目提醒快速处理 {overview?.reminderTotal ?? 0}
                 </h2>
-                <p>优先显示最接近当前时间的提醒</p>
+                <p>
+                  未来 {overview?.reminderWindowDays ?? "—"} 个自然日标记为临期
+                </p>
               </div>
-              <button
-                className="text-action"
-                onClick={() => {
-                  selectionPin.current = "";
-                  setDraftFilters((old) => ({ ...old, reminder: "any" }));
-                  setFilters((old) => ({ ...old, reminder: "any" }));
-                }}
-              >
-                查看全部
-              </button>
+              <div className="reminder-panel-actions">
+                <form
+                  className="reminder-window-form"
+                  noValidate
+                  onSubmit={(event) => void saveReminderWindow(event)}
+                >
+                  <div className="reminder-window-controls">
+                    <label htmlFor="reminder-window-days">临期窗口</label>
+                    <input
+                      id="reminder-window-days"
+                      type="number"
+                      min={1}
+                      step={1}
+                      inputMode="numeric"
+                      value={reminderWindowInput}
+                      disabled={!overview || reminderWindowSaving}
+                      aria-invalid={Boolean(reminderWindowError)}
+                      aria-describedby={
+                        reminderWindowError
+                          ? "reminder-window-error"
+                          : undefined
+                      }
+                      onChange={(event) => {
+                        setReminderWindowInput(event.target.value);
+                        setReminderWindowError("");
+                      }}
+                    />
+                    <span>天</span>
+                    <button
+                      className="button small"
+                      disabled={!reminderWindowChanged || reminderWindowSaving}
+                    >
+                      {reminderWindowSaving ? "保存中…" : "保存"}
+                    </button>
+                  </div>
+                  {reminderWindowError && (
+                    <small id="reminder-window-error" role="alert">
+                      {reminderWindowError}
+                    </small>
+                  )}
+                </form>
+                <button
+                  className="text-action reminder-view-all"
+                  onClick={() => {
+                    selectionPin.current = "";
+                    setDraftFilters((old) => ({ ...old, reminder: "any" }));
+                    setFilters((old) => ({ ...old, reminder: "any" }));
+                  }}
+                >
+                  查看全部
+                </button>
+              </div>
             </div>
             <div className="reminder-list">
               {overview?.reminderPreview.map((item) => (
@@ -966,7 +1051,12 @@ export function WorkbenchV2({
                           : "备注"}
                   </span>
                   <strong>{item.customerName}</strong>
-                  <small>{item.ecc ?? item.tempNo}</small>
+                  <small>
+                    {item.ecc ?? item.tempNo}
+                    {item.reminderAt
+                      ? ` · ${businessDate(item.reminderAt)}`
+                      : ""}
+                  </small>
                   <p>{item.reminderNote || "查看提醒日期"}</p>
                 </button>
               ))}
