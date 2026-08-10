@@ -15,57 +15,16 @@
 export const scenarioMap = {
   // ─────────────────────────── workbench-access ───────────────────────────
   'workbench-access': {
-    '首次启动必须创建账号': {
+    '启动直接进入工作台': {
       evidence: [
-        ['tests/domain/access.test.ts', '首次启动必须创建账号：无账号时状态为未初始化，创建后为已初始化'],
-        ['tests/integration/workbench-facade.sqlite.test.ts', '真实保存项目、项目提醒、十类动作中的核心记录及独立二维码申请'],
+        ['tests/renderer/app.test.tsx', '无密码模式渲染启动直接进入工作台：不出现初始化/登录界面，会话来自主进程'],
+        ['e2e/electron-smoke.spec.ts', '空数据库启动直接进入工作台'],
       ],
     },
-    '初始化后禁止新增第二个账号': {
+    '无初始化、登录与恢复码入口': {
       evidence: [
-        ['tests/domain/access.test.ts', '初始化后禁止新增第二个账号：第二次初始化被拒绝且不产生第二行'],
-        ['tests/persistence/account-persistence.test.ts', '数据库层禁止新增第二个账号（singleton 唯一约束）'],
-      ],
-    },
-    '后续启动需登录': {
-      evidence: [
-        ['tests/domain/access.test.ts', '登录成功：返回访问会话（账号内部 ID + 登录时用户名快照）'],
-        ['tests/persistence/account-persistence.test.ts', '关闭重开后数据保留：仍需登录本地账号才能获得会话'],
-      ],
-    },
-    '无远程认证与账号同步': {
-      evidence: [
-        ['tests/domain/access.test.ts', '无远程认证、外部身份源与账号同步：服务不暴露任何同步/导入账号能力'],
-      ],
-    },
-    '密码与恢复码不以明文存储': {
-      evidence: [
-        ['tests/domain/access.test.ts', '密码与恢复码不以明文存储：落库为 scrypt 派生值 + 独立随机盐'],
-        ['tests/persistence/account-persistence.test.ts', '密码与恢复码不以明文落库：数据库行只有 scrypt 派生值（十六进制）与盐'],
-      ],
-    },
-    '校验使用恒定时间比较': {
-      evidence: [
-        ['tests/domain/access.test.ts', '校验使用恒定时间比较：正确口令通过、错误口令恒定返回 false'],
-      ],
-    },
-    '恢复码仅展示一次': {
-      evidence: [
-        ['tests/domain/access.test.ts', '恢复码仅展示一次：初始化返回明文一次，此后无任何途径再次读取明文'],
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
-      ],
-    },
-    '凭恢复码重置密码': {
-      evidence: [
-        ['tests/domain/access.test.ts', '凭恢复码重置密码：旧密码失效、新密码可用，原恢复码失效并生成新恢复码'],
-        ['tests/persistence/account-persistence.test.ts', '持久化重置密码全流程：重开后新密码可登录、旧密码与原恢复码失效、新恢复码可用'],
-        ['tests/integration/runtime-lifecycle.sqlite.test.ts', '启动自动备份 → 初始化 → 录入 → 关闭重开登录 → 手动备份 → 恢复 → 恢复码重置'],
-        ['e2e/electron-smoke.spec.ts', '关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录'],
-      ],
-    },
-    '恢复码校验失败拒绝重置': {
-      evidence: [
-        ['tests/domain/access.test.ts', '恢复码校验失败拒绝重置：密码保持不变，不泄露有效性信息'],
+        ['tests/renderer/app.test.tsx', '无密码模式渲染启动直接进入工作台：不出现初始化/登录界面，会话来自主进程'],
+        ['tests/domain/access.test.ts', '自动建号不生成可用的密码/恢复码：恢复码字段为空，口令为随机秘密的派生值'],
       ],
     },
     '无多账号与角色账号': {
@@ -79,7 +38,7 @@ export const scenarioMap = {
         ['tests/domain/access.test.ts', '无远程认证、外部身份源与账号同步：服务不暴露任何同步/导入账号能力'],
       ],
     },
-    '手工录入事实归属当前登录账号': {
+    '手工录入事实归属内部本地用户': {
       evidence: [
         ['tests/domain/access.test.ts', '负责人录入外部事实归属当前登录账号：会话快照作为动作记录归属'],
         ['tests/domain/source.test.ts', '手工录入事实必须携带当前登录账号的内部 ID 与用户名快照'],
@@ -97,7 +56,7 @@ export const scenarioMap = {
         ['tests/domain/source.test.ts', '迁移导入事实不归属本地账号（迁移不计手工录入）'],
       ],
     },
-    '本地账号不加密数据库文件': {
+    'SQLite 数据库文件不因本地用户加密': {
       evidence: [
         ['tests/persistence/account-persistence.test.ts', '本地账号不加密 SQLite：数据库文件为普通 SQLite 且账号数据直接可读'],
         ['tests/persistence/runtime-boundary.test.ts', '本地账号表存在但 SQLite 不加密：数据库文件为普通 SQLite、账号数据本地可读'],
@@ -105,9 +64,8 @@ export const scenarioMap = {
     },
     'Windows 操作系统账户为主要保护边界': {
       abstract: true,
-      status: 'pending',
-      evidence: [['docs/verification/迁移执行与运维说明.md', '本地账号仅为访问门槛']],
-      note: 'Windows 操作系统账户边界在 macOS 开发机不可验证；10.6 交付文档已明确账号不加密 SQLite、登录本地账号不能防止直接读取数据库文件',
+      evidence: [['docs/verification/迁移执行与运维说明.md', '无应用内访问门槛']],
+      note: 'Windows 操作系统账户边界已由客户在 Windows 目标环境验收（tasks 8.85）；10.6 交付文档已明确无访问门槛、SQLite 不加密、内部本地用户不能防止直接读取数据库文件',
     },
     '负责人录入外部事实': {
       evidence: [
@@ -123,6 +81,11 @@ export const scenarioMap = {
     '工程师执行信息由负责人记录': {
       evidence: [
         ['tests/domain/relocation-execution.test.ts', '多名工程师参与同一活动：保存全部参与工程师'],
+      ],
+    },
+    '非受信窗口不能调用受保护能力': {
+      evidence: [
+        ['tests/main/import-wizard-ipc.test.ts', '未登录时导入向导全部 invoke 通道拒绝；非受信 sender 拒绝'],
       ],
     },
     '无外部数据同步': {
@@ -212,7 +175,7 @@ export const scenarioMap = {
         ['tests/domain/relocation-status.test.ts', '非法状态调整被拒：待执行 → 已完成（尚无掉票闭环依据）'],
       ],
     },
-    '实际装机完成时间自动进入待验收': {
+    '实际装机完成日期自动进入待验收': {
       evidence: [
         ['tests/domain/lifecycle.test.ts', '自动触发 1：实际装机完成时间自动置为待验收，且优先于人工选择'],
         ['tests/domain/relocation-status.test.ts', '录入实际装机完成时间自动进入待验收（TBD-07）'],
@@ -228,17 +191,17 @@ export const scenarioMap = {
         ['tests/domain/lifecycle.test.ts', '自动触发 3：金额闭环在待掉票/已完成之间自动重算（优先于人工值）'],
       ],
     },
-    '填写进单时间保持填写值': {
+    '填写进单日期保持填写值': {
       evidence: [
         ['tests/domain/relocation-entry.test.ts', '填写进单时间保持填写值，不以当前时间覆盖'],
       ],
     },
-    '进单时间默认当前且可补录': {
+    '进单日期默认当天且可补录': {
       evidence: [
         ['tests/domain/relocation-entry.test.ts', '进单时间未填写默认取当前时间，并允许进单后补录或修正'],
       ],
     },
-    '待进单进单时间可空': {
+    '待进单进单日期可空': {
       evidence: [
         ['tests/domain/relocation-entry.test.ts', '待进单阶段进单时间可空'],
       ],
@@ -261,17 +224,17 @@ export const scenarioMap = {
     },
     '先执行后进单由负责人确定主状态': {
       evidence: [
-        ['tests/domain/relocation-status.test.ts', '先执行后进单：正式进单不按已发生事实自动跳转，主状态由负责人人工确定'],
+        ['tests/domain/relocation-status.test.ts', '先执行后进单：正式进单基线待执行（无自动触发时），主状态由负责人后续确定'],
         ['tests/domain/lifecycle.test.ts', '标签清除后主状态由负责人人工确定，且明确自动触发仍生效'],
       ],
     },
-    '先录入实际装机完成时间后进单自动待验收': {
+    '先录入实际装机完成日期后进单自动待验收': {
       evidence: [
         ['tests/domain/relocation-status.test.ts', '先录入实际装机完成时间后进单自动待验收（TBD-07）'],
         ['tests/integration/relocation-project-lifecycle.sqlite.test.ts', '未进单先执行 → 正式进单在原项目上完成，自动触发待验收'],
       ],
     },
-    '计划上门时间与运输时间分开记录': {
+    '计划上门日期与运输日期分开记录': {
       evidence: [
         ['tests/domain/relocation-status.test.ts', '计划上门时间与计划运输时间分开记录'],
       ],
@@ -281,12 +244,12 @@ export const scenarioMap = {
         ['tests/domain/relocation-status.test.ts', '场地确认不影响状态流转'],
       ],
     },
-    '计划时间不自动流转': {
+    '计划日期不自动流转': {
       evidence: [
         ['tests/domain/relocation-status.test.ts', '计划时间到期不自动流转（计划时间与场地确认均不触发主状态）'],
       ],
     },
-    '录入实际装机完成时间自动进入待验收': {
+    '录入实际装机完成日期自动进入待验收': {
       evidence: [
         ['tests/domain/relocation-status.test.ts', '录入实际装机完成时间自动进入待验收（TBD-07）'],
       ],
@@ -423,17 +386,17 @@ export const scenarioMap = {
     '一次活动多类型多仪器同页记录': {
       evidence: [
         ['tests/domain/relocation-execution.test.ts', '一次活动多类型多仪器同页记录'],
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
+        ['e2e/electron-smoke.spec.ts', '空数据库启动直接进入工作台'],
       ],
     },
-    '拆机事实记录拆机状态及开始/完成时间': {
+    '拆机事实记录拆机状态及开始/完成日期': {
       evidence: [
-        ['tests/domain/relocation-execution.test.ts', '拆机事实记录拆机状态及拆机开始/完成时间'],
+        ['tests/domain/relocation-execution.test.ts', '拆机事实记录拆机状态及开始/完成日期'],
       ],
     },
-    '其他工作类型记录各自状态与时间': {
+    '其他工作类型记录各自状态与日期': {
       evidence: [
-        ['tests/domain/relocation-execution.test.ts', '其他工作类型记录各自状态与时间（装机/维修/其他）'],
+        ['tests/domain/relocation-execution.test.ts', '其他工作类型记录各自状态与日期（装机/维修/其他）'],
       ],
     },
     '多名工程师参与同一活动': {
@@ -461,50 +424,59 @@ export const scenarioMap = {
         ['tests/domain/relocation-execution.test.ts', '装机工作事实完成后进度更新'],
       ],
     },
-    '记录原价与折后价': {
+    '每批次仅一笔合并记录': {
       evidence: [
-        ['tests/domain/relocation-execution.test.ts', '记录原价与折后价：报价阶段不作为客户侧物流收入（仅记录）'],
-      ],
-    },
-    '不同批次不同运输公司': {
-      evidence: [
-        ['tests/domain/relocation-execution.test.ts', '不同批次不同运输公司'],
-      ],
-    },
-    '每批次仅一笔实际费用记录': {
-      evidence: [
-        ['tests/domain/relocation-execution.test.ts', '每批次仅一笔实际费用记录'],
+        ['tests/domain/relocation-execution.test.ts', '每批次仅一笔合并记录'],
         ['tests/persistence/schema.test.ts', '每批次仅一笔实际物流费用记录'],
       ],
     },
-    '申请（登记）时间必填默认当天': {
+    '费用登记日期必填默认当天': {
       evidence: [
-        ['tests/domain/relocation-execution.test.ts', '申请（登记）时间必填默认当天，归属月份按该时间计算'],
+        ['tests/domain/relocation-execution.test.ts', '费用登记日期必填默认当天，归属月份按该日期计算'],
       ],
     },
-    '三项金额必填且大于 0': {
+    '合同预算价必填且大于 0，物流成交价允许暂空或 0': {
       evidence: [
-        ['tests/domain/relocation-execution.test.ts', '三项金额必填且大于 0：未填写/0/负数拒绝'],
+        ['tests/domain/relocation-execution.test.ts', '合同预算价必填且大于 0；物流成交价允许 0（负数拒绝）'],
+        ['tests/domain/relocation-execution.test.ts', '合同预算价有值必须大于 0；物流成交价允许 0（仅拒绝负数），可清空为 null'],
+        ['tests/integration/new-batch-behaviors.sqlite.test.ts', '批量快速记录：物流成交价允许 0，预算价仍必须 > 0'],
       ],
     },
-    '成交价格大于预算价格仅警告': {
+    '运输公司可选': {
       evidence: [
-        ['tests/domain/relocation-execution.test.ts', '成交价格大于预算价格仅警告，仍允许保存且不自动创建项目提醒'],
+        ['tests/domain/relocation-execution.test.ts', '运输公司可选：未指定运输公司仍可保存，字段为空'],
+        ['tests/domain/relocation-execution.test.ts', '不同批次不同运输公司'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
       ],
     },
-    '修改金额不改归属月份': {
+    '物流成交价大于合同预算价仅警告': {
+      evidence: [
+        ['tests/domain/relocation-execution.test.ts', '物流成交价大于合同预算价仅警告，仍允许保存且不自动创建项目提醒'],
+      ],
+    },
+    '物流成交价即最终实际物流费用': {
+      evidence: [
+        ['tests/domain/relocation-execution.test.ts', '物流成交价即最终实际物流费用：无独立实际费用输入语义（写入路径成交价与实际费用同值）'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', '快速记录搬迁批次：原子创建批次与唯一物流费用，两个价格口径正确映射'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt'],
+      ],
+    },
+    '从批次编辑修改运输信息与两价不改归属月份': {
       evidence: [
         ['tests/domain/relocation-execution.test.ts', '修改金额不改申请（登记）时间与归属月份'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt'],
       ],
     },
-    '展示成交价格与实际费用差异': {
-      evidence: [
-        ['tests/domain/relocation-execution.test.ts', '展示成交价格与实际物流费用的差异'],
-      ],
-    },
-    '迁移缺申请（登记）时间 dry-run 报错': {
+    '迁移缺费用登记日期 dry-run 报错': {
       evidence: [
         ['tests/domain/historical-data-import.test.ts', '物流费用申请（登记）时间为目标必填字段，缺失时 dry-run 报错（TBD-14）'],
+        ['tests/domain/import-validation.test.ts', '物流费用申请（登记）时间为目标必填'],
+      ],
+    },
+    '历史批次缺费用视为异常数据': {
+      evidence: [
+        ['tests/domain/operational-reporting.test.ts', '历史异常批次（已有物流成交价无费用记录）进入清单；底层筛选保留历史兼容（补录后纳入报表）'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑'],
       ],
     },
   },
@@ -552,7 +524,7 @@ export const scenarioMap = {
         ['tests/domain/service-order-recording.test.ts', '记录全部最小字段后保存，且不关联搬迁项目生命周期'],
       ],
     },
-    '开单时间未填默认当前时间': {
+    '开单日期未填默认当天': {
       evidence: [
         ['tests/domain/service-order-recording.test.ts', '开单时间未填默认当前时间'],
       ],
@@ -578,13 +550,12 @@ export const scenarioMap = {
         ['tests/integration/service-order-recording.sqlite.test.ts', '向导原子保存：填写单号且已选工程师，项目与搬迁开单同次落库（事务）'],
       ],
     },
-    '填写单号但未选定工程师拒绝保存整个向导': {
+    '填写单号但未选定工程师拒绝保存整个录入': {
       evidence: [
         ['tests/domain/service-order-recording.test.ts', '填写单号但未选定工程师：拒绝保存整个向导（项目与开单均不产生）'],
-        ['tests/integration/service-order-recording.sqlite.test.ts', '向导填写单号但未选定工程师：拒绝保存，项目与开单均不落库'],
       ],
     },
-    '开单时间默认当前时间': {
+    '开单日期默认当天': {
       evidence: [
         ['tests/domain/service-order-recording.test.ts', '开单时间默认当前时间，备注可空并在后补'],
       ],
@@ -719,12 +690,12 @@ export const scenarioMap = {
         ['tests/domain/serial-address-update.test.ts', '更新事实不创建、不修改也不删除任何 Ship-to 主数据'],
       ],
     },
-    '创建时默认当前时间': {
+    '创建时默认当天': {
       evidence: [
         ['tests/domain/serial-address-update.test.ts', '创建时默认当前时间'],
       ],
     },
-    '补录历史时间': {
+    '补录历史日期': {
       evidence: [
         ['tests/domain/serial-address-update.test.ts', '补录历史时间：按所填历史时间保存并归属该月份'],
       ],
@@ -734,7 +705,7 @@ export const scenarioMap = {
         ['tests/domain/serial-address-update.test.ts', '列表展示与筛选：按客户、新址地址、序列号、Account ID 或更新时间'],
       ],
     },
-    '按更新时间所属月份计数': {
+    '按更新日期所属月份计数': {
       evidence: [
         ['tests/domain/serial-address-update.test.ts', '按更新时间所属月份计数'],
       ],
@@ -778,7 +749,7 @@ export const scenarioMap = {
         ['tests/domain/damage-repair-tracking.test.ts', '已关闭未修复必须记录原因'],
       ],
     },
-    '记录备件申请时间': {
+    '记录备件申请日期': {
       evidence: [
         ['tests/domain/damage-repair-tracking.test.ts', '记录备件申请时间到事项内，不建立独立备件申请对象'],
       ],
@@ -874,7 +845,7 @@ export const scenarioMap = {
 
   // ─────────────────────────── qr-request-tracking ────────────────────────
   'qr-request-tracking': {
-    '保存申请人与申请时间': {
+    '保存申请人与申请日期': {
       evidence: [
         ['tests/domain/qr-request-tracking.test.ts', '保存申请人与申请时间并选择申请类型'],
       ],
@@ -1011,7 +982,7 @@ export const scenarioMap = {
         ['tests/domain/operational-reporting.test.ts', '按进单月份与区域汇总进单金额，每个项目只计一次，不因合同变更改变'],
       ],
     },
-    '按已记录进单时间归属': {
+    '按已记录进单日期归属': {
       evidence: [
         ['tests/domain/operational-reporting.test.ts', '按已记录进单时间归属；补录或修正进单时间后归属实时变化'],
       ],
@@ -1058,22 +1029,30 @@ export const scenarioMap = {
     },
     '按运输公司与月份汇总物流费用': {
       evidence: [
-        ['tests/domain/operational-reporting.test.ts', '按运输公司与月份汇总，展示批次数、预算/成交/实际合计与差异'],
+        ['tests/domain/operational-reporting.test.ts', '按运输公司与月份汇总，展示批次数、合同预算价/物流成交价合计与差异'],
       ],
     },
-    '成交高于预算提示计数': {
+    '物流成交价高于合同预算价提示计数': {
       evidence: [
-        ['tests/domain/relocation-execution.test.ts', '成交价格大于预算价格仅警告，仍允许保存且不自动创建项目提醒'],
+        ['tests/domain/operational-reporting.test.ts', '按运输公司与月份汇总，展示批次数、合同预算价/物流成交价合计与差异'],
+        ['tests/domain/relocation-execution.test.ts', '物流成交价大于合同预算价仅警告，仍允许保存且不自动创建项目提醒'],
       ],
     },
     '计算物流费用合同占比': {
       evidence: [
-        ['tests/domain/operational-reporting.test.ts', '物流费用合同占比：RMB 按固定汇率折算 USD ÷ 最新合同金额，空/0 不可算'],
+        ['tests/domain/operational-reporting.test.ts', '物流成交价合同占比：RMB 按固定汇率折算 USD ÷ 最新合同金额，空/0 不可算'],
       ],
     },
-    '待补实际费用批次进入清单': {
+    '报表导出仅展示合同预算价与物流成交价': {
       evidence: [
-        ['tests/domain/operational-reporting.test.ts', '待补实际费用批次进入清单，补录后按申请（登记）月份纳入报表'],
+        ['tests/integration/operational-reporting.sqlite.test.ts', '物流报表导出 section header 精确：仅月份/运输公司/批次数/合同预算价合计/物流成交价合计/两价差异/成交>预算批次数/已取消批次数，不含旧「实际费用」列'],
+        ['tests/integration/operational-reporting.sqlite.test.ts', '导出三种格式：magic header、内容与同次实时 report model 一致、PNG 含指标与筛选值'],
+      ],
+    },
+    '历史批次缺费用视为异常数据': {
+      evidence: [
+        ['tests/domain/operational-reporting.test.ts', '历史异常批次（已有物流成交价无费用记录）进入清单；底层筛选保留历史兼容（补录后纳入报表）'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑'],
       ],
     },
     '首次提交与后续状态更新不重复计数': {
@@ -1096,12 +1075,12 @@ export const scenarioMap = {
         ['tests/domain/operational-reporting.test.ts', '二维码申请按去重类型计数，不同申请中的同类型分别计数'],
       ],
     },
-    '按申请时间归属并取申请人': {
+    '按申请日期归属并取申请人': {
       evidence: [
         ['tests/domain/operational-reporting.test.ts', '二维码申请按去重类型计数，不同申请中的同类型分别计数'],
       ],
     },
-    '按更新时间与客户统计记录数': {
+    '按更新日期与客户统计记录数': {
       evidence: [
         ['tests/domain/operational-reporting.test.ts', '序列号地址更新按更新记录计数、按月份与客户分组，同一仪器多次更新分别计数'],
       ],
@@ -1153,13 +1132,13 @@ export const scenarioMap = {
         ['tests/domain/operational-reporting.test.ts', '按月份区间与区域筛选'],
       ],
     },
-    '按开单业务类型与运输公司筛选': {
+    '按开单类型与运输公司筛选': {
       evidence: [
         ['tests/domain/operational-reporting.test.ts', '按开单业务类型筛选'],
         ['tests/domain/operational-reporting.test.ts', '按运输公司筛选物流费用'],
       ],
     },
-    '开单量按工程师筛选（可选）': {
+    '按工程师筛选（可选）': {
       evidence: [
         ['tests/domain/operational-reporting.test.ts', '按参与工程师筛选开单量（可选），不选择时汇总全部'],
       ],
@@ -1244,13 +1223,13 @@ export const scenarioMap = {
         ['tests/domain/financial-closure.test.ts', '最终可确认金额不随合同金额覆盖同步'],
       ],
     },
-    '合同金额为 0 时正式进单最终可确认金额必须大于 0': {
+    '合同金额为 0 时正式进单最终可确认金额允许暂空且首次掉票前必须补录': {
       evidence: [
-        ['tests/domain/financial-closure.test.ts', '合同金额为 0 时正式进单最终可确认金额必须另行录入大于 0'],
-        ['tests/domain/relocation-entry.test.ts', '合同金额为 0 时正式进单最终可确认金额必须另行录入大于 0 的值（TBD-11）'],
+        ['tests/domain/financial-closure.test.ts', '合同金额为 0 时正式进单 final 保持 null（不再强制另行录入，进单后基线待执行）'],
+        ['tests/domain/relocation-entry.test.ts', '合同金额为 0 时正式进单 final 保持 null，另行录入 > 0 才设值（TBD-11 更新）'],
       ],
     },
-    '最终可确认金额不得低于累计掉票金额': {
+    '最终可确认金额不得低于累计有效掉票金额': {
       evidence: [
         ['tests/domain/financial-closure.test.ts', '最终可确认金额不得低于累计掉票金额'],
       ],
@@ -1299,7 +1278,7 @@ export const scenarioMap = {
     },
     '编辑后重算项目状态': {
       evidence: [
-        ['tests/domain/financial-closure.test.ts', '编辑后重算项目状态：累计达到最终可确认金额进入已完成'],
+        ['tests/domain/financial-closure.test.ts', '编辑后重算项目状态：任意有效掉票即已完成（不再等累计金额足额）'],
       ],
     },
     '撤销一条掉票记录': {
@@ -1322,10 +1301,10 @@ export const scenarioMap = {
         ['tests/domain/financial-closure.test.ts', '已撤销掉票禁止重新激活，更正需新增有效掉票'],
       ],
     },
-    '累计掉票达到最终可确认金额进入已完成': {
+    '登记任一笔有效掉票即进入已完成': {
       evidence: [
-        ['tests/domain/financial-closure.test.ts', '累计掉票达到最终可确认金额进入已完成'],
-        ['tests/integration/cross-module-consistency.sqlite.test.ts', '掉票编辑/撤销后：主状态、项目提醒与报表实时一致'],
+        ['tests/domain/financial-closure.test.ts', '任意成功登记一笔掉票即进入已完成（不再等累计金额足额）'],
+        ['tests/domain/lifecycle.test.ts', '自动触发 3：金额闭环在待掉票/已完成之间自动重算（优先于人工值）'],
       ],
     },
     '已完成项目因撤销掉票回到待掉票': {
@@ -1424,11 +1403,11 @@ export const scenarioMap = {
       ],
       note: "项目缺 ECC 报必填错误",
     },
-    "物流登记时间不可由月份推断": {
+    "费用登记日期不可由月份推断": {
       evidence: [
         ["tests/domain/import-validation.test.ts", "物流费用申请（登记）时间为目标必填"],
       ],
-      note: "仅月份无法推断具体登记时间，缺失为阻断错误",
+      note: "仅月份无法推断具体登记日期，缺失为阻断错误",
     },
     "重复服务单号阻止导入": {
       evidence: [
@@ -1545,18 +1524,18 @@ export const scenarioMap = {
       ],
       note: "报表月份按源业务时间，不因导入时间改变",
     },
-    "可选源时间缺失保持为空": {
+    "可选源业务日期缺失保持为空": {
       evidence: [
         ["tests/domain/historical-data-import.test.ts", "源业务时间缺失（可选）时保留为空"],
       ],
-      note: "可选源业务时间缺失保留为空，不用导入时间填充",
+      note: "可选源业务日期缺失保留为空，不用导入时间填充",
     },
-    "提交审计归属登录账号": {
+    "提交审计归属本地用户": {
       evidence: [
         ["tests/domain/import-commit.test.ts", "账号审计与业务工作量分离"],
         ["tests/integration/import-seven-category-flow.sqlite.test.ts", "草稿创建人与最终提交人分列审计"],
       ],
-      note: "import_run 记录提交账号内部 ID 与用户名快照",
+      note: "import_run 记录内部本地用户 ID 与确认时用户名快照",
     },
     "导入事实不计作手工工作量": {
       evidence: [
@@ -1620,7 +1599,7 @@ export const scenarioMap = {
         ['tests/persistence/connection.test.ts', '关闭并重开应用后数据保留（真实临时 SQLite）'],
         ['tests/integration/relocation-project-lifecycle.sqlite.test.ts', '正式进单全流程落库（ECC/进单时间/快照/最终金额），关闭重开保留'],
         ['tests/integration/runtime-lifecycle.sqlite.test.ts', '启动自动备份 → 初始化 → 录入 → 关闭重开登录 → 手动备份 → 恢复 → 恢复码重置'],
-        ['e2e/electron-smoke.spec.ts', '关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录'],
+        ['e2e/electron-smoke.spec.ts', '关闭并重开应用：无密码模式直接进入工作台，已有账号与数据保留'],
       ],
     },
     '数据保存于本机数据库': {
@@ -1633,16 +1612,15 @@ export const scenarioMap = {
         ['tests/persistence/runtime-boundary.test.ts', '离线无远程依赖：领域与持久化源码不导入任何网络模块'],
       ],
     },
-    '数据库文件不因本地账号加密': {
+    '数据库文件不因本地用户加密': {
       evidence: [
         ['tests/persistence/account-persistence.test.ts', '本地账号不加密 SQLite：数据库文件为普通 SQLite 且账号数据直接可读'],
       ],
     },
     'Windows 操作系统账户保护数据文件与备份': {
       abstract: true,
-      status: 'pending',
-      evidence: [['docs/verification/迁移执行与运维说明.md', '本地账号仅为访问门槛']],
-      note: 'Windows 操作系统账户边界在 macOS 开发机不可验证；10.6 交付文档已明确保护边界',
+      evidence: [['docs/verification/迁移执行与运维说明.md', '无应用内访问门槛']],
+      note: 'Windows 操作系统账户边界已由客户在 Windows 目标环境验收（tasks 8.85）；10.6 交付文档已明确无访问门槛、SQLite 不加密、内部本地用户不能防止直接读取数据库文件',
     },
     '当日首次使用自动创建备份': {
       evidence: [
@@ -1711,53 +1689,55 @@ export const scenarioMap = {
   'workbench-interface': {
     '进入工作台先处理项目提醒': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈'],
+        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
       ],
     },
     '提醒与项目队列不被其他板块取代': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈'],
+        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
       ],
     },
     '顶部任务入口与运营指标': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈'],
+        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
       ],
     },
-    '首次启动展示初始化界面': {
+    '启动直接进入工作台': {
       evidence: [
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
+        ['tests/renderer/app.test.tsx', '无密码模式渲染启动直接进入工作台：不出现初始化/登录界面，会话来自主进程'],
+        ['e2e/electron-smoke.spec.ts', '空数据库启动直接进入工作台'],
       ],
     },
-    '后续启动展示登录界面': {
+    '无访问门槛入口': {
       evidence: [
-        ['e2e/electron-smoke.spec.ts', '关闭并重开应用：登录保留数据；忘记密码凭恢复码重置并可用新密码登录'],
+        ['tests/renderer/app.test.tsx', '无密码模式渲染启动直接进入工作台：不出现初始化/登录界面，会话来自主进程'],
       ],
     },
-    '访问门不改变主结构': {
+    '访问门缺失不改变主结构': {
       evidence: [
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
+        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
       ],
     },
     '项目队列中颜色区分': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈'],
+        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
       ],
     },
     '当前上下文与吞吐板块一致区分': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈'],
+        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
       ],
     },
-    '六阶段展示项目数与节奏信息': {
+    '六阶段展示项目数与平均停留': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈'],
+        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
       ],
     },
-    '识别并提示瓶颈阶段': {
+    '不提供流入流出与自动瓶颈提示': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈'],
+        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
       ],
+      note: '生命周期吞吐精简：不提供流入流出（inflow/outflow）节奏指标与自动瓶颈提示（客户最终反馈 2026-08-10）',
     },
     '点击阶段筛选项目队列': {
       evidence: [
@@ -1799,17 +1779,18 @@ export const scenarioMap = {
         ['tests/renderer/app.test.tsx', '阶段、提醒、区域和查询筛选下推并重置到首页 cursor'],
       ],
     },
-    '四步顺序展示与对应字段': {
+    '单页分组呈现与对应字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '向导明确必填、可后补和合同为 0 的反馈，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目改为单页四分组，范围只填写仪器数量'],
       ],
     },
-    '搬迁范围步骤字段': {
+    '搬迁范围分组字段': {
       evidence: [
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目改为单页四分组，范围只填写仪器数量'],
       ],
     },
-    '执行准备步骤字段': {
+    '执行准备分组字段': {
       evidence: [
         ['e2e/electron-smoke.spec.ts', '未进单先执行 → 实际装机完成自动待验收 → 验收进入待掉票（核心动作补充闭环）'],
       ],
@@ -1818,11 +1799,11 @@ export const scenarioMap = {
       evidence: [
         ['tests/integration/workbench-facade.sqlite.test.ts', '真实保存项目、项目提醒、十类动作中的核心记录及独立二维码申请'],
       ],
-      note: '向导「保存为待进单」（intent=draft）经 WorkbenchFacade（Electron 主进程入口）真实落库；正式进单/未进单先执行两个保存路径由 electron-smoke E2E 覆盖',
+      note: '单页分组录入「保存为待进单」（intent=draft）经 WorkbenchFacade（Electron 主进程入口）真实落库；正式进单/未进单先执行两个保存路径由 electron-smoke E2E 覆盖',
     },
     '正式进单': {
       evidence: [
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
+        ['tests/renderer/app.test.tsx', '新建项目由明确意图提交正式进单且不夹带服务单等已移除字段'],
       ],
     },
     '未进单先执行': {
@@ -1832,19 +1813,19 @@ export const scenarioMap = {
     },
     '填写服务单号要求工程师并同次创建开单': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
       ],
-      note: '向导内「服务单号必填工程师并同次保存」由领域测试 service-order-recording 3.10 覆盖，界面透传',
+      note: '单页录入中「服务单号必填工程师并同次保存」由领域测试 service-order-recording 3.10 覆盖，界面透传',
     },
     '可后补字段不无提示丢失且不自动生成提醒': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '向导明确必填、可后补和合同为 0 的反馈，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
       ],
     },
     '人工选择主状态并就地反馈': {
       evidence: [
         ['tests/integration/workbench-facade.sqlite.test.ts', '人工主状态必须经过 lifecycle 校验并将拒绝原因返回界面层'],
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
+        ['e2e/electron-smoke.spec.ts', '未进单先执行 → 实际装机完成自动待验收 → 验收进入待掉票（核心动作补充闭环）'],
       ],
     },
     '自动触发结果如实反映': {
@@ -1852,60 +1833,76 @@ export const scenarioMap = {
         ['e2e/electron-smoke.spec.ts', '未进单先执行 → 实际装机完成自动待验收 → 验收进入待掉票（核心动作补充闭环）'],
       ],
     },
-    '覆盖十类业务动作': {
+    '覆盖八类业务动作': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单'],
+        ['tests/renderer/app.test.tsx', '快速记录合并开单入口，八类动作均提供真实字段'],
       ],
     },
     '备件申请并入损坏/维修事项': {
       evidence: [
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
+        ['tests/renderer/app.test.tsx', '快速记录合并开单入口，八类动作均提供真实字段'],
       ],
     },
     '二维码申请不在项目快速记录': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单'],
+        ['tests/renderer/app.test.tsx', '快速记录合并开单入口，八类动作均提供真实字段'],
       ],
     },
     '批次表单字段': {
       evidence: [
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
       ],
     },
-    '物流费用表单字段': {
+    '物流费用并入批次表单': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
-      ],
-    },
-    '上门活动表单同页记录拆机与各工作类型': {
-      evidence: [
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
       ],
     },
     '开单表单字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单记录 tab 读取 orders，并只展示四个服务单字段'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
       ],
+      note: '开单记录为原"上门活动"入口并入后的合并入口，表单展示开单日期、工程师、开单类型、服务单号',
     },
     '搬迁仪器表单二维码是否申请手工字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
       ],
     },
     '损坏/维修表单合同金额 0 就地反馈': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
       ],
     },
     '序列号地址更新与二维码申请独立模块入口': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型'],
+        ['tests/renderer/app.test.tsx', '独立导航打开序列号地址更新与二维码申请，二维码支持九类多选并实时预览去重计数'],
       ],
     },
     '不用通用空表单': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '快速记录不混入二维码独立申请，十类动作均提供真实字段而非通用空表单'],
+        ['tests/renderer/app.test.tsx', '快速记录合并开单入口，八类动作均提供真实字段'],
       ],
+    },
+    '修改批次运输信息与两价': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '物流费用记录可预填编辑，并只提交约定字段且不修改费用登记日期'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt'],
+      ],
+    },
+    '费用登记日期不可修改且归属月份不变': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '物流费用记录可预填编辑，并只提交约定字段且不修改费用登记日期'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt'],
+      ],
+    },
+    '不提供独立物流费用补录入口': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '快速记录合并开单入口，八类动作均提供真实字段'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑'],
+      ],
+      note: '快速记录菜单不出现独立「实际物流费用」动作；费用仅通过批次创建/批次编辑中的合同预算价、物流成交价维护（见「物流费用记录可预填编辑」测试）',
     },
     '项目队列行内记录入口': {
       evidence: [
@@ -1929,12 +1926,12 @@ export const scenarioMap = {
     },
     '必填与可选标识及帮助': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '向导明确必填、可后补和合同为 0 的反馈，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
       ],
     },
     '校验失败就地提示': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、物流、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
         ['tests/integration/workbench-facade.sqlite.test.ts', '人工主状态必须经过 lifecycle 校验并将拒绝原因返回界面层'],
       ],
     },
@@ -1976,19 +1973,29 @@ export const scenarioMap = {
         ['tests/renderer/app.test.tsx', '报表提供 Excel、PNG、PDF 导出，并将导出失败留在当前抽屉提示'],
       ],
     },
+    '按月份与维度筛选': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '报表筛选贯通查询、下钻和导出，明细使用中文列名与业务值'],
+      ],
+    },
+    '下钻明细中文展示': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '报表筛选贯通查询、下钻和导出，明细使用中文列名与业务值'],
+      ],
+    },
     'Escape 关闭当前层': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '向导明确必填、可后补和合同为 0 的反馈，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
       ],
     },
     '打开后焦点移至首字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '向导明确必填、可后补和合同为 0 的反馈，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
       ],
     },
     'label 关联可访问名称': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '向导明确必填、可后补和合同为 0 的反馈，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
       ],
     },
     '字号基线': {
@@ -2013,12 +2020,12 @@ export const scenarioMap = {
     },
     '扩展 tab 或独立导航模块提供新增能力': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型'],
+        ['tests/renderer/app.test.tsx', '独立导航打开序列号地址更新与二维码申请，二维码支持九类多选并实时预览去重计数'],
       ],
     },
     '二维码申请模块表单多选类型': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '独立导航打开序列号地址更新与二维码申请，二维码支持有名称的多选类型'],
+        ['tests/renderer/app.test.tsx', '独立导航打开序列号地址更新与二维码申请，二维码支持九类多选并实时预览去重计数'],
       ],
     },
     '项目总览展示关键事实': {
@@ -2028,12 +2035,12 @@ export const scenarioMap = {
     },
     '费用与掉票 tab 展示金额与掉票记录': {
       evidence: [
-        ['e2e/electron-smoke.spec.ts', '初始化 → 恢复码一次展示 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻'],
+        ['e2e/electron-smoke.spec.ts', '空数据库启动直接进入工作台'],
       ],
     },
     '吞吐板块不复制项目看板': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈'],
+        ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
       ],
     },
     '当前上下文不挤占主队列': {
@@ -2082,17 +2089,17 @@ export const scenarioMap = {
   // 历史数据导入向导（tasks 8.47~8.66 + CLI 移除）。外部迁移 CLI 已删除，
   // 向导（import-wizard:* 通道 + 会话/受信窗口守卫）是唯一入口。
   'history-import-wizard': {
-    "已登录用户从数据管理进入": {
+    "负责人从数据管理进入": {
       evidence: [
         ["tests/renderer/app.test.tsx", "历史导入返回后刷新 overview 与项目首页并恢复入口焦点"],
       ],
       note: "app 级测试：数据管理提供历史数据导入入口并以全窗口 route 打开",
     },
-    "未登录用户不能进入": {
+    "非受信窗口不能进入": {
       evidence: [
         ["tests/main/import-wizard-ipc.test.ts", "未登录时导入向导全部 invoke 通道拒绝"],
       ],
-      note: "未登录时全部 import-wizard 通道拒绝",
+      note: "非受信窗口/非受信 sender 不能进入导入向导",
     },
     "非受信窗口不能调用导入能力": {
       evidence: [
@@ -2389,11 +2396,11 @@ export const scenarioMap = {
       ],
       note: "编辑中会话失效停止操作并保留草稿",
     },
-    "重新登录后继续草稿": {
+    "会话恢复后继续草稿": {
       evidence: [
         ["tests/main/import-wizard-ipc.test.ts", "重新登录后须重新完整校验"],
       ],
-      note: "重新登录后草稿保留、seal 已失效须重新完整校验",
+      note: "会话恢复后草稿保留、seal 已失效须重新完整校验",
     },
     "摘要展示七类导入范围": {
       evidence: [

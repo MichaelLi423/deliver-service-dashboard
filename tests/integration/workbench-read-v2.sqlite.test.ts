@@ -136,8 +136,6 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
     });
     for (const s of overview.stages) {
       expect(Number.isFinite(s.averageDays)).toBe(true);
-      expect(s.inflow).toBe(0);
-      expect(s.outflow).toBe(0);
     }
 
     // 提醒预览：≤6、按提醒时间升序、total 一致、分类与纯函数同口径

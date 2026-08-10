@@ -20,6 +20,7 @@ import {
  * 覆盖两件事（全部经真实 UI + 真实 IPC，不绕过界面）：
  * 1) 界面取消项目：填写取消日期/取消原因/不可恢复确认，验证取消终态
  *    （队列状态徽标为「已取消」、取消入口消失、已取消不可恢复）。
+ *    造数走当前单页四分组新建表单（保存意图「正式进单」），与 electron-smoke 同交互路径。
  * 2) 运营报表导出：依次触发 Excel/PNG/PDF 三种导出。参照
  *    e2e/import-wizard-fixture.ts 的原生 dialog stubs 方案，在 Electron main
  *    进程安全打桩 dialog.showSaveDialog 到临时路径，验证三个文件生成且
@@ -59,13 +60,13 @@ function extractPngTextChunk(pngBytes: Buffer, keyword: string): string {
   return '';
 }
 
-/** 四步向导正式进单一个 ECC 项目（与 electron-smoke 同交互路径）。 */
+/** 单页四分组新建表单正式进单一个 ECC 项目（与 electron-smoke 同交互路径）。 */
 async function createFormalProject(
   page: Page,
   customerName: string,
   ecc: string,
   region = '华东',
-  finalAmount?: string,
+  contractAmount?: string,
 ): Promise<void> {
   await page.getByRole('button', { name: '新建搬迁项目' }).click();
   const dialog = page.getByRole('dialog');
@@ -73,17 +74,15 @@ async function createFormalProject(
   await dialog.getByLabel('区域').fill(region);
   await dialog.getByLabel('合同开始日期').fill('2026-08-01');
   await dialog.getByLabel('合同截止日期').fill('2027-07-31');
-  await dialog.getByRole('button', { name: '下一步' }).click();
-  await dialog.getByLabel('旧址地址').fill('旧址 A 楼');
-  await dialog.getByLabel('新址地址').fill('新址 B 楼');
-  await dialog.getByLabel('仪器名称').fill('E2E 冒烟仪器');
-  await dialog.getByRole('button', { name: '下一步' }).click();
-  await dialog.getByRole('button', { name: '下一步' }).click();
-  await dialog.getByLabel('ECC').fill(ecc);
-  if (finalAmount !== undefined) {
-    await dialog.getByLabel('最终可确认金额（USD）').fill(finalAmount);
+  // 保存意图选「正式进单」：ECC/进单日期/合同金额仅随正式进单提交
+  await dialog.getByLabel('正式进单').check();
+  await dialog.getByLabel(/^ECC/).fill(ecc);
+  if (contractAmount !== undefined) {
+    // 合同金额为空时正式进单须另行录入最终可确认金额 > 0（领域校验）；
+    // 当前表单不再录入最终可确认金额，正式进单默认取合同金额，故此处必填正数合同金额。
+    await dialog.getByLabel('合同 USD 含税金额').fill(contractAmount);
   }
-  await dialog.getByRole('button', { name: /正式进单/ }).click();
+  await dialog.getByRole('button', { name: '正式进单' }).click();
   await expect(page.getByText(ecc).first()).toBeVisible();
 }
 
@@ -206,7 +205,7 @@ test.describe('真实打包 Electron UI 冒烟补充（WorkbenchV2 · 临时 use
       // 造数：正式进单项目 + 本月一张掉票（报表 monthly_invoice / 条形图有数据）
       await createFormalProject(page, 'E2E 报表导出客户', 'E2E-EXPORT-0001', '华东', '100000');
       await page.getByRole('button', { name: '快速记录', exact: false }).first().click();
-      await page.getByRole('button', { name: /^掉票 按 ECC/ }).click();
+      await page.getByRole('dialog').getByRole('button', { name: /^掉票/ }).click();
       const invoiceDialog = page.getByRole('dialog');
       await invoiceDialog.getByLabel('掉票日期').fill(`${month}-11`);
       await invoiceDialog.getByLabel('掉票金额（USD）').fill('40000');

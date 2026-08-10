@@ -744,14 +744,10 @@ export function WorkbenchV2({
         [
           "待验收 / 待掉票",
           `${overview.metrics.pendingAcceptance} / ${overview.metrics.pendingInvoice}`,
-          "当前生命周期瓶颈",
+          "按当前项目状态统计",
         ],
       ]
     : [];
-  const bottleneck = overview?.stages.reduce((current, item) =>
-    !current || item.averageDays > current.averageDays ? item : current,
-  undefined as WorkbenchV2OverviewDto["stages"][number] | undefined);
-
   return (
     <div className="app-shell workbench-v2">
       <header className="topbar">
@@ -916,12 +912,6 @@ export function WorkbenchV2({
               <small>独立事项筛选</small>
             </button>
           </div>
-          {bottleneck && (
-            <p className="bottleneck-callout" role="status">
-              <strong>当前瓶颈：{STATUS_LABEL[bottleneck.status]}</strong>
-              <span>平均停留 {bottleneck.averageDays} 天，建议优先核对该阶段项目。</span>
-            </p>
-          )}
         </section>
         <div className="workbench-grid">
           <section
@@ -3715,10 +3705,15 @@ function DataCleanPanel({ onComplete }: { onComplete: () => Promise<void> }): JS
 }
 
 function ReportPanelV2(): JSX.Element {
-  const [filter, setFilter] = useState<ReportFilterDto>({
+  const [draftFilter, setDraftFilter] = useState<ReportFilterDto>({
     monthFrom: "",
     monthTo: "",
+    region: null,
+    orderType: null,
+    transportCompany: null,
+    engineer: null,
   });
+  const [appliedFilter, setAppliedFilter] = useState<ReportFilterDto | null>(null);
   const [report, setReport] = useState<ReportDto | null>(null);
   const [details, setDetails] = useState<Array<Record<string, string | number | boolean | null>>>([]);
   const [error, setError] = useState("");
@@ -3730,7 +3725,9 @@ function ReportPanelV2(): JSX.Element {
     try {
       const api = bridge();
       if (!api) throw new Error("当前环境未连接主进程");
-      setReport(await api.buildReport(filter));
+      const nextReport = await api.buildReport(draftFilter);
+      setReport(nextReport);
+      setAppliedFilter({ ...draftFilter });
       setDetails([]);
     } catch (cause) {
       setError(messageOf(cause));
@@ -3742,7 +3739,8 @@ function ReportPanelV2(): JSX.Element {
     try {
       const api = bridge();
       if (!api) throw new Error("当前环境未连接主进程");
-      setDetails(await api.drillDown(key, filter));
+      if (!appliedFilter) return;
+      setDetails(await api.drillDown(key, appliedFilter));
     } catch (cause) {
       setError(messageOf(cause));
     }
@@ -3753,7 +3751,8 @@ function ReportPanelV2(): JSX.Element {
     try {
       const api = bridge();
       if (!api) throw new Error("当前环境未连接主进程");
-      const result = await api.exportReport(format, filter);
+      if (!appliedFilter) return;
+      const result = await api.exportReport(format, appliedFilter);
       if (!result.saved) setError("已取消保存，未生成导出文件。");
     } catch (cause) {
       setError(`导出失败：${messageOf(cause)}`);
@@ -3770,8 +3769,9 @@ function ReportPanelV2(): JSX.Element {
           label="起始月份"
           type="month"
           required
+          value={draftFilter.monthFrom}
           onChange={(event) =>
-            setFilter((old) => ({ ...old, monthFrom: event.target.value }))
+            setDraftFilter((old) => ({ ...old, monthFrom: event.target.value }))
           }
         />
         <Field
@@ -3779,10 +3779,20 @@ function ReportPanelV2(): JSX.Element {
           label="截止月份"
           type="month"
           required
+          value={draftFilter.monthTo}
           onChange={(event) =>
-            setFilter((old) => ({ ...old, monthTo: event.target.value }))
+            setDraftFilter((old) => ({ ...old, monthTo: event.target.value }))
           }
         />
+        <Field name="reportRegion" label="区域" placeholder="全部区域" help="留空表示全部区域" value={draftFilter.region ?? ""}
+          onChange={(event) => setDraftFilter((old) => ({ ...old, region: event.target.value || null }))} />
+        <Select name="reportOrderType" label="开单类型" value={draftFilter.orderType ?? ""}
+          options={[["", "全部开单类型"], ["relocation", "搬迁"], ["certification", "认证"], ["parts_by_mail", "单寄备件"], ["pm", "PM"]]}
+          onChange={(event) => setDraftFilter((old) => ({ ...old, orderType: (event.target.value || null) as ReportFilterDto["orderType"] }))} />
+        <Field name="reportTransportCompany" label="运输公司" placeholder="全部运输公司" help="留空表示全部运输公司" value={draftFilter.transportCompany ?? ""}
+          onChange={(event) => setDraftFilter((old) => ({ ...old, transportCompany: event.target.value || null }))} />
+        <Field name="reportEngineer" label="工程师" placeholder="全部工程师" help="留空表示全部工程师" value={draftFilter.engineer ?? ""}
+          onChange={(event) => setDraftFilter((old) => ({ ...old, engineer: event.target.value || null }))} />
         <button className="button primary" disabled={Boolean(busy)}>{busy === "build" ? "正在计算…" : "实时计算报表"}</button>
       </form>
       {error && (
@@ -3816,7 +3826,7 @@ function ReportPanelV2(): JSX.Element {
       {details.length > 0 && (
         <section className="report-details">
           <div className="report-section-head"><div><p className="overline">核对数据</p><h3>下钻明细</h3></div><span>{details.length} 行</span></div>
-          <div className="table-scroll"><table className="data-table"><thead><tr>{Object.keys(details[0] ?? {}).map((key) => <th key={key}>{reportColumnLabel(key)}</th>)}</tr></thead><tbody>{details.map((row, index) => <tr key={String(row.id ?? index)}>{Object.entries(row).map(([key,value]) => <td key={key}>{String(value ?? "—")}</td>)}</tr>)}</tbody></table></div>
+          <div className="table-scroll"><table className="data-table"><thead><tr>{Object.keys(details[0] ?? {}).map((key) => <th key={key}>{reportColumnLabel(key)}</th>)}</tr></thead><tbody>{details.map((row, index) => <tr key={String(row.id ?? index)}>{Object.entries(row).map(([key,value]) => <td key={key}>{reportCellText(key, value)}</td>)}</tr>)}</tbody></table></div>
         </section>
       )}
     </div>
@@ -3824,8 +3834,38 @@ function ReportPanelV2(): JSX.Element {
 }
 
 function reportColumnLabel(key: string): string {
-  const labels: Record<string, string> = { id: "记录编号", customerName: "客户名称", ecc: "ECC", region: "区域", status: "状态", amount: "金额", count: "数量", month: "月份", date: "日期", engineer: "工程师", transportCompany: "运输公司", orderType: "开单类型" };
-  return labels[key] ?? key.replaceAll("_", " ");
+  const labels: Record<string, string> = {
+    id: "记录编号", itemId: "维修事项编号", projectId: "项目编号", projectTempNo: "项目临时编号",
+    invoiceId: "掉票记录编号", orderId: "开单记录编号", feeId: "物流费用编号", batchId: "搬迁批次编号",
+    requestId: "申请记录编号", updateId: "更新记录编号", customerName: "客户名称", ecc: "ECC",
+    region: "区域", status: "项目状态", projectCount: "项目数", amount: "金额", amountCents: "金额（USD）",
+    count: "数量", month: "月份", date: "日期", engineer: "工程师", transportCompany: "运输公司",
+    orderType: "开单类型", serviceOrderNo: "服务单号", orderedAt: "开单日期", invoicedAt: "掉票日期",
+    registeredAt: "事项登记日期", partStatus: "备件状态", partAmountCents: "备件金额", partCurrency: "备件币种",
+    usedPartUsdCents: "已使用备件金额（USD）", contractAmountCents: "合同金额（USD）",
+    ratioPercentHundredths: "合同占比（%）", ratioUnavailable: "合同占比不可计算", ratioOverHundred: "合同占比超过 100%",
+    operatorAccountId: "责任人账号编号", operatorUsername: "责任人", cancelled: "项目已取消",
+    appliedAt: "费用登记日期", budgetPriceCents: "合同预算价（RMB）", dealPriceCents: "物流成交价（RMB）",
+    costCents: "实际物流费用（RMB）", costUsdCents: "物流费用（USD）", dealOverBudget: "成交价超过预算",
+    planTransportDate: "计划运输日期", submittedAt: "提交日期", applicant: "申请人", requestedAt: "申请日期",
+    typeCode: "二维码申请类型", updatedAt: "更新日期", serialNo: "序列号",
+  };
+  return labels[key] ?? "其他信息";
+}
+
+function reportCellText(key: string, value: string | number | boolean | null): string {
+  if (value === null) return "—";
+  if (typeof value === "boolean") return value ? "是" : "否";
+  const text = String(value);
+  const enumLabels: Record<string, Record<string, string>> = {
+    status: { ...STATUS_LABEL },
+    orderType: { relocation: "搬迁", certification: "认证", parts_by_mail: "单寄备件", pm: "PM" },
+    partStatus: { pending_submit: "待提交", processing: "处理中", arrived: "已到件", used: "已使用" },
+    typeCode: Object.fromEntries(QR_REQUEST_TYPE_LABEL),
+  };
+  if (key in enumLabels) return enumLabels[key]?.[text] ?? "其他";
+  if (reportColumnLabel(key) === "其他信息" && (/^[a-z]+(?:_[a-z0-9]+)+$/.test(text) || /[a-z][A-Z]/.test(text))) return "其他";
+  return text;
 }
 
 function Layer({

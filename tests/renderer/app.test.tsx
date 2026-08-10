@@ -33,12 +33,12 @@ const overview: WorkbenchV2OverviewDto = {
   businessRevision: 1, generatedAt: '2026-08-08T09:00:00+08:00',
   metrics: { totalProjects: 100_000, activeProjects: 99_900, reminderCount: 200, reminderOverdue: 20, reminderToday: 30, pendingAcceptance: 12, pendingInvoice: 18, openRepairProjects: 7, pendingAmount: '123456.78' },
   stages: [
-    { status: 'pending_entry', count: 20_000, averageDays: 3, inflow: 0, outflow: 0 },
-    { status: 'pending_execution', count: 20_000, averageDays: 4, inflow: 0, outflow: 0 },
-    { status: 'executing', count: 20_000, averageDays: 5, inflow: 0, outflow: 0 },
-    { status: 'pending_acceptance', count: 15_000, averageDays: 2, inflow: 0, outflow: 0 },
-    { status: 'pending_invoice', count: 15_000, averageDays: 2, inflow: 0, outflow: 0 },
-    { status: 'completed', count: 10_000, averageDays: 1, inflow: 0, outflow: 0 },
+    { status: 'pending_entry', count: 20_000, averageDays: 3 },
+    { status: 'pending_execution', count: 20_000, averageDays: 4 },
+    { status: 'executing', count: 20_000, averageDays: 5 },
+    { status: 'pending_acceptance', count: 15_000, averageDays: 2 },
+    { status: 'pending_invoice', count: 15_000, averageDays: 2 },
+    { status: 'completed', count: 10_000, averageDays: 1 },
   ],
   reminderPreview: firstProjects.slice(0, 3).map((row) => ({ projectId: row.id, customerName: row.customerName, ecc: row.ecc, tempNo: row.tempNo, reminderAt: row.reminderAt, reminderNote: row.reminderNote, reminderDueClass: row.reminderDueClass })),
   reminderTotal: 200, reminderWindowDays: 7,
@@ -227,13 +227,12 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByText('数据管理')); const entry = screen.getByRole('button', { name: '历史数据导入' }); fireEvent.click(entry); expect(await screen.findByRole('heading', { name: '把旧数据整理成一份可核对的导入计划' })).toBeInTheDocument(); const before = vi.mocked(api.v2Overview!).mock.calls.length; fireEvent.click(screen.getByRole('button', { name: /返回数据管理/ })); await waitFor(() => expect(vi.mocked(api.v2Overview!).mock.calls.length).toBeGreaterThan(before)); await waitFor(() => expect(screen.getByRole('button', { name: '历史数据导入' })).toHaveFocus()); expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null }));
   });
 
-  it('任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色和真实瓶颈', async () => {
+  it('任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色', async () => {
     render(<App />);
     expect(await screen.findByRole('heading', { name: '先处理提醒，再连续推进项目' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: '关键运营指标' })).toHaveTextContent('活跃搬迁项目99900');
     const lifecycle = screen.getByRole('region', { name: '生命周期吞吐' });
-    expect(lifecycle).toHaveTextContent('当前瓶颈：执行中');
-    expect(lifecycle).toHaveTextContent('平均停留 5 天');
+    expect(lifecycle).not.toHaveTextContent('当前瓶颈');
     expect(within(lifecycle).getByRole('button', { name: /待进单.*20000/ })).toHaveClass('stage', 'not-entered');
     expect(within(lifecycle).queryByText('客户 1')).not.toBeInTheDocument();
     expect(screen.getByRole('region', { name: /项目提醒快速处理/ })).toBeInTheDocument();
@@ -540,6 +539,56 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(within(dialog).getByRole('button', { name: '导出 PNG' })).toBeInTheDocument(); expect(within(dialog).getByRole('button', { name: '导出 PDF' })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '导出 PNG' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('导出失败：磁盘不可写');
+  });
+
+  it('报表筛选贯通查询、下钻和导出，明细使用中文列名与业务值', async () => {
+    const detailRows = [{
+      status: 'completed', orderType: 'parts_by_mail', partStatus: 'used', operatorUsername: null,
+      typeCode: 'logistics_management', cancelled: false, unknownField: 'future_status',
+    }];
+    const api = mockApi({
+      buildReport: vi.fn().mockResolvedValue({
+        range: { from: '2026-07', to: '2026-08' }, filters: {}, generatedAt: '',
+        sections: [{ key: 'monthly_service_order_count', label: '月度开单量', rows: detailRows }],
+      }),
+      drillDown: vi.fn().mockResolvedValue(detailRows),
+    });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+    render(<App />);
+    await screen.findByRole('heading', { name: /高密项目队列/ });
+    fireEvent.click(screen.getByRole('button', { name: '运营报表' }));
+    const dialog = screen.getByRole('dialog', { name: '运营报表' });
+    fireEvent.change(within(dialog).getByLabelText(/起始月份/), { target: { value: '2026-07' } });
+    fireEvent.change(within(dialog).getByLabelText(/截止月份/), { target: { value: '2026-08' } });
+    fireEvent.change(within(dialog).getByLabelText('区域'), { target: { value: '华东' } });
+    fireEvent.change(within(dialog).getByLabelText('开单类型'), { target: { value: 'parts_by_mail' } });
+    fireEvent.change(within(dialog).getByLabelText('运输公司'), { target: { value: '华东运输' } });
+    fireEvent.change(within(dialog).getByLabelText('工程师'), { target: { value: '工程师甲' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '实时计算报表' }));
+    const expectedFilter = {
+      monthFrom: '2026-07', monthTo: '2026-08', region: '华东', orderType: 'parts_by_mail',
+      transportCompany: '华东运输', engineer: '工程师甲',
+    };
+    await waitFor(() => expect(api.buildReport).toHaveBeenCalledWith(expectedFilter));
+    fireEvent.change(within(dialog).getByLabelText('区域'), { target: { value: '华北' } });
+    fireEvent.click(await within(dialog).findByRole('button', { name: '查看明细' }));
+    await waitFor(() => expect(api.drillDown).toHaveBeenCalledWith('monthly_service_order_count', expectedFilter));
+    const table = within(dialog).getByRole('table');
+    for (const heading of ['项目状态', '开单类型', '备件状态', '责任人', '二维码申请类型', '项目已取消', '其他信息']) {
+      expect(within(table).getByRole('columnheader', { name: heading })).toBeInTheDocument();
+    }
+    expect(table).toHaveTextContent('已完成');
+    expect(table).toHaveTextContent('单寄备件');
+    expect(table).toHaveTextContent('已使用');
+    expect(table).toHaveTextContent('物流管理');
+    expect(table).toHaveTextContent('否');
+    expect(table).toHaveTextContent('—');
+    expect(table).toHaveTextContent('其他');
+    expect(table).not.toHaveTextContent('completed');
+    expect(table).not.toHaveTextContent('parts_by_mail');
+    expect(table).not.toHaveTextContent('future_status');
+    fireEvent.click(within(dialog).getByRole('button', { name: '导出 Excel' }));
+    await waitFor(() => expect(api.exportReport).toHaveBeenCalledWith('xlsx', expectedFilter));
   });
 
   it('独立导航打开序列号地址更新与二维码申请，二维码支持九类多选并实时预览去重计数', async () => {

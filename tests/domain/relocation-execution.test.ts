@@ -352,7 +352,7 @@ describe('上门活动与工作事实（3.4 / TBD-05）', () => {
     expect(workFacts.listByInstrument(i1.id)).toHaveLength(2);
   });
 
-  it('拆机事实记录拆机状态及拆机开始/完成时间', () => {
+  it('拆机事实记录拆机状态及开始/完成日期', () => {
     const { service, projectService } = setup();
     const project = projectService.createPendingProject();
     const i = service.registerInstrument(project.id, { name: '仪器C' }, ACTOR);
@@ -369,7 +369,7 @@ describe('上门活动与工作事实（3.4 / TBD-05）', () => {
     expect(done.startedAt).toBe('2026-08-07');
   });
 
-  it('其他工作类型记录各自状态与时间（装机/维修/其他）', () => {
+  it('其他工作类型记录各自状态与日期（装机/维修/其他）', () => {
     const { service, projectService } = setup();
     const project = projectService.createPendingProject();
     const i = service.registerInstrument(project.id, { name: '仪器D' }, ACTOR);
@@ -526,7 +526,7 @@ describe('实际物流费用记录（3.7 / TBD-14）', () => {
     return { ...ctx, project, batch: b };
   }
 
-  it('每批次仅一笔实际费用记录', () => {
+  it('每批次仅一笔合并记录', () => {
     const { service, batch } = makeBatch();
     service.recordLogisticsFee(batch.id, {
       appliedAt: '2026-07-15',
@@ -544,7 +544,7 @@ describe('实际物流费用记录（3.7 / TBD-14）', () => {
     ).toThrow(/每批次仅允许一笔/);
   });
 
-  it('申请（登记）时间必填默认当天，归属月份按该时间计算', () => {
+  it('费用登记日期必填默认当天，归属月份按该日期计算', () => {
     const { service, batch, fees } = makeBatch();
     const { fee } = service.recordLogisticsFee(batch.id, {
       budgetPriceCents: 10000n,
@@ -629,6 +629,58 @@ describe('实际物流费用记录（3.7 / TBD-14）', () => {
       logisticsCostCents: 11000n,
     }, ACTOR);
     expect(service.getLogisticsFeeDifference(fee)).toBe(1000n);
+  });
+
+  it('运输公司可选：未指定运输公司仍可保存，字段为空', () => {
+    const { service, projectService, batches, fees } = setup();
+    const project = projectService.createPendingProject();
+    const batch = service.createBatch(project.id, ACTOR);
+    // 未指定运输公司登记批次与物流费用：允许保存、运输公司字段为空
+    service.updateBatchQuote(batch.id, {
+      planTransportDate: '2026-08-10',
+      originalPriceCents: 100000n,
+      discountedPriceCents: 0n,
+    }, ACTOR);
+    const { fee } = service.recordLogisticsFee(batch.id, {
+      appliedAt: '2026-07-15',
+      budgetPriceCents: 10000n,
+      dealPriceCents: 0n,
+      logisticsCostCents: 0n,
+    }, ACTOR);
+    expect(fees.findByBatchId(batch.id)?.id).toBe(fee.id);
+    expect(batches.findById(batch.id)!.transportCompany).toBeNull();
+    // 同一项目不同批次可分别指定不同运输公司（未指定者保持为空）
+    const batchB = service.createBatch(project.id, ACTOR);
+    service.updateBatchQuote(batchB.id, { transportCompany: '顺丰' }, ACTOR);
+    expect(batches.findById(batchB.id)!.transportCompany).toBe('顺丰');
+    expect(batches.findById(batch.id)!.transportCompany).toBeNull();
+  });
+
+  it('物流成交价即最终实际物流费用：无独立实际费用输入语义（写入路径成交价与实际费用同值）', () => {
+    const { service, batch } = makeBatch();
+    // 现行业务写入路径（workbench-facade batch/batch_edit）以物流成交价同时覆盖
+    // dealPriceCents 与 logisticsCostCents（物流成交价即最终实际费用），
+    // 不提供独立的实际物流费用录入；logisticsCostCents 仅历史兼容列。
+    const { fee } = service.recordLogisticsFee(batch.id, {
+      appliedAt: '2026-07-15',
+      budgetPriceCents: 10000n,
+      dealPriceCents: 12000n,
+      logisticsCostCents: 12000n, // 与成交价同值（现行业务写入路径）
+    }, ACTOR);
+    expect(fee.dealPriceCents).toBe(12000n);
+    expect(fee.logisticsCostCents).toBe(12000n);
+    // 成交价即最终实际物流费用：现行业务口径差异恒为 0
+    expect(service.getLogisticsFeeDifference(fee)).toBe(0n);
+    // 批次编辑修改成交价 → 实际费用同值覆盖，费用登记日期与归属月份不变
+    const { fee: updated } = service.updateLogisticsFee(fee.id, {
+      budgetPriceCents: 10000n,
+      dealPriceCents: 13000n,
+      logisticsCostCents: 13000n,
+    }, ACTOR);
+    expect(updated.dealPriceCents).toBe(13000n);
+    expect(updated.logisticsCostCents).toBe(13000n);
+    expect(updated.appliedAt).toBe('2026-07-15');
+    expect(service.getLogisticsFeeDifference(updated)).toBe(0n);
   });
 });
 

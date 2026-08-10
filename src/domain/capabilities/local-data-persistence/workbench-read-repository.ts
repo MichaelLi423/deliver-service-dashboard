@@ -227,8 +227,6 @@ export class WorkbenchReadRepository {
         status,
         count: row?.c ?? 0,
         averageDays: row ? Number(row.avg_days) : 0,
-        inflow: 0,
-        outflow: 0,
       };
     });
 

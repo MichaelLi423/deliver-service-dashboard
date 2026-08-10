@@ -91,9 +91,9 @@ test('8.83 只读：真实 5 份 docs 经向导完整校验，七类无静默遗
     await page.getByRole('tab', { name: /掉票记录/ }).click(); await declareData(page);
     await page.getByRole('tab', { name: /物流费用/ }).click(); await declareData(page);
     await chooseStep(page, /序列号地址更新/); await declareData(page);
-    await chooseStep(page, /二维码与 Ship-to 申请/);
+    await chooseStep(page, /二维码与 Account ID 申请/);
     await page.getByRole('tab', { name: /二维码申请/ }).click(); await declareData(page);
-    await page.getByRole('tab', { name: /Ship-to 申请/ }).click(); await declareData(page);
+    await page.getByRole('tab', { name: /Account ID 申请/ }).click(); await declareData(page);
 
     // ⑤ 完整校验（真实 IPC/worker；含阻断时不得触发 commit）
     await chooseStep(page, /校验摘要与确认/);

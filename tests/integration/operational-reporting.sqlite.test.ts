@@ -473,6 +473,46 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     }
   });
 
+  it('物流报表导出 section header 精确：仅月份/运输公司/批次数/合同预算价合计/物流成交价合计/两价差异/成交>预算批次数/已取消批次数，不含旧「实际费用」列', async () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const batch = ctx.execution.createBatch(p1, ACTOR);
+      ctx.execution.updateBatchQuote(batch.id, { transportCompany: '物流公司甲' }, ACTOR);
+      ctx.execution.recordLogisticsFee(
+        batch.id,
+        { appliedAt: '2026-07-18', budgetPriceCents: 10000n, dealPriceCents: 12000n, logisticsCostCents: 12000n },
+        ACTOR,
+      );
+      const month = { monthFrom: '2026-07', monthTo: '2026-07' };
+      const report = ctx.reporting.buildReport(month);
+      expect(report.monthlyLogistics[0].dealOverBudgetCount).toBe(1);
+
+      const png = ctx.exporter.exportPng(report);
+      const meta = JSON.parse(extractPngTextChunk(png, 'Report'));
+      const logisticsSection = meta.sections.find((s: { key: string }) => s.key === 'monthly_logistics');
+      // 导出仅保留两个价格口径：合同预算价与物流成交价（物流成交价即最终实际费用），
+      // 不含旧「实际费用」列（costSumCents/budgetCostDiffCents 仅为底层历史兼容列）。
+      expect(logisticsSection.header).toEqual([
+        '月份',
+        '运输公司',
+        '批次数',
+        '合同预算价合计',
+        '物流成交价合计',
+        '合同预算价-物流成交价差异',
+        '物流成交价>合同预算价批次数',
+        '已取消批次数',
+      ]);
+      expect(logisticsSection.header.join('').includes('实际费用')).toBe(false);
+      expect(logisticsSection.rows).toContainEqual(['2026-07', '物流公司甲', '1', '100.00', '120.00', '-20.00', '1', '0']);
+
+      closeDatabase(ctx.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
   it('跨四类工作量：多责任人分组、账号改名后历史快照稳定，三种导出内容包含责任人维度', async () => {
     const dir = makeTempDir();
     try {

@@ -106,8 +106,8 @@ test('真实打包 Electron：文件选择与 clipboard paste worker 真正成�
 
     // ---- clipboard paste：必须真正成功（行 tab 出现，无错误提示、无 DataClone/wc 信号） ----
     await page.getByRole('navigation', { name: '导入步骤' })
-      .getByRole('button', { name: /二维码与 Ship-to 申请/ }).click();
-    await expect(page.getByRole('heading', { name: '二维码与 Ship-to 申请', level: 2 })).toBeVisible();
+      .getByRole('button', { name: /二维码与 Account ID 申请/ }).click();
+    await expect(page.getByRole('heading', { name: '二维码与 Account ID 申请', level: 2 })).toBeVisible();
     const dataMode = page.getByRole('button', { name: '有数据', exact: true });
     await dataMode.click();
     await expect(dataMode).toHaveAttribute('aria-pressed', 'true');

@@ -120,7 +120,7 @@ test('真实历史导入全流程：失败零部分、原子提交与重启持�
     await chooseStep(page, /掉票与物流费用/); await chooseNone(page);
     await page.getByRole('tab', { name: /物流费用/ }).click(); await chooseNone(page);
     await chooseStep(page, /序列号地址更新/); await chooseNone(page);
-    await chooseStep(page, /二维码与 Ship-to 申请/);
+    await chooseStep(page, /二维码与 Account ID 申请/);
     await page.getByRole('button', { name: '有数据', exact: true }).click();
 
     await setClipboardText(app, [
@@ -138,11 +138,11 @@ test('真实历史导入全流程：失败零部分、原子提交与重启持�
     await expect(page.getByRole('tab', { name: /二维码申请 0/ })).toBeVisible();
     await page.getByRole('button', { name: /重做/ }).click();
     await expect(page.getByRole('tab', { name: /二维码申请 1/ })).toBeVisible();
-    await page.getByRole('tab', { name: /Ship-to 申请/ }).click(); await chooseNone(page);
+    await page.getByRole('tab', { name: /Account ID 申请/ }).click(); await chooseNone(page);
 
     await saveAndExit(page);
     await openSavedDraft(page);
-    await expect(page.getByRole('heading', { name: '二维码与 Ship-to 申请', level: 2 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '二维码与 Account ID 申请', level: 2 })).toBeVisible();
     await expect(page.getByRole('tab', { name: /二维码申请 1/ })).toBeVisible();
 
     await chooseStep(page, /校验摘要与确认/);

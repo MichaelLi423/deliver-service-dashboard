@@ -20,7 +20,8 @@ import {
  * 说明（诚实边界）：
  * - 本组测试在 macOS 开发机、以临时 userData 目录运行真实打包后的 Electron 应用，
  *   全程操作真实 UI（无密码个人模式：启动直接进入工作台，无初始化/登录/恢复码；
- *   随后四步向导/快速记录/提醒/主状态/报表），不通过 IPC 或领域服务绕过界面。
+ *   随后单页四分组新建搬迁项目（保存意图：待进单/正式进单/提前执行）、八类快速记录
+ *   （开单记录已并入原上门活动入口）、提醒/主状态/报表），不通过 IPC 或领域服务绕过界面。
  * - 它验证的是 macOS 开发机上的可运行性；不冒充 Windows 验证。
  *   Windows 打包安装、Windows 操作系统账户保护等仍为待验证状态（见
  *   docs/verification/scenario-test-matrix.md 与 tasks.md 10.4/10.5 备注）。
@@ -62,11 +63,17 @@ async function expectWorkbench(window: Page): Promise<void> {
   await expect(window.getByRole('heading', { name: '登录本地工作台' })).toHaveCount(0);
 }
 
+/** 打开快速记录并选择一类动作（八类快速记录；序列号地址更新与二维码申请位于独立导航）。 */
+async function quickRecord(window: Page, action: RegExp): Promise<void> {
+  await window.getByRole('button', { name: '快速记录', exact: false }).first().click();
+  await window.getByRole('dialog').getByRole('button', { name: action }).click();
+}
+
 // 打包产物缺失时跳过（macOS 开发机验收产物未构建），并提示构建命令。
 test.skip(!existsSync(APP_EXECUTABLE), '未找到 electron-forge 打包产物，请先执行 npm run e2e:build');
 
 test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData · 无密码个人模式）', () => {
-  test('空数据库启动直接进入工作台 → 四步向导正式进单 → 快速记录 → 提醒/主状态 → 报表下钻', async () => {
+  test('空数据库启动直接进入工作台 → 单页四分组正式进单 → 八类快速记录（开单合并）→ 提醒/主状态 → 报表下钻', async () => {
     const userDataDir = makeUserDataDir();
     const app = await launchApp(userDataDir);
     try {
@@ -75,56 +82,55 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData · 
       // —— 无密码个人模式：空数据库自动建「本地用户」并直接进入工作台 ——
       await expectWorkbench(window);
 
-      // —— 四步新建搬迁项目向导：正式进单 ——
+      // —— 单页四分组新建搬迁项目：保存意图选「正式进单」 ——
       await window.getByRole('button', { name: '新建搬迁项目' }).click();
       const dialog = window.getByRole('dialog');
-      await expect(dialog.getByText('基本信息')).toBeVisible();
       await dialog.getByLabel('客户名称').fill('E2E 华东实验室');
       await dialog.getByLabel('区域').fill('华东');
       await dialog.getByLabel('合同开始日期').fill('2026-08-01');
       await dialog.getByLabel('合同截止日期').fill('2027-07-31');
-      await dialog.getByRole('button', { name: '下一步' }).click();
-      await dialog.getByLabel('旧址地址').fill('旧址 A 楼');
-      await dialog.getByLabel('新址地址').fill('新址 B 楼');
-      await dialog.getByLabel('仪器名称').fill('E2E 质谱仪');
-      await dialog.getByRole('button', { name: '下一步' }).click();
-      await dialog.getByRole('button', { name: '下一步' }).click();
-      await dialog.getByLabel('ECC').fill('E2E-2026-0001');
-      await dialog.getByLabel('最终可确认金额（USD）').fill('100000');
-      await dialog.getByRole('button', { name: /正式进单/ }).click();
+      await dialog.getByLabel('正式进单').check();
+      await dialog.getByLabel(/^ECC/).fill('E2E-2026-0001');
+      await dialog.getByLabel(/^进单日期/).fill('2026-08-01');
+      await dialog.getByLabel('合同 USD 含税金额').fill('100000');
+      await dialog.getByRole('button', { name: '正式进单' }).click();
       // 保存后返回工作台，项目队列出现该项目
       await expect(window.getByText('E2E-2026-0001').first()).toBeVisible();
       await expect(window.getByText('E2E 华东实验室').first()).toBeVisible();
       // 已进单项目标识（未进单/已进单视觉区分事实）
       await expect(window.getByText('已进单').first()).toBeVisible();
 
-      // —— 快速记录：搬迁批次 ——
-      await window.getByRole('button', { name: '快速记录', exact: false }).first().click();
-      await window.getByRole('button', { name: /搬迁批次/ }).click();
+      // —— 快速记录：物流费用登记（搬迁批次） ——
+      await quickRecord(window, /^物流费用登记/);
       const batchDialog = window.getByRole('dialog');
-      await batchDialog.getByLabel('计划运输日期').fill('2026-08-10');
+      await batchDialog.getByLabel('运输日期').fill('2026-08-10');
       await batchDialog.getByLabel('运输公司').fill('E2E 运输');
       await batchDialog.getByLabel('费用登记日期').fill('2026-08-09');
       await batchDialog.getByLabel('合同预算价').fill('12000');
       await batchDialog.getByLabel('物流成交价').fill('11000');
       await batchDialog.getByRole('button', { name: '保存记录' }).click();
-      await window.getByRole('tab', { name: '搬迁批次' }).click();
+      await window.getByRole('tab', { name: '物流费用登记' }).click();
       await expect(window.getByText('E2E 运输').first()).toBeVisible();
 
-      // —— 快速记录：上门活动（同页拆机事实） ——
+      // —— 快速记录：开单记录（原「上门活动」入口已并入，无独立入口） ——
       await window.getByRole('button', { name: '快速记录', exact: false }).first().click();
-      await window.getByRole('button', { name: /上门活动/ }).click();
-      const visitDialog = window.getByRole('dialog');
-      await expect(visitDialog.getByText('拆机', { exact: true })).toBeVisible();
-      await visitDialog.getByLabel('参与工程师').fill('E2E 工程师');
-      await visitDialog.getByLabel('工作事实状态').selectOption('done');
-      await visitDialog.getByRole('button', { name: '保存记录' }).click();
-      await window.getByRole('tab', { name: '上门活动' }).click();
+      const quickDialog = window.getByRole('dialog');
+      await expect(quickDialog.getByText('上门活动')).toHaveCount(0);
+      await quickDialog.getByRole('button', { name: /^开单记录/ }).click();
+      const orderDialog = window.getByRole('dialog');
+      await orderDialog.getByLabel('开单类型').selectOption('relocation');
+      await orderDialog.getByLabel('服务单号').fill('E2E-SO-0001');
+      await orderDialog.getByLabel('开单日期').fill('2026-08-11');
+      await orderDialog.getByLabel('工程师').fill('E2E 工程师');
+      await orderDialog.getByRole('button', { name: '保存记录' }).click();
+      // 已移除独立「上门活动」tab；开单记录为合并入口
+      await expect(window.getByRole('tab', { name: '上门活动' })).toHaveCount(0);
+      await window.getByRole('tab', { name: '开单记录' }).click();
+      await expect(window.getByText('E2E-SO-0001').first()).toBeVisible();
       await expect(window.getByText('E2E 工程师').first()).toBeVisible();
 
       // —— 快速记录：掉票 ——
-      await window.getByRole('button', { name: '快速记录', exact: false }).first().click();
-      await window.getByRole('button', { name: /^掉票 按 ECC/ }).click();
+      await quickRecord(window, /^掉票/);
       const invoiceDialog = window.getByRole('dialog');
       await invoiceDialog.getByLabel('掉票金额（USD）').fill('40000');
       await invoiceDialog.getByLabel('掉票日期').fill('2026-08-11');
@@ -148,8 +154,7 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData · 
       await revokeDialog.getByRole('button', { name: '确认撤销掉票' }).click();
       await expect(window.getByText('终态 · 更正请新增')).toBeVisible();
 
-      await window.getByRole('button', { name: '快速记录', exact: false }).first().click();
-      await window.getByRole('button', { name: /^掉票 按 ECC/ }).click();
+      await quickRecord(window, /^掉票/);
       const correctedInvoiceDialog = window.getByRole('dialog');
       await correctedInvoiceDialog.getByLabel('掉票金额（USD）').fill('40000');
       await correctedInvoiceDialog.getByLabel('掉票日期').fill('2026-08-11');
@@ -216,52 +221,51 @@ test.describe('Electron 应用级冒烟（macOS 开发机 · 临时 userData · 
       // 无密码个人模式：空数据库自动建号并直接进入工作台
       await expectWorkbench(window);
 
-      // —— 未进单先执行：四步向导第三个保存路径 ——
+      // —— 未进单先执行：单页表单保存意图选「提前执行」 ——
       await window.getByRole('button', { name: '新建搬迁项目' }).click();
       let dialog = window.getByRole('dialog');
       await dialog.getByLabel('客户名称').fill('E2E 未进单先执行客户');
       await dialog.getByLabel('区域').fill('华北');
-      await dialog.getByLabel('合同开始日期').fill('2026-08-01');
-      await dialog.getByLabel('合同截止日期').fill('2027-07-31');
-      await dialog.getByRole('button', { name: '下一步' }).click();
-      await dialog.getByLabel('旧址地址').fill('旧址');
-      await dialog.getByLabel('新址地址').fill('新址');
-      await dialog.getByLabel('仪器名称').fill('E2E 仪器甲');
-      await dialog.getByRole('button', { name: '下一步' }).click();
-      await dialog.getByRole('button', { name: '下一步' }).click();
-      await dialog.getByLabel('经理批复原因').fill('E2E 经理批复');
-      await dialog.getByRole('button', { name: /未进单先执行/ }).click();
+      await dialog.getByLabel('提前执行').check();
+      await dialog.getByLabel('是否批复：是，已取得提前执行批复').check();
+      await dialog.getByLabel('批复说明').fill('E2E 经理批复');
+      await dialog.getByRole('button', { name: '确认提前执行' }).click();
       // 未进单项目标识 + 未进单先执行标签
-      await expect(window.getByText('未进单').first()).toBeVisible();
-      await expect(window.getByText('未进单先执行').first()).toBeVisible();
+      const preEntryRow = window
+        .getByRole('grid', { name: '项目队列' })
+        .getByRole('row')
+        .filter({ hasText: 'E2E 未进单先执行客户' });
+      await expect(preEntryRow.getByText('未进单', { exact: true })).toBeVisible();
+      await expect(preEntryRow.getByText('未进单先执行', { exact: true })).toBeVisible();
 
-      // —— 实际装机完成日期自动进入待验收 ——
+      // —— 实际装机完成日期（经补齐进单核心资料）→ 自动进入待验收 ——
       await window.getByRole('button', { name: '新建搬迁项目' }).click();
       dialog = window.getByRole('dialog');
       await dialog.getByLabel('客户名称').fill('E2E 装机完成客户');
       await dialog.getByLabel('区域').fill('华东');
+      await dialog.getByLabel('正式进单').check();
+      await dialog.getByLabel(/^ECC/).fill('E2E-2026-0002');
+      await dialog.getByLabel(/^进单日期/).fill('2026-08-08');
       await dialog.getByLabel('合同 USD 含税金额').fill('10000');
-      await dialog.getByLabel('合同开始日期').fill('2026-08-01');
-      await dialog.getByLabel('合同截止日期').fill('2027-07-31');
-      await dialog.getByRole('button', { name: '下一步' }).click();
-      await dialog.getByLabel('旧址地址').fill('旧址');
-      await dialog.getByLabel('新址地址').fill('新址');
-      await dialog.getByLabel('仪器名称').fill('E2E 仪器乙');
-      await dialog.getByRole('button', { name: '下一步' }).click();
-      await dialog.getByLabel('实际装机完成日期').fill('2026-08-08');
-      await dialog.getByRole('button', { name: '下一步' }).click();
-      await dialog.getByLabel('ECC').fill('E2E-2026-0002');
-      await dialog.getByRole('button', { name: /正式进单/ }).click();
+      await dialog.getByRole('button', { name: '正式进单' }).click();
+
+      await quickRecord(window, /^补齐进单核心资料/);
+      const coreDialog = window.getByRole('dialog');
+      await coreDialog.getByLabel('实际装机完成日期').fill('2026-08-08');
+      await coreDialog.getByRole('button', { name: '保存记录' }).click();
       // 实际装机完成 → 自动进入待验收
-      await expect(window.getByText('待验收').first()).toBeVisible();
+      const installRow = window
+        .getByRole('grid', { name: '项目队列' })
+        .getByRole('row')
+        .filter({ hasText: 'E2E 装机完成客户' });
+      await expect(installRow.getByText('待验收')).toBeVisible();
 
       // —— 验收报告 → 自动进入待掉票 ——
-      await window.getByRole('button', { name: '快速记录', exact: false }).first().click();
-      await window.getByRole('button', { name: /验收报告/ }).click();
+      await quickRecord(window, /^验收报告/);
       const acceptanceDialog = window.getByRole('dialog');
       await acceptanceDialog.getByLabel('验收报告形成日期').fill('2026-08-10');
       await acceptanceDialog.getByRole('button', { name: '保存记录' }).click();
-      await expect(window.getByText('待掉票').first()).toBeVisible();
+      await expect(installRow.getByText('待掉票')).toBeVisible();
     } finally {
       await app.close();
     }

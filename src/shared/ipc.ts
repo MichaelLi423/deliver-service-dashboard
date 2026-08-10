@@ -464,7 +464,7 @@ export interface WorkbenchV2OverviewDto {
     /** 待掉票金额（已进单且未取消项目 最终可确认金额-累计有效掉票 之和），十进制字符串。 */
     pendingAmount: string;
   };
-  stages: Array<{ status: ProjectStatus; count: number; averageDays: number; inflow: number; outflow: number }>;
+  stages: Array<{ status: ProjectStatus; count: number; averageDays: number }>;
   reminderPreview: Array<{
     projectId: string;
     customerName: string;
