@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { ValidationError } from '../domain/core/errors';
+import { SystemClock } from '../domain/core/time';
 import type { FinancialClosureService } from '../domain/capabilities/project-financial-closure';
 import type { ProjectService } from '../domain/capabilities/relocation-project-lifecycle';
 import type {
@@ -151,6 +152,32 @@ class DeleteOperation {
     this.importTargets.push({ table, id });
   }
 
+  /**
+   * 真实状态变化写一行 project_status_transition_audit（与 tombstone/import marker
+   * 同事务原子；source=user；仅状态/原因/日期/操作者，禁止任何客户值）。
+   */
+  private writeTransitionAudit(projectId: string, fromStatus: string, toStatus: string, reason: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO project_status_transition_audit (
+           id, project_id, from_status, to_status, reason,
+           effective_business_date, source, actor_id, actor_username_snapshot, created_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        randomUUID(),
+        projectId,
+        fromStatus,
+        toStatus,
+        reason,
+        new SystemClock().today(),
+        'user',
+        this.actor.accountId,
+        this.actor.username,
+        this.deletedAt,
+      );
+  }
+
   // -------------------------------------------------------------------------
   // type-specific policies：每类显式 SQL + 守卫，删除时记录 tombstone/import 目标。
   // -------------------------------------------------------------------------
@@ -171,7 +198,9 @@ class DeleteOperation {
     if (!activity) {
       throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `上门活动不存在: ${id}`);
     }
-    // 严格守卫：存在工作事实或维修关联 → 拒绝（不级联清事实）。
+    // 下游事实依赖拒绝（同一写事务内重查，事务回滚零写）：
+    // - 工作事实（work_facts）：执行事实，不可级联删除 → 拒绝；
+    // - 维修上门活动关联（activity_damage_links）：指向本活动的下游引用 → 拒绝。
     if (this.existsWhere('work_facts', 'activity_id', id)) {
       throw new ValidationError(
         DELETE_REJECTION_CODES.DEPENDENCIES,
@@ -184,6 +213,9 @@ class DeleteOperation {
         '该上门活动已关联损坏/维修事项，无法删除；请先解除维修关联',
       );
     }
+    // 可删除的活动（无工作事实/无维修关联）不承载任何状态相关事实：项目是否「已开始
+    // 执行」只由 work_facts（或批次开始运输）决定，活动自身不计入；故删除不影响主
+    // 状态，无需经 lifecycle 重算（无真实状态变化），也绝不直接赋值状态。
     // 活动自身的参与工程师属活动记录一部分（非独立事实），随活动删除并计入子记录数。
     const engineerCount = (
       this.db.prepare('SELECT COUNT(*) AS n FROM activity_engineers WHERE activity_id = ?').get(id) as {
@@ -202,21 +234,23 @@ class DeleteOperation {
     if (!project) {
       throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `项目不存在: ${projectId}`);
     }
-    // 有 invoice 历史（含已撤销）→ 拒绝（掉票闭环事实不可逆回退）；否则清空验收事实
-    // 并按事实确定性回退主状态（clearAcceptance 内部同样防御校验）。
+    // 有 invoice 历史（含已撤销）→ 拒绝（掉票闭环事实不可逆回退）。
     if (this.projectInvoiceHistoryExists(projectId)) {
       throw new ValidationError(
         DELETE_REJECTION_CODES.DEPENDENCIES,
         '该项目存在掉票历史（含已撤销），验收报告不可删除；掉票闭环事实不可逆回退',
       );
     }
+    const fromStatus = project.status;
     const executionStarted = this.projectExecutionStarted(projectId);
     try {
+      // 删除验收事实后经 lifecycle 唯一入口重算主状态（clearAcceptance 内部同防御校验）。
       this.ctx.projectService().clearAcceptance(projectId, {
         hasAnyInvoiceHistory: false,
         executionStarted,
       });
     } catch (error) {
+      // 重算不可靠（终态/金额闭环完成态等）→ 在删除任何行前映射为 STATUS_RECALC。
       if (error instanceof ValidationError && error.code === 'ACCEPTANCE_STATUS_RECALC_FAILED') {
         throw new ValidationError(
           DELETE_REJECTION_CODES.STATUS_RECALC_UNRELIABLE,
@@ -224,6 +258,11 @@ class DeleteOperation {
         );
       }
       throw error;
+    }
+    // 真实状态变化 → 同事务写 transition audit（source=user，无客户值）；零变化不写。
+    const after = this.ctx.repositories.projects.findById(projectId);
+    if (after && after.status !== fromStatus) {
+      this.writeTransitionAudit(projectId, fromStatus, after.status, 'acceptance_deleted');
     }
     // acceptance 无物理业务行删除：tombstone 记录「验收报告已删除」这一审计事实。
     this.tombstone('acceptance', projectId, 0);

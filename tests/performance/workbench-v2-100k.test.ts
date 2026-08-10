@@ -10,7 +10,7 @@ import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 /**
  * Oracle #10 性能测试：100k 项目 + 大量子记录。
  *
- * - 首屏返回固定页（overview 提醒预览 ≤6、项目页固定 50 行），不随数据规模放大；
+ * - 首屏返回固定页（overview 提醒预览 ≤6、项目页固定每页 20 行，legacy limit 忽略），不随数据规模放大；
  * - keyset 翻页无重复遗漏、游标稳定；查询计划实际使用 v12 索引；
  * - DTO / structuredClone 有界（页大小固定、序列化体积有界）；
  * - v2 mutation 返回有界结果、绝不调用 snapshot；BigInt 金额精确；提醒边界正确。
@@ -181,7 +181,7 @@ async function seedBulk(db: DatabaseSync, projectCount = 100_000): Promise<void>
 }
 
 describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
-  it('首屏返回固定页：overview 固定预览 + 项目页固定 50 行，SQL 索引生效，DTO 有界', { timeout: 180_000 }, async () => {
+  it('首屏返回固定页：overview 固定预览 + 项目页固定每页 20 行（legacy limit 忽略），SQL 索引生效，DTO 有界', { timeout: 180_000 }, async () => {
     const ctx = makeCtx();
     await seedBulk(ctx.db);
     const t0 = Date.now();
@@ -199,13 +199,15 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
     expect(overview.reminderPreview.length).toBeLessThanOrEqual(6);
     expect(overview.stages).toHaveLength(6);
 
-    // 项目页固定 50 行；total 全量；页数据不因数据规模放大
-    expect(page.projects.length).toBe(50);
+    // 项目页固定每页 20 行（tasks 7.5）：limit: 50 属 legacy limit 被忽略；total 全量；页数据不因数据规模放大
+    expect(page.projects.length).toBe(20);
+    expect(page.limit).toBe(20);
+    expect(page.pageSize).toBe(20);
     expect(page.total).toBe(100_000);
     const serialized = JSON.stringify(page);
     expect(serialized.length).toBeLessThan(200_000);
     const clone = structuredClone(page) as unknown as { projects: unknown[] };
-    expect(clone.projects.length).toBe(50);
+    expect(clone.projects.length).toBe(20);
 
     // 耗时粗边界：100k 规模首屏 + 分页应在秒级内完成（防退化回归）
     expect(t1 - t0).toBeLessThan(5_000);
@@ -218,7 +220,7 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
          SELECT p.id, p.temp_no FROM projects p
          LEFT JOIN contracts c ON c.project_id = p.id
          LEFT JOIN customers cu ON cu.id = p.customer_id
-         ORDER BY p.updated_at DESC, p.id DESC LIMIT 50`,
+         ORDER BY p.updated_at DESC, p.id DESC LIMIT 20`,
       )
       .all() as { detail: string }[];
     expect(plan.map((r) => r.detail).join('\n')).toContain('idx_projects_updated');
@@ -230,7 +232,7 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
     const ctx = makeCtx();
     await seedBulk(ctx.db);
 
-    // 全量翻页（limit=100 → 1000 页）：无重复无遗漏、total 精确
+    // 全量翻页（legacy limit=100 忽略、固定每页 20 → 5000 页）：无重复无遗漏、total 精确
     const seen = new Set<string>();
     let cursor: string | null = null;
     let pages = 0;
@@ -242,12 +244,12 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
       }
       cursor = page.nextCursor;
       pages += 1;
-      expect(pages, '100k/100 页上界').toBeLessThanOrEqual(1_001);
+      expect(pages, '100k/20 页上界').toBeLessThanOrEqual(5_001);
       if (pages % 100 === 0) await tick();
     } while (cursor !== null);
     expect(seen.size).toBe(100_000);
-    // 100k/100 恰好 1000 满页；keyset 语义下最后一满页仍给游标，需第 1001 次空页确认结束
-    expect(pages).toBe(1_001);
+    // 100k/20 恰好 5000 满页；keyset 语义下最后一满页仍给游标，需第 5001 次空页确认结束
+    expect(pages).toBe(5_001);
 
     // 游标稳定：同一 cursor 两次返回相同顺序
     const first = ctx.repo.projectPage({ limit: 50 });
@@ -263,7 +265,7 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
       const next = ctx.repo.projectPage({ cursor: lastCursor });
       lastCursor = next.nextCursor;
       guard += 1;
-      expect(guard).toBeLessThanOrEqual(2_100); // 100k/50 页上界
+      expect(guard).toBeLessThanOrEqual(5_100); // 100k/20 页上界
       if (guard % 200 === 0) await tick();
     }
     closeDatabase(ctx.db);
@@ -281,7 +283,7 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
         intent: 'formal',
         customerName: '性能场景新项目',
         ecc: 'ECC-PERF-NEW',
-        region: '华东',
+        region: 'East',
         contractStartDate: '2026-08-01',
         contractEndDate: '2027-07-31',
         oldSiteAddress: '旧址',

@@ -19,7 +19,7 @@ function project(index: number): WorkbenchProjectRow {
   return {
     id: `p-${index}`, tempNo: `TMP-${String(index).padStart(6, '0')}`, ecc: `ECC-${String(index).padStart(6, '0')}`,
     customerName: `客户 ${index}`, status: index % 2 ? 'executing' : 'pending_entry', formallyEntered: index % 2 === 1,
-    preEntryExecution: index % 2 === 0, region: index % 2 ? '华东' : '华北', regionNeedsAdjustment: true, entryAt: null,
+    preEntryExecution: index % 2 === 0, region: index % 2 ? 'East' : 'North', regionNeedsAdjustment: false, entryAt: null,
     reminderAt: index < 3 ? '2026-08-08' : null, reminderNote: index < 3 ? `提醒 ${index}` : null,
     reminderDueClass: index < 3 ? 'today' : null, finalAmount: '100000.00', invoicedAmount: '40000.00', contractAmount: '110000.00',
     counts: { batches: 1, instruments: 1, activities: 1, orders: 1, repairs: 0 }, nonBlocking: { pendingShipTo: 0, qrUnmarked: 0, repairs: 0 },
@@ -27,8 +27,8 @@ function project(index: number): WorkbenchProjectRow {
   };
 }
 
-const firstProjects = Array.from({ length: 50 }, (_, index) => project(index + 1));
-const secondProjects = Array.from({ length: 50 }, (_, index) => project(index + 51));
+const firstProjects = Array.from({ length: 20 }, (_, index) => project(index + 1));
+const secondProjects = Array.from({ length: 20 }, (_, index) => project(index + 21));
 const overview: WorkbenchV2OverviewDto = {
   businessRevision: 1, generatedAt: '2026-08-08T09:00:00+08:00',
   metrics: { totalProjects: 100_000, activeProjects: 99_900, reminderCount: 200, reminderOverdue: 20, reminderToday: 30, pendingAcceptance: 12, pendingInvoice: 18, openRepairProjects: 7, pendingAmount: '123456.78' },
@@ -45,7 +45,7 @@ const overview: WorkbenchV2OverviewDto = {
 };
 
 function page(rows = firstProjects, cursor: string | null = 'cursor-2', total = 100_000, revision = 1): WorkbenchV2ProjectPageDto {
-  return { businessRevision: revision, projects: rows, total, nextCursor: cursor, limit: 50 };
+  return { businessRevision: revision, projects: rows, total, nextCursor: cursor, limit: 20, pageSize: 20 };
 }
 
 function section(kind: WorkbenchV2SectionPageDto['kind'], projectId = 'p-1'): WorkbenchV2SectionPageDto {
@@ -92,6 +92,15 @@ function mockApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
       businessRevision: 1, kind: request.kind, total: 1, nextCursor: null, limit: 50,
       rows: request.kind === 'service_order' ? [{ kind: 'service_order' as const, id: 'order-1', projectId: 'p-1', customerName: '客户 1', ecc: 'ECC-000001', tempNo: 'TMP-000001', orderType: 'relocation' as const, serviceOrderNo: 'SO-100', orderedAt: '2026-08-08', engineer: '工程师甲', businessDate: '2026-08-08', createdAt: '2026-08-08T00:00:00Z' }] : [],
     })),
+    v2ReminderPage: vi.fn().mockImplementation((request: { sort?: 'asc' | 'desc' | null; cursor?: string | null }) => Promise.resolve({
+      businessRevision: 1, rows: overview.reminderPreview, total: overview.reminderTotal, nextCursor: request.cursor ? null : 'reminder-2', limit: 50, sort: request.sort ?? 'desc',
+    })),
+    v2ReminderLanes: vi.fn().mockResolvedValue({
+      businessRevision: 1,
+      dates: ['2026-08-08'],
+      lanes: [{ date: '2026-08-08', projects: overview.reminderPreview.filter((item) => item.reminderAt === '2026-08-08').map((item) => ({ ...item, reminderAt: item.reminderAt! })), total: 3, nextCursor: null, limit: 50 }],
+      lanePageSize: 50,
+    }),
     v2IndependentPage: vi.fn().mockImplementation((request: { kind: string }) => Promise.resolve({ businessRevision: 1, kind: request.kind, rows: [], total: 0, nextCursor: null, limit: 50 })),
     v2LookupPage: vi.fn().mockImplementation((request: { kind: string }) => Promise.resolve({ businessRevision: 1, kind: request.kind, rows: [], total: 0, nextCursor: null, limit: 50 })),
     v2Mutate: vi.fn().mockResolvedValue({ businessRevision: 2, invalidated: ['overview', 'projects', 'project:p-1', 'sections:p-1'], changed: { projectId: 'p-1' } }),
@@ -136,19 +145,20 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(api.getSession).toHaveBeenCalled();
   });
 
-  it('100k total 只渲染当前 50 项', async () => {
+  it('100k total 只渲染当前固定 20 项', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     expect(await screen.findByRole('heading', { name: '高密项目队列 100000' })).toBeInTheDocument();
-    expect(screen.getAllByRole('row')).toHaveLength(51);
-    expect(screen.getByText('第 1–50 项 / 共 100000 项')).toBeInTheDocument();
+    expect(screen.getAllByRole('row')).toHaveLength(21);
+    expect(screen.getByText('第 1–20 项 / 共 100000 项')).toBeInTheDocument();
+    expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.not.objectContaining({ limit: expect.anything() }));
   });
 
   it('阶段、提醒、区域和查询筛选下推并重置到首页 cursor', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /执行中.*20000.*平均 5 天/ }, { timeout: 5_000 }));
     await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, status: 'executing' })));
-    fireEvent.change(screen.getByLabelText('提醒'), { target: { value: 'overdue' } }); fireEvent.change(screen.getByLabelText('区域'), { target: { value: '华东' } }); fireEvent.change(screen.getByLabelText('查找项目'), { target: { value: 'ECC-9' } }); fireEvent.click(screen.getByRole('button', { name: '筛选' }));
-    await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, status: 'executing', reminder: 'overdue', region: '华东', query: 'ECC-9' })));
+    fireEvent.change(screen.getByLabelText('提醒'), { target: { value: 'overdue' } }); fireEvent.change(screen.getByLabelText('区域'), { target: { value: 'East' } }); fireEvent.change(screen.getByLabelText('查找项目'), { target: { value: 'ECC-9' } }); fireEvent.click(screen.getByRole('button', { name: '筛选' }));
+    await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, status: 'executing', reminder: 'overdue', region: 'East', query: 'ECC-9' })));
   });
 
   it('维修中作为独立筛选发送 repair open，不占用生命周期状态', async () => {
@@ -222,7 +232,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('项目队列支持 roving focus 与方向/Home/End/Enter/Space/PageDown', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); const rows = screen.getAllByRole('row').slice(1); rows[0]!.focus(); fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' }); expect(rows[1]).toHaveFocus(); fireEvent.keyDown(rows[1]!, { key: 'Enter' }); expect(rows[1]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[1]!, { key: 'End' }); expect(rows.at(-1)).toHaveFocus(); fireEvent.keyDown(rows.at(-1)!, { key: 'Home' }); expect(rows[0]).toHaveFocus(); fireEvent.keyDown(rows[0]!, { key: ' ' }); expect(rows[0]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[0]!, { key: 'PageDown' }); expect(await screen.findByText('客户 51')).toBeInTheDocument();
+    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); const rows = screen.getAllByRole('row').slice(1); rows[0]!.focus(); fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' }); expect(rows[1]).toHaveFocus(); fireEvent.keyDown(rows[1]!, { key: 'Enter' }); expect(rows[1]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[1]!, { key: 'End' }); expect(rows.at(-1)).toHaveFocus(); fireEvent.keyDown(rows.at(-1)!, { key: 'Home' }); expect(rows[0]).toHaveFocus(); fireEvent.keyDown(rows[0]!, { key: ' ' }); expect(rows[0]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[0]!, { key: 'PageDown' }); expect(await screen.findByText('客户 21')).toBeInTheDocument();
   });
 
   it('历史导入返回后刷新 overview 与项目首页并恢复入口焦点', async () => {
@@ -280,14 +290,15 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('新建搬迁项目改为单页四分组，范围只填写仪器数量', async () => {
+  it('新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签', async () => {
     render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     for (const name of ['项目与进单', '搬迁范围（均可后补）', '执行准备', '保存意图']) expect(within(dialog).getByRole('group', { name })).toBeInTheDocument();
     expect(within(dialog).getByLabelText(/仪器数量/)).toBeInTheDocument();
-    expect(within(dialog).getByLabelText(/计划装机完成日期/)).toBeInTheDocument();
-    expect(within(dialog).queryByLabelText(/实际装机完成日期/)).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/^计划装机日期/)).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent('计划装机完成日期');
+    expect(within(dialog).getByLabelText(/实际装机完成日期/)).toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/仪器名称|型号/)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: '下一步' })).not.toBeInTheDocument();
   });
@@ -299,7 +310,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
 
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '向导客户' } });
-    fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: '华东' } });
+    fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
     fireEvent.change(within(dialog).getByLabelText(/旧址联系人/), { target: { value: '旧址王工' } });
     fireEvent.change(within(dialog).getByLabelText(/新址联系人/), { target: { value: '新址李工' } });
     fireEvent.change(within(dialog).getByLabelText(/旧址地址/), { target: { value: '旧址 A' } });
@@ -323,20 +334,20 @@ describe('Oracle #10 bounded workbench renderer', () => {
     })));
   });
 
-  it('待进单不渲染正式字段，提前执行以是否批复和批复说明为核心', async () => {
+  it('待进单不渲染正式字段，未进单先执行只记录是否批复 boolean', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
-    fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '待进单客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: '华东' } });
+    fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '待进单客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
     expect(within(dialog).queryByRole('textbox', { name: /^ECC/ })).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/^进单日期 必填$/)).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('spinbutton', { name: /合同 USD 含税金额/ })).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('radio', { name: /提前执行/ }));
-    expect(within(dialog).getByRole('checkbox', { name: /是否批复/ })).toBeRequired();
-    expect(within(dialog).getByLabelText(/批复说明/)).toBeRequired();
-    expect(dialog).not.toHaveTextContent('经理批复原因');
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: /是否批复/ })); fireEvent.change(within(dialog).getByLabelText(/批复说明/), { target: { value: '王经理同意先执行' } }); fireEvent.click(within(dialog).getByRole('button', { name: '确认提前执行' }));
-    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'create_project', payload: expect.objectContaining({ intent: 'pre_entry_execution', approvalReason: '王经理同意先执行' }) })));
+    fireEvent.click(within(dialog).getByRole('radio', { name: /未进单先执行/ }));
+    const approval = within(dialog).getByRole('combobox', { name: /是否批复/ });
+    expect(approval).toBeRequired();
+    expect(within(dialog).queryByLabelText(/批复说明|缺失资料/)).not.toBeInTheDocument();
+    fireEvent.change(approval, { target: { value: 'false' } }); fireEvent.click(within(dialog).getByRole('button', { name: '确认提前执行' }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'create_project', payload: expect.objectContaining({ intent: 'pre_entry_execution', managerApproved: false }) })));
     const payload = vi.mocked(api.v2Mutate!).mock.calls.at(-1)![0].payload as unknown as Record<string, unknown>;
     for (const key of ['ecc', 'entryAt', 'contractAmount', 'finalAmount', 'serviceOrderNo', 'engineers', 'serviceOrderNote', 'missingItems']) expect(key in payload).toBe(false);
   });
@@ -344,7 +355,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   it('新建契约拒绝只展示稳定中文，不暴露技术错误码', async () => {
     const api = mockApi({ v2Mutate: vi.fn().mockRejectedValue(new Error('WIZARD_CONTRACT_AMOUNT_ONLY_FORMAL: invalid payload')) });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
-    const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' }); fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '错误客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: '华东' } }); fireEvent.click(within(dialog).getByRole('button', { name: '保存为待进单' }));
+    const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' }); fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '错误客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } }); fireEvent.click(within(dialog).getByRole('button', { name: '保存为待进单' }));
     const alert = await within(dialog).findByRole('alert'); expect(alert).toHaveTextContent('合同金额仅可在正式进单时提交'); expect(alert).not.toHaveTextContent('WIZARD_');
   });
 
@@ -458,7 +469,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     const dialog = await openQuickAction('补齐进单核心资料');
     fireEvent.change(within(dialog).getByLabelText(/仪器数量/), { target: { value: '8' } });
-    fireEvent.change(within(dialog).getByLabelText(/计划装机完成日期/), { target: { value: '2026-09-01' } });
+    fireEvent.change(within(dialog).getByLabelText(/^计划装机日期/), { target: { value: '2026-09-01' } });
     fireEvent.change(within(dialog).getByLabelText(/实际装机完成日期/), { target: { value: '2026-09-02' } });
     fireEvent.change(within(dialog).getByLabelText(/服务单号/), { target: { value: 'SO-8' } });
     fireEvent.change(within(dialog).getByLabelText(/^工程师/), { target: { value: '工程师甲' } });
@@ -739,7 +750,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('项目总览编辑资料预填分组字段，显式提交 false/空值并在成功后关闭刷新详情', async () => {
-    const row = { ...project(1), customerName: '预填客户', region: '华南' };
+    const row = { ...project(1), customerName: '预填客户', region: 'East' };
     const loaded = detailOf(row);
     loaded.detail = {
       ...loaded.detail!, contractStartDate: '2026-01-01', contractEndDate: '2026-12-31',
@@ -776,10 +787,11 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(api.v2Mutate).toHaveBeenCalledWith({
       op: 'update_project',
       payload: {
-        projectId: 'p-1', customerName: '更新客户', region: '华南',
+        projectId: 'p-1', customerName: '更新客户', region: 'East',
         contractStartDate: '2026-01-01', contractEndDate: '2026-12-31',
         oldSiteContact: '旧址王工', newSiteContact: null, oldSiteAddress: '旧址 A', newSiteAddress: null,
-        plannedVisitAt: null, plannedTransportAt: '2026-08-11', plannedInstallDoneAt: null, siteConfirmed: false,
+        plannedVisitAt: null, plannedTransportAt: '2026-08-11', plannedInstallAt: null, siteConfirmed: false,
+        projectNote: null, temporaryStorageAddress: null, isTemporaryStorage: null, temporaryInstrumentCount: null,
       },
     });
     resolveMutation({ businessRevision: 2, invalidated: ['project:p-1'], changed: { projectId: 'p-1' } });
@@ -787,7 +799,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledTimes(2));
   });
 
-  it('基线：detail DTO 已携带 temporaryInstrumentCount，编辑表单尚无暂定数量/备注/暂存字段，保存复用既有刷新路径', async () => {
+  it('编辑项目资料预填并提交暂定数量、备注、暂存与计划装机，保存后 refetch 回显', async () => {
     const row = { ...project(1), customerName: '基线客户' };
     const loaded = detailOf(row);
     loaded.detail = { ...loaded.detail!, temporaryInstrumentCount: 12 };
@@ -807,15 +819,20 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
     const dialog = screen.getByRole('dialog', { name: '编辑项目资料' });
     for (const name of ['基本信息', '地点与联系人', '执行准备']) expect(within(dialog).getByRole('group', { name })).toBeInTheDocument();
-    // 当前编辑表单字段集合：无 暂定数量（暂定仪器数量）、项目备注、暂存地址、是否暂存。
-    expect(within(dialog).queryByLabelText(/暂定数量|仪器数量/)).not.toBeInTheDocument();
-    expect(within(dialog).queryByLabelText(/项目备注|暂存地址|是否暂存/)).not.toBeInTheDocument();
-    expect(dialog).not.toHaveTextContent('暂定');
-    expect(dialog).not.toHaveTextContent('暂存');
+    expect(within(dialog).getByLabelText(/暂定仪器数量/)).toHaveValue(12);
+    expect(within(dialog).getByLabelText(/项目备注/)).toHaveValue('');
+    expect(within(dialog).getByLabelText(/暂存地址/)).toHaveValue('');
+    expect(within(dialog).getByLabelText(/是否暂存/)).toHaveValue('');
+    expect(within(dialog).getByLabelText(/^计划装机日期/)).toHaveValue('');
+    fireEvent.change(within(dialog).getByLabelText(/暂定仪器数量/), { target: { value: '18' } });
+    fireEvent.change(within(dialog).getByLabelText(/项目备注/), { target: { value: '需避开周末' } });
+    fireEvent.change(within(dialog).getByLabelText(/暂存地址/), { target: { value: '中转仓 A' } });
+    fireEvent.change(within(dialog).getByLabelText(/是否暂存/), { target: { value: 'true' } });
+    fireEvent.change(within(dialog).getByLabelText(/^计划装机日期/), { target: { value: '2026-09-03' } });
 
     // 保存复用既有 v2Mutate update_project 刷新路径：关闭弹层并重新读取详情回显项目数据。
     fireEvent.click(within(dialog).getByRole('button', { name: '保存项目资料' }));
-    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: expect.objectContaining({ projectId: 'p-1' }) }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: expect.objectContaining({ projectId: 'p-1', temporaryInstrumentCount: 18, projectNote: '需避开周末', temporaryStorageAddress: '中转仓 A', isTemporaryStorage: true, plannedInstallAt: '2026-09-03' }) }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目资料' })).not.toBeInTheDocument());
     await waitFor(() => expect(vi.mocked(api.v2ProjectDetail!).mock.calls.length).toBeGreaterThan(1));
     expect(screen.getByRole('region', { name: '基线客户' })).toBeInTheDocument();
@@ -873,6 +890,10 @@ describe('Oracle #10 bounded workbench renderer', () => {
           projectId: 'p-51', customerName: '跨页客户', ecc: 'ECC-000051', tempNo: 'TMP-000051',
           reminderAt: '2026-08-08', reminderNote: '跨页提醒', reminderDueClass: 'today' as const,
         }],
+      }),
+      v2ReminderLanes: vi.fn().mockResolvedValue({
+        businessRevision: 1, dates: ['2026-08-08'], lanePageSize: 50,
+        lanes: [{ date: '2026-08-08', total: 1, nextCursor: null, limit: 50, projects: [{ projectId: 'p-51', customerName: '跨页客户', ecc: 'ECC-000051', tempNo: 'TMP-000051', reminderAt: '2026-08-08', reminderNote: '跨页提醒', reminderDueClass: 'today' as const }] }],
       }),
       // 新筛选（ECC-000051）下项目不在当前页，用于复现 detail 为空且 selectedId 不在页内时面板消失。
       v2ProjectPage: vi.fn().mockImplementation((request: { cursor?: string | null; query?: string | null }) =>
@@ -940,7 +961,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '新建客户' } });
-    fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: '华东' } });
+    fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
     fireEvent.change(within(dialog).getByLabelText(/旧址地址/), { target: { value: '旧址 A' } });
     fireEvent.change(within(dialog).getByLabelText(/新址地址/), { target: { value: '新址 B' } });
     fireEvent.change(within(dialog).getByLabelText(/仪器数量/), { target: { value: '1' } });
@@ -957,5 +978,68 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(newRow).toHaveAttribute('aria-selected', 'true'));
     await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledWith('p-new'));
     expect(await screen.findByRole('region', { name: '新建客户' })).toBeInTheDocument();
+  });
+
+  it('区域在新建、编辑与队列均为五选项，legacy 原文醒目标记且未显式选择不提交区域', async () => {
+    const legacy = { ...project(1), region: '华东旧区', regionNeedsAdjustment: true };
+    const api = mockApi({
+      v2ProjectPage: vi.fn().mockResolvedValue(page([legacy], null, 1)),
+      v2ProjectDetail: vi.fn().mockResolvedValue(detailOf(legacy)),
+    });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    await screen.findByRole('region', { name: legacy.customerName });
+    expect(screen.getByText('待调整', { selector: '.legacy-region-tag' })).toBeInTheDocument();
+    const queueRegion = screen.getByLabelText('区域');
+    expect(within(queueRegion).getAllByRole('option').map((item) => item.textContent)).toEqual(['全部区域', 'East', 'South', 'West', 'Central', 'North']);
+    fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
+    const dialog = screen.getByRole('dialog', { name: '编辑项目资料' });
+    expect(within(dialog).getByRole('status')).toHaveTextContent('原区域“华东旧区”');
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存项目资料' }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalled());
+    expect(vi.mocked(api.v2Mutate!).mock.calls.at(-1)![0].payload).not.toHaveProperty('region');
+  });
+
+  it('提醒泳道按最多七个日期列读取，同日纵向堆叠且列加载更多保持 selectedDates', async () => {
+    const dates = Array.from({ length: 7 }, (_, index) => `2026-08-${String(index + 1).padStart(2, '0')}`);
+    const laneApi = vi.fn().mockImplementation((request: { selectedDates?: readonly string[]; date?: string; cursor?: string | null }) => Promise.resolve({
+      businessRevision: 1, dates, lanePageSize: 2,
+      lanes: dates.map((date, index) => ({
+        date, total: index === 0 ? 3 : 1, limit: 2, nextCursor: date === dates[0] && !request.cursor ? 'lane-next' : null,
+        projects: date === dates[0]
+          ? (request.cursor ? [{ projectId: 'p-3', customerName: '同日客户 3', ecc: null, tempNo: 'TMP-3', reminderAt: date, reminderNote: null, reminderDueClass: 'overdue' as const }] : [{ projectId: 'p-1', customerName: '同日客户 1', ecc: null, tempNo: 'TMP-1', reminderAt: date, reminderNote: null, reminderDueClass: 'overdue' as const }, { projectId: 'p-2', customerName: '同日客户 2', ecc: null, tempNo: 'TMP-2', reminderAt: date, reminderNote: null, reminderDueClass: 'overdue' as const }])
+          : [{ projectId: `lane-${index}`, customerName: `日期客户 ${index}`, ecc: null, tempNo: `TMP-${index}`, reminderAt: date, reminderNote: null, reminderDueClass: 'upcoming' as const }],
+      })),
+    }));
+    const api = mockApi({ v2ReminderLanes: laneApi }); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    const lanes = await screen.findByRole('region', { name: '提醒日期泳道' });
+    expect(lanes.querySelectorAll('.reminder-lane')).toHaveLength(7);
+    const firstLane = lanes.querySelector<HTMLElement>('.reminder-lane')!;
+    expect(within(firstLane).getAllByRole('button', { name: /同日客户/ })).toHaveLength(2);
+    fireEvent.click(within(firstLane).getByRole('button', { name: '加载本列更多' }));
+    await waitFor(() => expect(laneApi).toHaveBeenLastCalledWith({ selectedDates: dates, date: dates[0], cursor: 'lane-next' }));
+    expect(within(firstLane).getAllByRole('button', { name: /同日客户/ })).toHaveLength(3);
+  });
+
+  it('查看全部进入完整提醒页，默认日期降序，切换升序立即首页重读并稳定翻页', async () => {
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    await screen.findByRole('heading', { name: /高密项目队列/ });
+    fireEvent.click(screen.getByRole('button', { name: '查看全部' }));
+    const dialog = screen.getByRole('dialog', { name: '全部项目提醒' });
+    await waitFor(() => expect(api.v2ReminderPage).toHaveBeenCalledWith({ sort: 'desc', cursor: null, limit: 50 }));
+    fireEvent.change(within(dialog).getByLabelText('提醒日期顺序'), { target: { value: 'asc' } });
+    await waitFor(() => expect(api.v2ReminderPage).toHaveBeenLastCalledWith({ sort: 'asc', cursor: null, limit: 50 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(api.v2ReminderPage).toHaveBeenLastCalledWith({ sort: 'asc', cursor: 'reminder-2', limit: 50 }));
+  });
+
+  it('项目仅有取消入口且无物理删除，掉票只提供撤销并在终态禁编辑和重复撤销', async () => {
+    const api = mockApi({ v2SectionPage: vi.fn().mockResolvedValue({ ...section('invoices'), rows: [{ kind: 'invoices' as const, id: 'inv-revoked', projectId: 'p-1', amount: '10.00', invoicedAt: '2026-08-01', active: false, revokedAt: '2026-08-02', revokeReason: '重复登记', lastModifiedAt: '2026-08-02T00:00:00Z', createdAt: '2026-08-01T00:00:00Z' }] }) });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    await screen.findByRole('region', { name: project(1).customerName });
+    expect(screen.getByRole('button', { name: '取消项目' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /删除项目/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '费用与掉票' }));
+    expect(await screen.findByText('终态 · 更正请新增')).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).queryByRole('button', { name: /编辑|撤销|删除/ })).not.toBeInTheDocument();
   });
 });

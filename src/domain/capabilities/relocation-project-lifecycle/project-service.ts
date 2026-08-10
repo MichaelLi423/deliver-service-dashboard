@@ -9,7 +9,7 @@ import {
 } from '../../core/time';
 import { createPendingProject, isFormallyEntered, type Project } from './project';
 import { createContract, type Contract } from './contract';
-import { resolveStatus, type TransitionContext, type TransitionResult } from './lifecycle';
+import { resolveStatus, resolveStatusAfterFactDeletion, type TransitionContext, type TransitionResult } from './lifecycle';
 import { isCancelled, type ProjectStatusOrCancelled } from './states';
 
 /**
@@ -395,17 +395,13 @@ export class ProjectService {
   }
 
   /**
-   * 删除验收报告（受保护删除，2.4 反向操作）：
+   * 删除验收报告（受保护删除，2.4 反向操作 / Tasks 5.3）：
    * - 存在任何掉票历史（含已撤销）拒绝（掉票闭环事实不可逆回退）；
-   * - 清空 acceptanceReport / acceptanceReportDate，并按现有事实确定性回退主状态：
-   *   未进单先执行标签存在 → 待进单（标签规则，TBD-08）；
-   *   已录入实际装机完成日期 → 待验收（自动触发 2 同口径）；
-   *   已开始执行（首次上门工作事实/批次开始运输）→ 执行中；
-   *   已正式进单 → 待执行（进单基线）；
-   *   否则 → 待进单。
-   * 该回退是事实驱动的确定性重算，尊重生命周期不变量：绝不进入 cancelled /
-   * completed（不绕过取消终态与金额闭环约束）、不产生与上述事实矛盾的非法状态；
-   * 反向回退无法经前向自动触发表达，故由本方法直接落库（结果与 lifecycle 规则一致）。
+   * - 清空 acceptanceReport / acceptanceReportDate，并按「删除后剩余事实」经
+   *   lifecycle 唯一入口 resolveStatusAfterFactDeletion 重算主状态（剩余验收/
+   *   实际装机/执行事实/正式进单/plan visit due/金额闭环保留），绝不直接赋值状态；
+   * - 重算不可靠（已取消/金额闭环完成态）→ 抛 ACCEPTANCE_STATUS_RECALC_FAILED，
+   *   删除路径在删任何行前映射为 DELETE_REJECTED_STATUS_RECALC。
    */
   clearAcceptance(
     projectId: string,
@@ -421,38 +417,66 @@ export class ProjectService {
         '该项目存在掉票历史（含已撤销），验收报告不可删除；掉票闭环事实不可逆回退',
       );
     }
-    project.acceptanceReport = false;
-    project.acceptanceReportDate = null;
-    project.updatedAt = this.now();
-    this.projects.save(project);
-
-    // 先按统一 lifecycle 规则重算状态（状态转换与校验唯一入口）。
-    let target: ProjectStatusOrCancelled;
-    if (project.preEntryExecution) {
-      target = 'pending_entry'; // 未进单先执行标签：主状态保持待进单（TBD-08）
-    } else if (project.actualInstallDoneAt !== null) {
-      target = 'pending_acceptance'; // 已实际装机完成
-    } else if (facts.executionStarted) {
-      target = 'executing'; // 已开始执行
-    } else if (isFormallyEntered(project)) {
-      target = 'pending_execution'; // 正式进单基线
-    } else {
-      target = 'pending_entry';
-    }
-
-    const result = this.adjustStatus(projectId, target, {
+    // 先按「删除验收报告后」的剩余事实重算（经 lifecycle 唯一入口，不落库只决策）；
+    // 重算不可靠 → 抛 ACCEPTANCE_STATUS_RECALC_FAILED，调用方映射为 STATUS_RECALC。
+    const result = this.recomputeStatusAfterFactDeletion(projectId, {
       executionStarted: facts.executionStarted,
-      hasAnyInvoiceHistory: false,
+      acceptanceCleared: true,
     });
-
     if (!result.ok) {
       throw new ValidationError(
         'ACCEPTANCE_STATUS_RECALC_FAILED',
         `验收报告删除后状态重算失败：${result.errors.join('；')}`,
       );
     }
-
+    // 重算通过后清空验收事实。重新读取已应用重算结果的项目对象再落库，
+    // 避免用重算前的陈旧对象（旧 status）覆盖重算已写入的状态。
+    const updated = this.requireProject(projectId);
+    updated.acceptanceReport = false;
+    updated.acceptanceReportDate = null;
+    updated.updatedAt = this.now();
+    this.projects.save(updated);
     return this.requireProject(projectId);
+  }
+
+  /**
+   * 删除事实后的状态重算（Tasks 5.3）：经 lifecycle 唯一入口
+   * resolveStatusAfterFactDeletion 决策「删除后」主状态。
+   *
+   * - facts.acceptanceCleared：重算视验收报告事实为已删除（按剩余事实推导基线）；
+   * - 以「删除后剩余事实」为基线并应用前向自动触发（plan due 不倒退、金额闭环保留）；
+   * - 真实状态变化才落库（revision 经 v10 触发器自然递增）；零变化零写；拒绝零写。
+   */
+  recomputeStatusAfterFactDeletion(
+    projectId: string,
+    facts: { executionStarted: boolean; acceptanceCleared?: boolean; today?: BusinessDate },
+  ): TransitionResult {
+    const project = this.requireProject(projectId);
+    const contract = project.contractId ? this.contracts.findByProjectId(projectId) : undefined;
+    const invoice = this.invoiceFacts(projectId);
+    const context: TransitionContext = {
+      currentStatus: project.status,
+      requestedStatus: project.status,
+      actualInstallDoneAt: project.actualInstallDoneAt,
+      acceptanceReportDate: facts.acceptanceCleared ? null : project.acceptanceReportDate,
+      planVisitAt: project.planVisitAt,
+      today: facts.today,
+      preEntryExecution: project.preEntryExecution,
+      executionStarted: facts.executionStarted,
+      formallyEntered: isFormallyEntered(project),
+      amounts: {
+        confirmedAmountCents: invoice.confirmedAmountCents,
+        finalConfirmableAmountCents: contract?.finalConfirmableAmountCents ?? null,
+      },
+      cancel: { hasAnyInvoiceHistory: invoice.hasAnyInvoiceHistory },
+    };
+    const result = resolveStatusAfterFactDeletion(context);
+    if (result.ok && result.status !== project.status) {
+      project.status = result.status;
+      project.updatedAt = this.now();
+      this.projects.save(project);
+    }
+    return result;
   }
 
   // ---- 2.5 取消 ----

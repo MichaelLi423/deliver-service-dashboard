@@ -5,6 +5,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
+  type CSSProperties,
 } from "react";
 import ExcelJS from "exceljs";
 import type {
@@ -38,13 +39,18 @@ import type {
   WorkbenchV2SectionPageDto,
   WorkbenchV2SectionRow,
   WorkbenchV2DeleteRequest,
+  WorkbenchV2ReminderLaneRow,
+  WorkbenchV2ReminderLanesDto,
+  WorkbenchV2ReminderPageDto,
 } from "../../shared/ipc";
+import { PROJECT_REGIONS } from "../../shared/ipc";
 import {
   HistoryImportWizard,
   IpcHistoryImportProvider,
 } from "../history-import";
 
 const PAGE_SIZE = 50;
+const PROJECT_PAGE_SIZE = 20;
 const QR_REQUEST_TYPES = [
   { code: "A", label: "A" },
   { code: "B", label: "B" },
@@ -147,6 +153,8 @@ type V2Method =
   | "v2HistoryPage"
   | "v2IndependentPage"
   | "v2LookupPage"
+  | "v2ReminderPage"
+  | "v2ReminderLanes"
   | "v2Mutate";
 function bridge(): WorkbenchApi | undefined {
   return (window as unknown as { workbench?: WorkbenchApi }).workbench;
@@ -228,7 +236,7 @@ interface Filters {
   query: string;
 }
 type LayerState =
-  | { kind: "new" | "quick" | "reminder" | "cancel" | "report" | "history" | "clean" | "edit-project" | "correct-entry" }
+  | { kind: "new" | "quick" | "reminder" | "reminder-all" | "cancel" | "report" | "history" | "clean" | "edit-project" | "correct-entry" }
   | { kind: "action"; action: WorkbenchActionType }
   | { kind: "independent"; module: WorkbenchV2IndependentKind }
   | {
@@ -327,6 +335,7 @@ export function WorkbenchV2({
   const [layer, setLayer] = useState<LayerState | null>(null);
   const [historyImport, setHistoryImport] = useState(false);
   const [independentRefresh, setIndependentRefresh] = useState(0);
+  const [reminderRefresh, setReminderRefresh] = useState(0);
   const revision = useRef(0);
   const requests = useRef({ projects: 0, detail: 0, section: 0, overview: 0 });
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
@@ -384,7 +393,6 @@ export function WorkbenchV2({
         api,
         "v2ProjectPage",
       )({
-        limit: PAGE_SIZE,
         cursor,
         status: effective.status || null,
         reminder: effective.reminder || null,
@@ -532,6 +540,7 @@ export function WorkbenchV2({
       tags.includes("independent:qr_request")
     )
       setIndependentRefresh((value) => value + 1);
+    if (tags.includes("reminders")) setReminderRefresh((value) => value + 1);
     await Promise.all(jobs);
   }
 
@@ -600,9 +609,12 @@ export function WorkbenchV2({
     setDraftFilters(next);
     setFilters(next);
   }
-  function selectReminder(
-    item: WorkbenchV2OverviewDto["reminderPreview"][number],
-  ): void {
+  function selectReminder(item: {
+    projectId: string;
+    customerName: string;
+    ecc: string | null;
+    tempNo: string;
+  }): void {
     const query = item.ecc ?? item.tempNo ?? item.customerName;
     // 钉住提醒目标：即使新筛选下不在当前页，也保持选中并继续按 id 读取详情。
     selectionPin.current = item.projectId;
@@ -806,7 +818,7 @@ export function WorkbenchV2({
         </div>
       </header>
       <main id="main" className="page">
-        <section className="command">
+        <section className="command" aria-label="任务指挥台">
           <div>
             <p className="overline">任务指挥台</p>
             <h1>先处理提醒，再连续推进项目</h1>
@@ -925,42 +937,16 @@ export function WorkbenchV2({
                 <h2 id="reminder-title">
                   项目提醒快速处理 {overview?.reminderTotal ?? 0}
                 </h2>
-                <p>优先显示最接近当前时间的提醒</p>
+                <p>按业务日期分列，同日项目集中处理</p>
               </div>
               <button
                 className="text-action"
-                onClick={() => {
-                  selectionPin.current = "";
-                  setDraftFilters((old) => ({ ...old, reminder: "any" }));
-                  setFilters((old) => ({ ...old, reminder: "any" }));
-                }}
+                onClick={() => setLayer({ kind: "reminder-all" })}
               >
                 查看全部
               </button>
             </div>
-            <div className="reminder-list">
-              {overview?.reminderPreview.map((item) => (
-                <button
-                  key={item.projectId}
-                  onClick={() => selectReminder(item)}
-                >
-                  <span
-                    className={`due due-${item.reminderDueClass ?? "note"}`}
-                  >
-                    {item.reminderDueClass === "overdue"
-                      ? "已逾期"
-                      : item.reminderDueClass === "today"
-                        ? "今日"
-                        : item.reminderDueClass === "upcoming"
-                          ? "临期"
-                          : "备注"}
-                  </span>
-                  <strong>{item.customerName}</strong>
-                  <small>{item.ecc ?? item.tempNo}</small>
-                  <p>{item.reminderNote || "查看提醒日期"}</p>
-                </button>
-              ))}
-            </div>
+            <ReminderLanes refreshToken={reminderRefresh} onSelect={selectReminder} />
           </section>
           <ProjectContext
             project={selected}
@@ -986,7 +972,7 @@ export function WorkbenchV2({
           <div className="panel-head queue-heading">
             <div>
               <h2 id="queue-title">高密项目队列 {projectPage?.total ?? 0}</h2>
-              <p>服务端 keyset 分页 · 每页最多 {PAGE_SIZE} 项</p>
+              <p>固定每页 20 个项目，筛选后从第一页开始</p>
             </div>
             <span className="queue-range" aria-live="polite">
               {notice}
@@ -1033,7 +1019,7 @@ export function WorkbenchV2({
             </label>
             <label>
               区域
-              <input
+              <select
                 value={draftFilters.region}
                 onChange={(event) =>
                   setDraftFilters((old) => ({
@@ -1041,7 +1027,10 @@ export function WorkbenchV2({
                     region: event.target.value,
                   }))
                 }
-              />
+              >
+                <option value="">全部区域</option>
+                {PROJECT_REGIONS.map((region) => <option value={region} key={region}>{region}</option>)}
+              </select>
             </label>
             <label className="queue-query">
               查找项目
@@ -1115,7 +1104,7 @@ export function WorkbenchV2({
                     <td>
                       <StatusBadge status={project.status} />
                     </td>
-                    <td>{project.region || "待补"}</td>
+                    <td>{project.region || "待补"}{project.regionNeedsAdjustment && <span className="legacy-region-tag">待调整</span>}</td>
                     <td>
                       {project.reminderAt
                         ? businessDate(project.reminderAt)
@@ -1162,9 +1151,9 @@ export function WorkbenchV2({
               上一页
             </button>
             <span>
-              第 {projectPage?.total ? currentPageIndex * PAGE_SIZE + 1 : 0}–
+              第 {projectPage?.total ? currentPageIndex * (projectPage.pageSize ?? projectPage.limit ?? PROJECT_PAGE_SIZE) + 1 : 0}–
               {Math.min(
-                (currentPageIndex + 1) * PAGE_SIZE,
+                (currentPageIndex + 1) * (projectPage?.pageSize ?? projectPage?.limit ?? PROJECT_PAGE_SIZE),
                 projectPage?.total ?? 0,
               )}{" "}
               项 / 共 {projectPage?.total ?? 0} 项
@@ -1238,7 +1227,7 @@ export function WorkbenchV2({
         <Layer
           title={layerTitle(layer)}
           description={layerDescription(layer, selected)}
-          side={layer.kind === "independent" || layer.kind === "report" || layer.kind === "history"}
+          side={layer.kind === "independent" || layer.kind === "report" || layer.kind === "history" || layer.kind === "reminder-all"}
           onClose={() => setLayer(null)}
         >
           {layer.kind === "new" ? (
@@ -1391,6 +1380,8 @@ export function WorkbenchV2({
             <ReportPanelV2 />
           ) : layer.kind === "history" ? (
             <HistoryBrowserV2 onRevision={(next) => { revision.current = Math.max(revision.current, next); }} onDelete={(request, success) => deleteRecord(request, success, false)} />
+          ) : layer.kind === "reminder-all" ? (
+            <ReminderBrowserV2 onSelect={(item) => { setLayer(null); selectReminder(item); }} onRevision={(next) => { revision.current = Math.max(revision.current, next); }} />
           ) : layer.kind === "clean" ? (
             <DataCleanPanel onComplete={async () => {
               revision.current = 0;
@@ -1407,6 +1398,108 @@ export function WorkbenchV2({
       )}
     </div>
   );
+}
+
+function reminderClassLabel(value: WorkbenchV2ReminderLaneRow["reminderDueClass"]): string {
+  return value === "overdue" ? "已逾期" : value === "today" ? "今日" : value === "upcoming" ? "临期" : "未分类";
+}
+
+function ReminderLanes({
+  refreshToken,
+  onSelect,
+}: {
+  refreshToken: number;
+  onSelect: (item: WorkbenchV2ReminderLaneRow) => void;
+}): JSX.Element {
+  const [data, setData] = useState<WorkbenchV2ReminderLanesDto | null>(null);
+  const [error, setError] = useState("");
+  const [loadingDate, setLoadingDate] = useState("");
+  async function load(date?: string, cursor?: string | null): Promise<void> {
+    setError("");
+    setLoadingDate(date ?? "initial");
+    try {
+      const api = bridge();
+      if (!api) throw new Error("当前环境未连接主进程");
+      const next = await requireV2(api, "v2ReminderLanes")({
+        ...(date && data?.dates.length ? { selectedDates: data.dates } : {}),
+        ...(date ? { date, cursor: cursor ?? null } : {}),
+      });
+      setData((current) => {
+        if (!date || !current) return next;
+        const incoming = next.lanes.find((lane) => lane.date === date);
+        if (!incoming) return current;
+        return {
+          ...next,
+          dates: current.dates,
+          lanes: current.lanes.map((lane) =>
+            lane.date === date
+              ? { ...incoming, projects: [...lane.projects, ...incoming.projects] }
+              : lane,
+          ),
+        };
+      });
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      setLoadingDate("");
+    }
+  }
+  useEffect(() => { setData(null); void load(); }, [refreshToken]);
+  if (error) return <div className="inline-error" role="alert">{error}<button className="text-action" onClick={() => void load()}>重试</button></div>;
+  if (!data) return <div className="detail-loading" role="status">正在读取提醒日期…</div>;
+  if (!data.dates.length) return <Empty title="暂无日期提醒" copy="设置提醒日期后会按日期出现在这里。" />;
+  return (
+    <div className="reminder-lane-scroll" role="region" aria-label="提醒日期泳道" tabIndex={0}>
+      <div className="reminder-lanes" style={{ "--lane-count": data.dates.length } as CSSProperties}>
+        {data.dates.map((date) => {
+          const lane = data.lanes.find((item) => item.date === date);
+          return <section className="reminder-lane" key={date} aria-labelledby={`lane-${date}`} tabIndex={0}>
+            <header><time id={`lane-${date}`} dateTime={date}>{date}</time><span>{lane?.total ?? 0} 项</span></header>
+            <div className="reminder-lane-stack">
+              {lane?.projects.map((item) => <button className="reminder-card" key={item.projectId} onClick={() => onSelect(item)}>
+                <span className={`due due-${item.reminderDueClass ?? "note"}`}>{reminderClassLabel(item.reminderDueClass)}</span>
+                <strong>{item.customerName}</strong><small>{item.ecc ?? item.tempNo}</small>
+                <p>{item.reminderNote || "无备注"}</p>
+              </button>)}
+            </div>
+            {lane?.nextCursor && <button className="lane-more" disabled={loadingDate === date} onClick={() => void load(date, lane.nextCursor)}>{loadingDate === date ? "正在读取…" : "加载本列更多"}</button>}
+          </section>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ReminderBrowserV2({
+  onSelect,
+  onRevision,
+}: {
+  onSelect: (item: WorkbenchV2ReminderPageDto["rows"][number]) => void;
+  onRevision: (revision: number) => void;
+}): JSX.Element {
+  const [sort, setSort] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState<WorkbenchV2ReminderPageDto | null>(null);
+  const [stack, setStack] = useState<Array<string | null>>([null]);
+  const [error, setError] = useState("");
+  async function load(cursor: string | null, direction = sort): Promise<void> {
+    setError("");
+    try {
+      const api = bridge(); if (!api) throw new Error();
+      const next = await requireV2(api, "v2ReminderPage")({ sort: direction, cursor, limit: 50 });
+      onRevision(next.businessRevision); setPage(next);
+    } catch { setError("提醒读取失败，请重试。"); }
+  }
+  useEffect(() => { void load(null); }, []);
+  function changeSort(direction: "asc" | "desc"): void {
+    setSort(direction); setStack([null]); void load(null, direction);
+  }
+  return <div className="reminder-browser">
+    <div className="reminder-browser-toolbar"><div><h3>全部项目提醒</h3><p>包含日期提醒与仅备注提醒，共 {page?.total ?? 0} 项。</p></div><Select name="reminderSort" label="提醒日期顺序" value={sort} onChange={(event) => changeSort(event.target.value as "asc" | "desc")} options={[["desc", "日期降序（默认）"], ["asc", "日期升序"]]} /></div>
+    {error && <div className="inline-error" role="alert">{error}<button className="text-action" onClick={() => void load(stack.at(-1) ?? null)}>重试</button></div>}
+    <div className="reminder-page-list">{page?.rows.map((item) => <button key={item.projectId} onClick={() => onSelect(item)}><span className={`due due-${item.reminderDueClass ?? "note"}`}>{reminderClassLabel(item.reminderDueClass)}</span><strong>{item.customerName}</strong><small>{item.ecc ?? item.tempNo}</small><time>{item.reminderAt ?? "仅备注"}</time><p>{item.reminderNote || "无备注"}</p></button>)}</div>
+    {page?.rows.length === 0 && <Empty title="暂无提醒" copy="项目设置提醒后会出现在这里。" />}
+    <div className="queue-pagination"><button className="button" disabled={stack.length <= 1} onClick={() => { const next = stack.slice(0, -1); setStack(next); void load(next.at(-1) ?? null); }}>上一页</button><span>本页 {page?.rows.length ?? 0} / 共 {page?.total ?? 0}</span><button className="button" disabled={!page?.nextCursor} onClick={() => { if (!page?.nextCursor) return; const next = [...stack, page.nextCursor]; setStack(next); void load(page.nextCursor); }}>下一页</button></div>
+  </div>;
 }
 
 function ProjectContext({
@@ -1439,7 +1532,7 @@ function ProjectContext({
       aria-busy={loading}
     >
       <div className="context-head">
-        <span>当前上下文 · {project.region || "区域待补"}</span>
+        <span>当前上下文 · {project.region || "区域待补"}{project.regionNeedsAdjustment ? "（待调整）" : ""}</span>
         <h2>{project.customerName}</h2>
         <p>{project.ecc || project.tempNo}</p>
         <div className="row-actions">
@@ -1606,7 +1699,7 @@ function ProjectDetails({
           </h2>
           <span>
             {project
-              ? `${project.ecc || project.tempNo} · ${project.region || "区域待补"}`
+              ? `${project.ecc || project.tempNo} · ${project.region || "区域待补"}${project.regionNeedsAdjustment ? "（待调整）" : ""}`
               : "从项目队列选择一行，或点击项目提醒跳转对应项目"}
           </span>
         </div>
@@ -1708,14 +1801,22 @@ function ProjectDetails({
             </div>
             <div className="fact-grid">
               {[
+              ["客户名称", project.customerName],
+              ["ECC / 临时编号", project.ecc || project.tempNo],
+              ["所属区域", `${project.region || "待补"}${project.regionNeedsAdjustment ? "（待调整）" : ""}`],
               ["主状态", STATUS_LABEL[project.status]],
-              [
-                "进单日期",
-                project.entryAt
-                  ? businessDate(project.entryAt)
-                  : "待进单",
-              ],
-              ["所属区域", project.region || "待补"],
+              ["进单日期", project.entryAt ? businessDate(project.entryAt) : "待进单"],
+              ["旧址地址", detail?.detail?.oldSiteAddress || "待补"],
+              ["新址地址", detail?.detail?.newSiteAddress || "待补"],
+              ["计划上门日期", detail?.detail?.planVisitAt || "待补"],
+              ["计划运输日期", detail?.detail?.planTransportAt || "待补"],
+              ["场地确认", detail?.detail?.siteConfirmed ? "是" : "否"],
+              ["是否暂存", detail?.detail?.isTemporaryStorage === null || detail?.detail?.isTemporaryStorage === undefined ? "未填写" : detail.detail.isTemporaryStorage ? "是" : "否"],
+              ["暂存地址", detail?.detail?.temporaryStorageAddress || "待补"],
+              ["计划装机日期", detail?.detail?.plannedInstallAt || "待补"],
+              ["实际装机完成日期", detail?.detail?.actualInstallDoneAt || "待补"],
+              ["项目备注", detail?.detail?.projectNote || "无"],
+              ["暂定仪器数量", detail?.detail?.temporaryInstrumentCount === null || detail?.detail?.temporaryInstrumentCount === undefined ? "待补" : `${detail.detail.temporaryInstrumentCount} 台`],
               ["合同开始日期", detail?.detail?.contractStartDate || "待补"],
               ["合同截止日期", detail?.detail?.contractEndDate || "待补"],
               ["物流费用登记", `${project.counts.batches} 条`],
@@ -2698,7 +2799,7 @@ function actionFields(
       <div className="form-group-title full">执行准备</div>
       <Field name="plannedVisitAt" label="计划上门日期" type="date" defaultValue={businessDate(detail?.planVisitAt)} optional />
       <Field name="plannedTransportAt" label="计划运输日期" type="date" defaultValue={businessDate(detail?.planTransportAt)} optional />
-      <Field name="plannedInstallDoneAt" label="计划装机完成日期" type="date" defaultValue={businessDate(detail?.plannedInstallDoneAt)} optional />
+      <Field name="plannedInstallDoneAt" label="计划装机日期" type="date" defaultValue={businessDate(detail?.plannedInstallAt ?? detail?.plannedInstallDoneAt)} optional />
       <Field name="actualInstallDoneAt" label="实际装机完成日期" type="date" defaultValue={businessDate(detail?.actualInstallDoneAt)} optional />
       <label className="confirm-check full"><input name="siteConfirmed" type="checkbox" defaultChecked={detail?.siteConfirmed ?? false} />现场条件已确认</label>
       <div className="form-group-title full">可选服务单</div>
@@ -3225,6 +3326,28 @@ function DataRows({
   );
 }
 
+function ProjectRegionSelect({
+  value,
+  legacy = false,
+  onChange,
+  required = true,
+}: {
+  value: string;
+  legacy?: boolean;
+  onChange?: (value: string) => void;
+  required?: boolean;
+}): JSX.Element {
+  return <div className="field region-field">
+    <label htmlFor="v2-region">区域 {required && <b>必填</b>}</label>
+    {legacy && <div className="legacy-region-warning" role="status"><strong>待调整</strong><span>原区域“{value}”仅保留显示，请明确选择新的五区域后再保存。</span></div>}
+    <select id="v2-region" name="region" value={value} required={required} onChange={(event) => onChange?.(event.target.value)}>
+      <option value="" disabled>请选择区域</option>
+      {legacy && value && <option value={value} disabled>{value}（待调整）</option>}
+      {PROJECT_REGIONS.map((region) => <option value={region} key={region}>{region}</option>)}
+    </select>
+  </div>;
+}
+
 function ProjectEditForm({
   mode,
   project,
@@ -3238,6 +3361,7 @@ function ProjectEditForm({
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [region, setRegion] = useState(project.region ?? "");
   const nullable = (data: FormData, name: string): string | null => {
     const value = String(data.get(name) ?? "").trim();
     return value || null;
@@ -3253,7 +3377,7 @@ function ProjectEditForm({
         await onSave({
           projectId: project.id,
           customerName: String(data.get("customerName") ?? "").trim(),
-          region: String(data.get("region") ?? "").trim(),
+          ...(!project.regionNeedsAdjustment || region !== project.region ? { region: String(data.get("region") ?? "").trim() } : {}),
           contractStartDate: nullable(data, "contractStartDate"),
           contractEndDate: nullable(data, "contractEndDate"),
           oldSiteContact: nullable(data, "oldSiteContact"),
@@ -3262,8 +3386,12 @@ function ProjectEditForm({
           newSiteAddress: nullable(data, "newSiteAddress"),
           plannedVisitAt: nullable(data, "plannedVisitAt"),
           plannedTransportAt: nullable(data, "plannedTransportAt"),
-          plannedInstallDoneAt: nullable(data, "plannedInstallDoneAt"),
+          plannedInstallAt: nullable(data, "plannedInstallAt"),
           siteConfirmed: data.has("siteConfirmed"),
+          projectNote: nullable(data, "projectNote"),
+          temporaryStorageAddress: nullable(data, "temporaryStorageAddress"),
+          isTemporaryStorage: data.get("isTemporaryStorage") === "" ? null : data.get("isTemporaryStorage") === "true",
+          temporaryInstrumentCount: nullable(data, "temporaryInstrumentCount") === null ? null : Number(nullable(data, "temporaryInstrumentCount")),
         });
       } else {
         await onSave({
@@ -3318,9 +3446,10 @@ function ProjectEditForm({
           <legend>基本信息</legend>
           <div className="form-grid">
             <Field name="customerName" label="客户名称" defaultValue={project.customerName} required autoFocus />
-            <Field name="region" label="区域" defaultValue={project.region ?? ""} required />
+            <ProjectRegionSelect value={region} legacy={project.regionNeedsAdjustment} onChange={setRegion} />
             <Field name="contractStartDate" label="合同开始日期" type="date" defaultValue={detail?.contractStartDate ?? ""} optional />
             <Field name="contractEndDate" label="合同截止日期" type="date" defaultValue={detail?.contractEndDate ?? ""} optional />
+            <TextArea name="projectNote" label="项目备注" defaultValue={detail?.projectNote ?? ""} optional />
           </div>
         </fieldset>
         <fieldset className="edit-form-section">
@@ -3337,7 +3466,10 @@ function ProjectEditForm({
           <div className="form-grid">
             <Field name="plannedVisitAt" label="计划上门日期" type="date" defaultValue={businessDate(detail?.planVisitAt)} optional />
             <Field name="plannedTransportAt" label="计划运输日期" type="date" defaultValue={businessDate(detail?.planTransportAt)} optional />
-            <Field name="plannedInstallDoneAt" label="计划装机完成日期" type="date" defaultValue={businessDate(detail?.plannedInstallDoneAt)} optional />
+            <Field name="plannedInstallAt" label="计划装机日期" type="date" defaultValue={businessDate(detail?.plannedInstallAt)} optional />
+            <Field name="temporaryInstrumentCount" label="暂定仪器数量" type="number" min="0" step="1" defaultValue={detail?.temporaryInstrumentCount ?? ""} optional help="可留空、补录或调整；不会生成仪器记录。" />
+            <Select name="isTemporaryStorage" label="是否暂存" defaultValue={detail?.isTemporaryStorage === null || detail?.isTemporaryStorage === undefined ? "" : String(detail.isTemporaryStorage)} options={[["", "未填写"], ["false", "否"], ["true", "是"]]} />
+            <Field name="temporaryStorageAddress" label="暂存地址" defaultValue={detail?.temporaryStorageAddress ?? ""} optional />
             <label className="confirm-check full">
               <input name="siteConfirmed" type="checkbox" defaultChecked={detail?.siteConfirmed ?? false} />
               现场条件已确认
@@ -3356,6 +3488,7 @@ function ProjectEditForm({
 
 function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWizardPayload) => Promise<void> }): JSX.Element {
   const [intent, setIntent] = useState<ProjectWizardPayload["intent"]>("draft");
+  const [region, setRegion] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -3363,47 +3496,54 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
     const data = new FormData(event.currentTarget);
     const value = (key: string) => String(data.get(key) || "").trim();
     if (intent === "formal" && !value("ecc")) { setError("正式进单必须填写 ECC。"); return; }
-    if (intent === "pre_entry_execution" && !value("approvalReason")) { setError("选择提前执行时，请填写批复说明。"); return; }
     setBusy(true); setError("");
     try {
       await onSave({
-        intent, customerName: value("customerName"), region: value("region"),
+        intent, customerName: value("customerName"), region,
         contractStartDate: value("contractStartDate") || null, contractEndDate: value("contractEndDate") || null,
         ...(intent === "formal" ? { ecc: value("ecc"), entryAt: value("entryAt"), contractAmount: value("contractAmount") } : {}),
         oldSiteAddress: value("oldSiteAddress") || null,
         newSiteAddress: value("newSiteAddress") || null, oldSiteContact: value("oldSiteContact"), newSiteContact: value("newSiteContact"),
         instrumentCount: value("instrumentCount") ? Number(value("instrumentCount")) : null,
-        planVisitAt: value("planVisitAt"), planTransportAt: value("planTransportAt"), plannedInstallDoneAt: value("plannedInstallDoneAt"),
+        projectNote: value("projectNote") || null,
+        temporaryStorageAddress: value("temporaryStorageAddress") || null,
+        isTemporaryStorage: value("isTemporaryStorage") === "" ? null : value("isTemporaryStorage") === "true",
+        planVisitAt: value("planVisitAt"), planTransportAt: value("planTransportAt"), plannedInstallAt: value("plannedInstallAt"), actualInstallDoneAt: value("actualInstallDoneAt"),
         siteConfirmed: data.get("siteConfirmed") === "on",
-        approvalReason: intent === "pre_entry_execution" ? value("approvalReason") : undefined,
+        managerApproved: intent === "pre_entry_execution" ? value("managerApproved") === "true" : undefined,
       });
     } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); }
   }
   const intents: Array<[ProjectWizardPayload["intent"], string, string]> = [
     ["draft", "保存为待进单", "先建项目，资料稍后补齐"],
-    ["pre_entry_execution", "提前执行", "已获得经理批复，仍保持待进单"],
+    ["pre_entry_execution", "未进单先执行", "记录是否批复，项目仍保持待进单"],
     ["formal", "正式进单", "明确使用 ECC 和进单日期完成进单"],
   ];
   return <form className="project-create-form" onSubmit={(event) => void submit(event)}>
     <p className="notice">先明确保存意图。旧址、新址和仪器数量均可后补，不影响建立项目。</p>
     <div className="create-form-sections">
       <fieldset className="edit-form-section"><legend>项目与进单</legend><div className="form-grid">
-        <Field name="customerName" label="客户名称" required autoFocus /><Field name="region" label="区域" required />
+        <Field name="customerName" label="客户名称" required autoFocus /><ProjectRegionSelect value={region} onChange={setRegion} />
+        <Field name="oldSiteContact" label="旧址联系人" optional /><Field name="newSiteContact" label="新址联系人" optional />
         <Field name="contractStartDate" label="合同开始日期" type="date" optional /><Field name="contractEndDate" label="合同截止日期" type="date" optional />
+        <TextArea name="projectNote" label="项目备注" optional />
+        {intent === "formal" && <div className="formal-intent-fields full" role="group" aria-label="正式进单资料"><div className="wizard-section-head"><div><h3>正式进单资料</h3><p>仅在正式进单时保存；其他意图不会提交这些值。</p></div><span>正式进单专属</span></div><div className="form-grid"><Field name="ecc" label="ECC" required /><Field name="entryAt" label="进单日期" type="date" defaultValue={todayDate()} required /><Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="可留空后补；新建时不录最终可确认金额。" /></div></div>}
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>搬迁范围（均可后补）</legend><div className="form-grid">
         <Field name="oldSiteAddress" label="旧址地址" optional /><Field name="newSiteAddress" label="新址地址" optional />
-        <Field name="oldSiteContact" label="旧址联系人" optional /><Field name="newSiteContact" label="新址联系人" optional />
         <Field name="instrumentCount" label="仪器数量" type="number" min="1" step="1" optional />
+        <Field name="temporaryStorageAddress" label="暂存地址" optional />
+        <p className="notice full">仪器名称、型号和 UPS 请在项目创建后通过“搬迁仪器”记录保存；当前建档契约尚不能保存这三项。</p>
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>执行准备</legend><div className="form-grid">
         <Field name="planVisitAt" label="计划上门日期" type="date" optional /><Field name="planTransportAt" label="计划运输日期" type="date" optional />
-        <Field name="plannedInstallDoneAt" label="计划装机完成日期" type="date" optional /><label className="confirm-check full"><input name="siteConfirmed" type="checkbox" />现场条件已确认</label>
+        <Field name="plannedInstallAt" label="计划装机日期" type="date" optional /><Field name="actualInstallDoneAt" label="实际装机完成日期" type="date" optional />
+        <Select name="isTemporaryStorage" label="是否暂存" defaultValue="" options={[["", "未填写"], ["false", "否"], ["true", "是"]]} />
+        <label className="confirm-check full"><input name="siteConfirmed" type="checkbox" />场地已确认</label>
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>保存意图</legend><div className="form-grid">
         <div className="intent-choices full" role="radiogroup" aria-label="保存意图">{intents.map(([value,label,copy]) => <label key={value} className={intent === value ? "selected" : ""}><input type="radio" name="projectIntent" value={value} checked={intent === value} onChange={() => { setIntent(value); setError(""); }} /><strong>{label}</strong><span>{copy}</span></label>)}</div>
-        {intent === "formal" && <div className="formal-intent-fields full" role="group" aria-label="正式进单资料"><div className="wizard-section-head"><div><h3>正式进单资料</h3><p>这些字段仅随正式进单提交；切换其他意图后不会保留或发送。</p></div><span>正式进单专属</span></div><div className="form-grid"><Field name="ecc" label="ECC" required autoFocus /><Field name="entryAt" label="进单日期" type="date" defaultValue={todayDate()} required /><Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="可留空后补；新建时不录最终可确认金额。" /></div></div>}
-        {intent === "pre_entry_execution" && <div className="approval-fields full" role="group" aria-label="提前执行批复"><label className="confirm-check"><input type="checkbox" required autoFocus />是否批复：是，已取得提前执行批复</label><TextArea name="approvalReason" label="批复说明" required help="填写批复人、结论或必要的执行边界。" /></div>}
+        {intent === "pre_entry_execution" && <div className="approval-fields full" role="group" aria-label="未进单先执行批复"><Select name="managerApproved" label="是否批复" required defaultValue="" options={[["", "请选择"], ["true", "是"], ["false", "否"]]} help="只记录是否批复，不收集原因或缺失资料。" /></div>}
         <div className="form-footer full"><span>{intent === "draft" ? "项目将保持待进单" : intent === "formal" ? "将按正式进单意图校验" : "将标记为提前执行"}</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : intent === "draft" ? "保存为待进单" : intent === "formal" ? "正式进单" : "确认提前执行"}</button></div>
       </div></fieldset>
     </div>
@@ -4056,6 +4196,7 @@ function layerTitle(layer: LayerState): string {
   if (layer.kind === "correct-entry") return "更正进单/合同资料";
   if (layer.kind === "quick") return "快速记录";
   if (layer.kind === "reminder") return "维护项目提醒";
+  if (layer.kind === "reminder-all") return "全部项目提醒";
   if (layer.kind === "cancel") return "取消项目";
   if (layer.kind === "report") return "运营报表";
   if (layer.kind === "history") return "浏览往期与全部记录";
@@ -4082,6 +4223,7 @@ function layerDescription(
   if (layer.kind === "correct-entry") return project ? `${project.customerName} · 已正式进单项目` : "已正式进单项目";
   if (layer.kind === "report") return "手工月份区间与有界导出";
   if (layer.kind === "history") return "统一按类型、项目和日期查找业务记录";
+  if (layer.kind === "reminder-all") return "按提醒日期查看全部项目与到期分类";
   if (layer.kind === "clean") return "先检查数量，再输入固定文本确认";
   if (layer.kind === "independent") return "独立模块 · 记录按页读取";
   if (layer.kind === "cancel") return "记录取消日期与原因（终态，不可恢复）";

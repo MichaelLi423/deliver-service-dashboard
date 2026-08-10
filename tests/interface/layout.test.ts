@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 describe('workbench-interface 桌面布局静态约束',()=>{
   const css=readFileSync(join(process.cwd(),'src/renderer/styles.css'),'utf8');
+  const renderer=readFileSync(join(process.cwd(),'src/renderer/components/workbench-v2.tsx'),'utf8');
   it('正文与表格保持 14px 基线，辅助信息保持 12px',()=>{expect(css).toContain('font-size:14px');expect(css).toContain('font-size:12px');expect(css).toContain('.queue table,.data-table');});
   it('1024 附近不产生页面级横向溢出，宽表格在容器内滚动',()=>{expect(css).toContain('body{margin:0;min-width:0');expect(css).toContain('overflow-x:hidden');expect(css).toContain('.table-scroll{max-width:100%;overflow-x:auto}');expect(css).toContain('@media(max-width:1030px)');});
   it('1440 为主布局基准且上下文不遮挡队列',()=>{expect(css).toContain('max-width:1600px');expect(css).toContain('grid-template-columns:minmax(0,1fr) 330px');expect(css).toContain('.context{position:sticky');});
@@ -14,4 +15,9 @@ describe('workbench-interface 桌面布局静态约束',()=>{
   it('顶部导航锁定且窄屏允许导航自身滚动',()=>{expect(css).toContain('.workbench-v2 .topbar{position:sticky;top:0;z-index:12');expect(css).toContain('.workbench-v2 .topbar nav{min-width:0;overflow-x:auto');});
   it('历史、报表和危险操作形成独立响应式层级',()=>{expect(css).toContain('.history-browser{display:grid');expect(css).toContain('.report-metric-grid{display:grid');expect(css).toContain('.danger-zone{');expect(css).toContain('@media(max-width:650px)');});
   it('跨项目历史上下文与 intent 专属资料具有独立视觉层级',()=>{expect(css).toContain('.history-scope{grid-column:1/-1');expect(css).toContain('.history-table td:first-child strong');expect(css).toContain('.formal-intent-fields,.approval-fields');expect(css).toContain('.clean-recheck-error');});
+  it('单一页面滚动根下 topbar 与 command 按导航高度协同固定并保留滚动补偿',()=>{expect(css).toContain(':root{--topbar-height:58px;--sticky-command-height:116px;scroll-padding-top:calc(');expect(css).toContain('.workbench-v2{min-width:0;overflow:visible}');expect(css).toContain('.workbench-v2 .command{position:sticky;top:var(--topbar-height);z-index:11');expect(css).toContain('scroll-margin-top:calc(var(--topbar-height) + var(--sticky-command-height) + 18px)');});
+  it('1024 固定操作区允许换行且页面无横溢，1440 保持完整固定层级',()=>{expect(css).toContain('.workbench-v2 .command .row-actions{flex-wrap:wrap');expect(css).toContain('@media(max-width:1030px)');expect(css).toContain('.workbench-v2 .command .row-actions{max-width:280px}');expect(css).toContain('html{overflow-x:hidden}');});
+  it('提醒泳道由日期列头和同日纵向卡片组成，最多七列且列内独立加载',()=>{expect(renderer).toContain('data.dates.map((date) =>');expect(renderer).toContain('<time id={`lane-${date}`}');expect(renderer).toContain('className="reminder-lane-stack"');expect(renderer).toContain('selectedDates: data.dates');expect(renderer).toContain('加载本列更多');});
+  it('提醒泳道在 1024 与 1440 保持可读最小列宽并只在容器内部横滚',()=>{expect(css).toContain('.reminder-lane-scroll{max-width:100%;overflow-x:auto');expect(css).toContain('grid-template-columns:repeat(var(--lane-count),minmax(176px,1fr))');expect(css).toContain('grid-template-columns:repeat(var(--lane-count),minmax(190px,190px))');expect(css).toContain('overscroll-behavior-x:contain');});
+  it('泳道和全部可聚焦目标有清晰 focus-visible，reduced motion 不移除静态反馈',()=>{expect(css).toContain('.workbench-v2 :focus-visible{outline:2px solid var(--brand);outline-offset:3px}');expect(renderer).toContain('aria-label="提醒日期泳道" tabIndex={0}');expect(renderer).toContain('className="reminder-lane"');expect(css).toContain('@media(prefers-reduced-motion:reduce)');});
 });

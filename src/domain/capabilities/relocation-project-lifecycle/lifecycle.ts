@@ -64,6 +64,8 @@ export interface TransitionContext {
   preEntryExecution?: boolean;
   /** 首次上门活动开始或首个搬迁批次开始运输（仅完成排期/工程师/运输安排不计）。 */
   executionStarted?: boolean;
+  /** 是否已正式进单（entryAt 已记录；删除事实后重算的基线推导用）。 */
+  formallyEntered?: boolean;
 }
 
 export type TransitionReason =
@@ -241,4 +243,65 @@ function isPlanVisitDue(context: TransitionContext): boolean {
     planVisitAt !== undefined &&
     today >= planVisitAt
   );
+}
+
+/**
+ * 删除执行/验收事实后的状态重算（Tasks 5.3）：经 lifecycle 唯一入口的显式重算。
+ *
+ * - 终态（已取消）与财务闭环完成态（completed）无法可靠反向重算 → 拒绝
+ *   （调用方须在删除任何行前把该拒绝映射为 DELETE_REJECTED_STATUS_RECALC，
+ *   绝不直接赋值状态）；
+ * - 其余：由「剩余事实」推导确定性基线（remaining acceptance → actual install →
+ *   未正式进单/已正式进单 → 已开始执行或 plan visit due → 执行中，否则待执行），
+ *   再经 resolveStatus 前向引擎应用更强事实与自动触发（plan due 不倒退、
+ *   金额闭环完成态保留 completed），结果即删除后的主状态；
+ * - 真实状态变化由调用方决定落库与审计；本函数只决策、不写库。
+ */
+export function resolveStatusAfterFactDeletion(context: TransitionContext): TransitionResult {
+  const { currentStatus } = context;
+
+  // 终态：已取消不可恢复，删除事实后无可靠主状态可重算。
+  if (isCancelled(currentStatus)) {
+    return reject(currentStatus, ['已取消项目为终态，删除执行/验收事实后无法可靠重算主状态']);
+  }
+  // 财务闭环完成态：只能经掉票撤销路径回退，删除执行/验收事实的反向重算不可靠。
+  if (currentStatus === 'completed') {
+    return reject(currentStatus, ['项目已通过金额闭环进入已完成，删除执行/验收事实后无法可靠重算主状态']);
+  }
+
+  const baseline = deletionBaseline(context);
+  // 以剩余事实基线为现状态/目标状态，经前向引擎应用更强事实与自动触发。
+  return resolveStatus({ ...context, currentStatus: baseline, requestedStatus: baseline });
+}
+
+/**
+ * 从剩余事实推导删除后的确定性基线（反向重算）：
+ * - 金额闭环完成态（累计有效掉票 > 0 且最终可确认金额 > 0）保留 completed
+ *   （关闭态只经掉票撤销路径回退，不因删除执行/验收事实回归）；
+ * - 剩余验收报告事实 → 待掉票；剩余实际装机完成事实 → 待验收；
+ * - 未正式进单（含未进单先执行标签）→ 待进单；
+ * - 已正式进单：已开始执行 或 计划上门日期已到期 → 执行中（plan due 不倒退），
+ *   否则待执行基线。
+ */
+function deletionBaseline(context: TransitionContext): ProjectStatusOrCancelled {
+  const {
+    acceptanceReportDate,
+    actualInstallDoneAt,
+    planVisitAt,
+    today,
+    executionStarted,
+    formallyEntered,
+  } = context;
+  const final = context.amounts.finalConfirmableAmountCents;
+  if (final !== null && final > 0n && context.amounts.confirmedAmountCents > 0n) {
+    return 'completed';
+  }
+  if (acceptanceReportDate !== null) return 'pending_invoice';
+  if (actualInstallDoneAt !== null) return 'pending_acceptance';
+  if (!formallyEntered) return 'pending_entry';
+  if (executionStarted) return 'executing';
+  if (today !== undefined && planVisitAt !== null && planVisitAt !== undefined && today >= planVisitAt) {
+    return 'executing';
+  }
+  return 'pending_execution';
 }

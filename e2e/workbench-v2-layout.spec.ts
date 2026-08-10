@@ -13,18 +13,45 @@ async function initialize(page: Page): Promise<void> {
   await page.getByRole('heading', { name: '先处理提醒，再连续推进项目' }).waitFor();
 }
 
+async function seedReminderLanes(page: Page): Promise<void> {
+  for (let index = 1; index <= 7; index += 1) {
+    await page.getByRole('button', { name: '新建搬迁项目' }).click();
+    const create = page.getByRole('dialog', { name: '新建搬迁项目' });
+    await create.getByLabel(/客户名称/).fill(`布局提醒客户 ${index}`);
+    await create.getByLabel(/区域/).selectOption(index % 2 ? 'East' : 'North');
+    await create.getByRole('button', { name: '保存为待进单' }).click();
+    await expect(create).toBeHidden();
+    await page.getByRole('button', { name: '维护提醒' }).click();
+    const reminder = page.getByRole('dialog', { name: '维护项目提醒' });
+    await reminder.getByLabel(/当前提醒日期/).fill(`2026-08-${String(11 + index).padStart(2, '0')}`);
+    await reminder.getByLabel(/备注内容/).fill(`第 ${index} 列提醒`);
+    await reminder.getByRole('button', { name: '保存当前提醒' }).click();
+    await expect(reminder).toBeHidden();
+  }
+  await expect(page.getByRole('region', { name: '提醒日期泳道' })).toBeVisible();
+}
+
 async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: string): Promise<void> {
   await page.setViewportSize({ width, height: width === 1440 ? 900 : 768 });
   const layout = await page.evaluate(() => {
     const queue = document.querySelector<HTMLElement>('.queue-table-wrap');
     const filters = document.querySelector<HTMLElement>('.queue-filters');
     const topbar = document.querySelector<HTMLElement>('.topbar');
+    const command = document.querySelector<HTMLElement>('.command');
+    const lanes = document.querySelector<HTMLElement>('.reminder-lane-scroll');
     return {
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       queueOverflow: queue ? getComputedStyle(queue).overflowX : '',
       filtersOverflow: filters ? filters.scrollWidth - filters.clientWidth : 999,
       topbarPosition: topbar ? getComputedStyle(topbar).position : '',
       topbarTop: topbar?.getBoundingClientRect().top ?? 999,
+      commandPosition: command ? getComputedStyle(command).position : '',
+      commandTop: command?.getBoundingClientRect().top ?? 999,
+      topbarHeight: topbar?.getBoundingClientRect().height ?? 0,
+      laneOverflow: lanes ? getComputedStyle(lanes).overflowX : '',
+      laneScrollWidth: lanes?.scrollWidth ?? 0,
+      laneClientWidth: lanes?.clientWidth ?? 0,
+      laneCount: lanes?.querySelectorAll('.reminder-lane').length ?? 0,
     };
   });
   expect(layout.pageOverflow).toBeLessThanOrEqual(1);
@@ -32,6 +59,24 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: 
   expect(layout.filtersOverflow).toBeLessThanOrEqual(1);
   expect(layout.topbarPosition).toBe('sticky');
   expect(layout.topbarTop).toBeGreaterThanOrEqual(-1);
+  expect(layout.commandPosition).toBe('sticky');
+  expect(layout.commandTop).toBeGreaterThanOrEqual(layout.topbarHeight - 1);
+  expect(layout.laneOverflow).toMatch(/auto|scroll/);
+  expect(layout.laneCount).toBe(7);
+  if (width === 1024) expect(layout.laneScrollWidth).toBeGreaterThan(layout.laneClientWidth);
+  const firstLane = page.locator('.reminder-lane').first();
+  await firstLane.focus();
+  await expect(firstLane).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.reminder-card').first()).toBeFocused();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const sticky = await page.evaluate(() => ({
+    topbar: document.querySelector<HTMLElement>('.topbar')?.getBoundingClientRect().top ?? 999,
+    command: document.querySelector<HTMLElement>('.command')?.getBoundingClientRect().top ?? 999,
+    topbarHeight: document.querySelector<HTMLElement>('.topbar')?.getBoundingClientRect().height ?? 0,
+  }));
+  expect(sticky.topbar).toBeGreaterThanOrEqual(-1);
+  expect(sticky.command).toBeGreaterThanOrEqual(sticky.topbarHeight - 1);
   await expect(page.getByRole('heading', { name: /高密项目队列/ })).toBeVisible();
   await expect(page.getByText(/第 0–0 项 \/ 共 0 项/)).toBeVisible();
   await page.screenshot({ path: screenshot, fullPage: true });
@@ -84,6 +129,7 @@ test('Oracle #10 任务指挥台在 820 / 1024 / 1440 无页面横溢且独立�
     app = await electron.launch({ executablePath: executable, env: { ...process.env, WORKBENCH_E2E_USER_DATA_DIR: userData } });
     const page = await app.firstWindow();
     await initialize(page);
+    await seedReminderLanes(page);
     await assertViewport(page, 1024, testInfo.outputPath('workbench-v2-1024.png'));
     await assertViewport(page, 1440, testInfo.outputPath('workbench-v2-1440.png'));
     await assertViewport(page, 820, testInfo.outputPath('workbench-v2-820.png'));

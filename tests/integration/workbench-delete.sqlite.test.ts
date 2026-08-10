@@ -3,8 +3,28 @@ import type { DatabaseSync } from 'node:sqlite';
 import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { readBusinessRevision } from '../../src/domain/capabilities/local-data-persistence/identity';
 import { SqliteAccountRepository } from '../../src/domain/capabilities/local-data-persistence/repositories';
+import {
+  SqliteActivityRepository,
+  SqliteBatchRepository,
+  SqliteDamageRepairItemRepository,
+  SqliteInstrumentRepository,
+  SqliteInvoiceRepository,
+  SqliteLogisticsFeeRepository,
+  SqliteProjectRepository,
+  SqliteQrRequestRepository,
+  SqliteSerialAddressUpdateRepository,
+  SqliteServiceOrderRepository,
+  SqliteShipToRequestRepository,
+} from '../../src/domain/capabilities/local-data-persistence';
+import { ValidationError } from '../../src/domain/core/errors';
+import type { FinancialClosureService } from '../../src/domain/capabilities/project-financial-closure';
+import type { ProjectService } from '../../src/domain/capabilities/relocation-project-lifecycle';
 import { LocalAccountService } from '../../src/domain/capabilities/workbench-access';
 import { WorkbenchFacade } from '../../src/main/workbench-facade';
+import {
+  WorkbenchDeletePolicies,
+  type WorkbenchDeleteContext,
+} from '../../src/main/workbench-delete';
 import {
   DELETE_REJECTION_CODES,
   type ProjectWizardPayload,
@@ -86,6 +106,35 @@ function expectRejected(fn: () => unknown, codeOrPattern: string | RegExp): void
     return;
   }
   expect.unreachable('应当抛出拒绝错误');
+}
+
+/**
+ * 直接构造 WorkbenchDeletePolicies 上下文（policy 依赖注入）：测试可注入
+ * 自定义 projectService 使 clearAcceptance 抛 ACCEPTANCE_STATUS_RECALC_FAILED，
+ * 验证 STATUS_RECALC 拒绝路径（生产映射保持稳定）。
+ */
+function makePolicyContext(db: DatabaseSync, projectService: ProjectService): WorkbenchDeleteContext {
+  const account = db.prepare('SELECT id FROM accounts LIMIT 1').get() as { id: string };
+  return {
+    db,
+    actor: () => ({ accountId: account.id, username: '负责人' }),
+    parseBusinessDate: (v) => (typeof v === 'string' && v.trim() !== '' ? v : undefined),
+    repositories: {
+      orders: new SqliteServiceOrderRepository(db),
+      activities: new SqliteActivityRepository(db),
+      projects: new SqliteProjectRepository(db),
+      damageItems: new SqliteDamageRepairItemRepository(db),
+      serialUpdates: new SqliteSerialAddressUpdateRepository(db),
+      qrRequests: new SqliteQrRequestRepository(db),
+      batches: new SqliteBatchRepository(db),
+      fees: new SqliteLogisticsFeeRepository(db),
+      instruments: new SqliteInstrumentRepository(db),
+      shipRequests: new SqliteShipToRequestRepository(db),
+      invoices: new SqliteInvoiceRepository(db),
+    },
+    projectService: () => projectService,
+    financialService: () => ({} as FinancialClosureService),
+  };
 }
 
 describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () => {
@@ -201,6 +250,195 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
       DELETE_REJECTION_CODES.DEPENDENCIES,
     );
     expect(facade.v2ProjectDetail(projectId).detail!.acceptanceReport).toBe(true);
+  });
+
+  it('acceptance：删除引起真实状态变化写 transition audit（source=user）；零变化不写', async () => {
+    const ctx = await makeCtx();
+    const { facade, db, projectId } = ctx;
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'acceptance', projectId, values: { reportDate: '2026-08-15' } } });
+    expect(facade.v2ProjectDetail(projectId).project!.status).toBe('pending_invoice');
+
+    // 真实状态变化：待掉票 → 待执行（正式进单基线，无实际装机/执行事实）→ 写审计
+    facade.v2Delete({ kind: 'acceptance', projectId, expectedRevision: readBusinessRevision(db) });
+    expect(facade.v2ProjectDetail(projectId).project!.status).toBe('pending_execution');
+    const audits = db.prepare('SELECT * FROM project_status_transition_audit').all() as Array<
+      Record<string, unknown>
+    >;
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      project_id: projectId,
+      from_status: 'pending_invoice',
+      to_status: 'pending_execution',
+      reason: 'acceptance_deleted',
+      source: 'user',
+    });
+    expect(audits[0].effective_business_date).toBeTruthy();
+    expect(audits[0].actor_username_snapshot).toBe('负责人');
+
+    // 零变化：未进单先执行项目验收报告删除保持待进单 → 不写审计
+    const dir2 = makeTempDir('workbench-delete-zero-');
+    dirs.push(dir2);
+    const { db: db2 } = bootstrapDatabase({ dataDir: dir2 });
+    const { account: account2 } = await new LocalAccountService(new SqliteAccountRepository(db2)).initialize({
+      username: '负责人2',
+      password: 'password1',
+    });
+    const facade2 = new WorkbenchFacade(db2, () => ({ accountId: account2.id, username: account2.username }));
+    const created2 = facade2.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '零变化客户' }),
+    });
+    const p2 = projectIdOf(created2);
+    facade2.v2Mutate({ op: 'submit_action', projectId: p2, action: { type: 'acceptance', projectId: p2, values: { reportDate: '2026-08-15' } } });
+    expect(facade2.v2ProjectDetail(p2).project!.status).toBe('pending_entry'); // 标签保持待进单
+    facade2.v2Delete({ kind: 'acceptance', projectId: p2, expectedRevision: readBusinessRevision(db2) });
+    expect(facade2.v2ProjectDetail(p2).project!.status).toBe('pending_entry');
+    expect(db2.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get()!.n).toBe(0);
+  });
+
+  it('acceptance：lifecycle 重算不可靠（stub clearAcceptance 抛 ACCEPTANCE_STATUS_RECALC_FAILED）→ STATUS_RECALC 拒绝且零写', async () => {
+    const ctx = await makeCtx();
+    const { facade, db, projectId } = ctx;
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'acceptance', projectId, values: { reportDate: '2026-08-15' } } });
+    expect(facade.v2ProjectDetail(projectId).detail!.acceptanceReport).toBe(true);
+    db.prepare(
+      "INSERT INTO import_record_audit (id, source_key, target_table, target_id, import_source_hash, target_snapshot_hash, imported_at) VALUES ('audit-acc-stub', 'a-stub', 'projects', ?, 'h', 'h', '2026-08-11T00:00:00+08:00')",
+    ).run(projectId);
+    const revisionBefore = readBusinessRevision(db);
+
+    // policy 依赖注入：stub projectService 使 clearAcceptance 抛重算失败。
+    const failingService = {
+      clearAcceptance: () => {
+        throw new ValidationError('ACCEPTANCE_STATUS_RECALC_FAILED', '重算失败（测试注入）');
+      },
+    } as unknown as ProjectService;
+    const policies = new WorkbenchDeletePolicies(makePolicyContext(db, failingService));
+    expectRejected(
+      () => policies.execute({ kind: 'acceptance', projectId, expectedRevision: revisionBefore }),
+      DELETE_REJECTION_CODES.STATUS_RECALC_UNRELIABLE,
+    );
+    // 业务行零写：验收事实保留、主状态不变
+    expect(db.prepare('SELECT acceptance_report, status FROM projects WHERE id = ?').get(projectId)).toMatchObject({
+      acceptance_report: 1,
+      status: 'pending_invoice',
+    });
+    // tombstone 零写
+    expect(db.prepare('SELECT COUNT(*) AS n FROM record_deletion_audit').get()!.n).toBe(0);
+    // import marker 零写（来源审计原样保留、无删除标记）
+    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE id = ? AND target_deleted_at IS NULL').get('audit-acc-stub')!.n).toBe(1);
+    // revision 零写
+    expect(readBusinessRevision(db)).toBe(revisionBefore);
+  });
+
+  it('activity：存在维修上门活动关联（downstream fact）→ 事务内 DEPENDENCIES 拒绝且零写', async () => {
+    const ctx = await makeCtx();
+    const { facade, db, projectId } = ctx;
+    const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
+    // 空活动（无工作事实）+ 一条指向它的维修关联
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'visit', projectId, values: { visitAt: '2026-08-13', engineers: '工程师甲' } } });
+    const activityId = String(db.prepare('SELECT id FROM activities WHERE project_id = ?').get(projectId)!.id);
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'damage', projectId, values: { instrumentId, damageReason: '磕碰', partNumber: 'P-L', partQuantity: '1', partAmount: '10', partCurrency: 'USD', partStatus: 'pending_submit', issueStatus: 'untreated', registeredAt: '2026-08-12' } },
+    });
+    const damageId = String(db.prepare('SELECT id FROM damage_repair_items WHERE project_id = ?').get(projectId)!.id);
+    db.prepare('INSERT INTO activity_damage_links (id, activity_id, damage_item_id, created_at) VALUES (?,?,?,?)').run('link-act', activityId, damageId, 't');
+
+    const revision = readBusinessRevision(db);
+    expectRejected(
+      () => facade.v2Delete({ kind: 'activity', id: activityId, expectedRevision: revision }),
+      DELETE_REJECTION_CODES.DEPENDENCIES,
+    );
+    // 拒绝零写：活动/事项/关联均保留
+    expect(db.prepare('SELECT COUNT(*) AS n FROM activities WHERE id = ?').get(activityId)!.n).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM activity_damage_links WHERE id = ?').get('link-act')!.n).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM record_deletion_audit').get()!.n).toBe(0);
+    expect(readBusinessRevision(db)).toBe(revision);
+  });
+
+  it('activity：可删除活动（无 work/downstream facts）删除后项目主状态不变且不写 transition audit', async () => {
+    const ctx = await makeCtx();
+    const { facade, db, projectId } = ctx;
+    // 项目进入执行中（人工调整，不经活动承载状态事实）
+    facade.v2Mutate({ op: 'adjust_status', projectId, status: 'executing' });
+    expect(String(db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)!.status)).toBe('executing');
+    // 空活动（无工作事实/维修关联，仅参与工程师）
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'visit', projectId, values: { visitAt: '2026-08-13', engineers: '工程师甲、工程师乙' } } });
+    const activityId = String(db.prepare('SELECT id FROM activities WHERE project_id = ?').get(projectId)!.id);
+    const auditsBefore = db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get()!.n;
+
+    const result = facade.v2Delete({ kind: 'activity', id: activityId, expectedRevision: readBusinessRevision(db) });
+    expect(result.changed?.kind).toBe('activity');
+    // 状态不变：可删除活动仅含参与工程师（非状态相关事实）；「已开始执行」只由
+    // work_facts / 批次开始运输驱动，删除空活动不影响该判定 → 无需 lifecycle 重算。
+    expect(String(db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)!.status)).toBe('executing');
+    // 零状态变化 → 不写 transition audit
+    expect(db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get()!.n).toBe(auditsBefore);
+  });
+
+  it('5.6 汇总：批次/仪器/开单/验收/Ship-to/损坏/序列号/二维码成功删除后从可观察读取表面消失，tombstone 保留', async () => {
+    const ctx = await makeCtx();
+    const { facade, db, projectId } = ctx;
+    const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
+
+    // ---- 预置各类型记录 ----
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '运输公司', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '11000' } } });
+    const batchId = String(db.prepare('SELECT id FROM batches WHERE project_id = ?').get(projectId)!.id);
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'order', projectId, values: { orderType: 'relocation', serviceOrderNo: 'SO-56', orderedAt: '2026-08-11', engineer: '工程师甲' } } });
+    const orderId = String(db.prepare('SELECT id FROM service_orders WHERE service_order_no = ?').get('SO-56')!.id);
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'acceptance', projectId, values: { reportDate: '2026-08-15' } } });
+    const shipTo = facade.createShipToRequest({ customerName: 'ShipTo 56', newSiteAddress: '新址56' });
+    facade.submitShipToRequest(shipTo.request.id);
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'damage', projectId, values: { instrumentId, damageReason: '磕碰', partNumber: 'P-56', partQuantity: '1', partAmount: '10', partCurrency: 'USD', partStatus: 'pending_submit', issueStatus: 'untreated', registeredAt: '2026-08-12' } } });
+    const damageId = String(db.prepare('SELECT id FROM damage_repair_items WHERE project_id = ?').get(projectId)!.id);
+    db.prepare(
+      `INSERT INTO serial_address_updates (id, instrument_id, customer_name, new_site_address, serial_no, account_id, updated_at, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+    ).run('sa-56', null, '独立客户', '新址', 'SN-56', 'ACC-56', '2026-08-10', 't');
+    facade.v2Mutate({ op: 'submit_action', action: { type: 'qr_request', values: { applicant: '申请人', requestedAt: '2026-08-10', types: ['A', 'B'] } } });
+    const qrId = String(db.prepare('SELECT id FROM qr_requests LIMIT 1').get()!.id);
+
+    // ---- 删除前各自可观察 ----
+    expect(facade.v2SectionPage({ projectId, kind: 'batches' }).total).toBe(1);
+    expect(facade.v2SectionPage({ projectId, kind: 'instruments' }).total).toBe(1);
+    expect(facade.v2SectionPage({ projectId, kind: 'orders' }).total).toBe(1);
+    expect(facade.v2SectionPage({ projectId, kind: 'damage_items' }).total).toBe(1);
+    expect(facade.v2LookupPage({ kind: 'ship_to_requests' }).total).toBe(1);
+    expect(facade.v2IndependentPage({ kind: 'serial_address' }).total).toBe(1);
+    expect(facade.v2IndependentPage({ kind: 'qr_request' }).total).toBe(1);
+    expect(facade.v2ProjectDetail(projectId).detail!.acceptanceReport).toBe(true);
+    expect(facade.v2HistoryPage({ kind: 'batch' }).total).toBe(1);
+
+    // ---- 逐个删除（damage 先于 instrument；均无跨记录依赖）----
+    facade.v2Delete({ kind: 'qr_request', id: qrId, expectedRevision: readBusinessRevision(db) });
+    expect(facade.v2IndependentPage({ kind: 'qr_request' }).total).toBe(0);
+    facade.v2Delete({ kind: 'serial_address', id: 'sa-56', expectedRevision: readBusinessRevision(db) });
+    expect(facade.v2IndependentPage({ kind: 'serial_address' }).total).toBe(0);
+    facade.v2Delete({ kind: 'service_order', id: orderId, expectedRevision: readBusinessRevision(db) });
+    expect(facade.v2SectionPage({ projectId, kind: 'orders' }).total).toBe(0);
+    expect(facade.v2HistoryPage({ kind: 'service_order' }).total).toBe(0);
+    facade.v2Delete({ kind: 'damage_repair_item', id: damageId, expectedRevision: readBusinessRevision(db) });
+    expect(facade.v2SectionPage({ projectId, kind: 'damage_items' }).total).toBe(0);
+    expect(facade.v2HistoryPage({ kind: 'damage' }).total).toBe(0);
+    facade.v2Delete({ kind: 'ship_to_request', id: shipTo.request.id, expectedRevision: readBusinessRevision(db) });
+    expect(facade.v2LookupPage({ kind: 'ship_to_requests' }).total).toBe(0);
+    expect(facade.v2HistoryPage({ kind: 'ship_to_request' }).total).toBe(0);
+    facade.v2Delete({ kind: 'batch', id: batchId, expectedRevision: readBusinessRevision(db) });
+    expect(facade.v2SectionPage({ projectId, kind: 'batches' }).total).toBe(0);
+    expect(facade.v2HistoryPage({ kind: 'batch' }).total).toBe(0);
+    facade.v2Delete({ kind: 'instrument', id: instrumentId, expectedRevision: readBusinessRevision(db) });
+    expect(facade.v2SectionPage({ projectId, kind: 'instruments' }).total).toBe(0);
+    expect(facade.v2HistoryPage({ kind: 'instrument' }).total).toBe(0);
+    facade.v2Delete({ kind: 'acceptance', projectId, expectedRevision: readBusinessRevision(db) });
+    expect(facade.v2ProjectDetail(projectId).detail!.acceptanceReport).toBe(false);
+    expect(facade.v2HistoryPage({ kind: 'acceptance' }).total).toBe(0);
+
+    // ---- 每个成功删除的 kind 都保留 tombstone（审计保留）----
+    const kinds = ['qr_request', 'serial_address', 'service_order', 'damage_repair_item', 'ship_to_request', 'batch', 'instrument', 'acceptance'];
+    for (const kind of kinds) {
+      const row = db.prepare('SELECT COUNT(*) AS n FROM record_deletion_audit WHERE record_type = ?').get(kind) as { n: number };
+      expect(row.n, `kind ${kind} 应保留 tombstone`).toBeGreaterThan(0);
+    }
   });
 
   it('damage：确认后删除（含已处理），同事务仅清理指向该事项的维修上门关联、不删活动/仪器/项目', async () => {

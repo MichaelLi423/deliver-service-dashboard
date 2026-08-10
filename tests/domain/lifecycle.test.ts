@@ -1,5 +1,9 @@
-import { describe, it } from 'vitest';
-import { resolveStatus, type TransitionContext } from '../../src/domain/capabilities/relocation-project-lifecycle/lifecycle';
+import { describe, expect, it } from 'vitest';
+import {
+  resolveStatus,
+  resolveStatusAfterFactDeletion,
+  type TransitionContext,
+} from '../../src/domain/capabilities/relocation-project-lifecycle/lifecycle';
 import type { ProjectStatusOrCancelled } from '../../src/domain/capabilities/relocation-project-lifecycle/states';
 import { expectReason, expectRejected, expectStatus } from '../helpers/state-assert';
 
@@ -447,5 +451,93 @@ describe('计划上门日期到期自动推进（tasks 3.1 / design D5 转换表
     );
     expectStatus(noPlan, 'pending_execution');
     expectReason(noPlan, 'unchanged');
+  });
+});
+
+describe('删除执行/验收事实后的状态重算（resolveStatusAfterFactDeletion，Tasks 5.3）', () => {
+  const base = (overrides: Partial<TransitionContext> = {}) =>
+    ctx({
+      acceptanceReportDate: null,
+      actualInstallDoneAt: null,
+      executionStarted: false,
+      formallyEntered: true,
+      ...overrides,
+    });
+
+  it('删除验收报告（已正式进单、无实际装机/执行事实）→ 待执行基线', () => {
+    const result = resolveStatusAfterFactDeletion(base({ currentStatus: 'pending_invoice' }));
+    expectStatus(result, 'pending_execution');
+  });
+
+  it('剩余实际装机完成事实 → 待验收', () => {
+    const result = resolveStatusAfterFactDeletion(
+      base({ currentStatus: 'pending_invoice', actualInstallDoneAt: '2026-07-20' }),
+    );
+    expectStatus(result, 'pending_acceptance');
+  });
+
+  it('已开始执行（剩余工作事实/批次开始运输）→ 执行中', () => {
+    const result = resolveStatusAfterFactDeletion(
+      base({ currentStatus: 'pending_invoice', executionStarted: true }),
+    );
+    expectStatus(result, 'executing');
+  });
+
+  it('plan visit due 不倒退：到期项目删除验收后仍为执行中', () => {
+    // 基线已按到期推导为执行中，前向引擎保持执行中（reason unchanged）；
+    // 语义是「不因删除验收事实回退」，以状态为准。
+    const result = resolveStatusAfterFactDeletion(
+      base({
+        currentStatus: 'pending_invoice',
+        planVisitAt: '2026-08-01',
+        today: '2026-08-07',
+      }),
+    );
+    expectStatus(result, 'executing');
+  });
+
+  it('未正式进单（含未进单先执行标签）→ 待进单', () => {
+    const result = resolveStatusAfterFactDeletion(
+      base({
+        currentStatus: 'pending_entry',
+        formallyEntered: false,
+        preEntryExecution: true,
+      }),
+    );
+    expectStatus(result, 'pending_entry');
+  });
+
+  it('剩余验收报告事实仍保留 → 待掉票（如删除的是其他执行事实）', () => {
+    const result = resolveStatusAfterFactDeletion(
+      base({ currentStatus: 'pending_invoice', acceptanceReportDate: '2026-08-01' }),
+    );
+    expectStatus(result, 'pending_invoice');
+  });
+
+  it('金额闭环完成态保留（防御分支）：存在有效掉票与最终可确认金额时仍为已完成', () => {
+    const result = resolveStatusAfterFactDeletion(
+      base({
+        currentStatus: 'executing',
+        amounts: { confirmedAmountCents: 1000n, finalConfirmableAmountCents: 1000n },
+      }),
+    );
+    expectStatus(result, 'completed');
+  });
+
+  it('已取消终态无法可靠重算 → 拒绝', () => {
+    const result = resolveStatusAfterFactDeletion(base({ currentStatus: 'cancelled' }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join('；')).toContain('已取消');
+  });
+
+  it('财务闭环完成态无法可靠反向重算 → 拒绝', () => {
+    const result = resolveStatusAfterFactDeletion(
+      base({
+        currentStatus: 'completed',
+        amounts: { confirmedAmountCents: 100n, finalConfirmableAmountCents: 100n },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join('；')).toContain('已完成');
   });
 });
