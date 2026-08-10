@@ -820,8 +820,9 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(vi.mocked(api.v2ProjectDetail!).mock.calls.filter(([id]) => id === 'p-51')).toHaveLength(2);
   });
 
-  // domain/persistence 已支持 set_window_days(0)（见 domain/sqlite 测试）；
-  // 本用例针对 UI/接线缺口：提醒面板当前没有「临期窗口」输入与显式保存按钮，也不显示提醒日期 → Red。
+  // domain/persistence 已支持 set_window_days(0)（见 domain/sqlite 测试）。
+  // 回归口径：提醒面板配置「临期窗口」数字输入并显式保存，0 合法且随 v2Mutate 提交；
+  // 提醒行按钮小字为「ECC/tempNo · yyyy-mm-dd」，按客户行断言含格式化日期。
   it('提醒面板提供临期窗口数字输入与显式保存：设为 0 走 set_window_days 且提醒行显示格式化日期', async () => {
     const api = mockApi();
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
@@ -835,8 +836,9 @@ describe('Oracle #10 bounded workbench renderer', () => {
         expect.objectContaining({ op: 'set_window_days', windowDays: 0 }),
       ),
     );
-    // 提醒行显示格式化提醒日期（yyyy-mm-dd），而不只是备注
-    expect(within(panel).getByText('2026-08-08')).toBeInTheDocument();
+    // 提醒行按钮小字完整文本为「ECC/tempNo · yyyy-mm-dd」：按客户名定位提醒行，再断言含格式化日期
+    const reminderRow = within(panel).getByRole('button', { name: /客户 1/ });
+    expect(reminderRow).toHaveTextContent('2026-08-08');
   });
 
   it('新建项目成功后清除隐藏筛选、回到首屏、刷新列表并自动选中新项目', async () => {

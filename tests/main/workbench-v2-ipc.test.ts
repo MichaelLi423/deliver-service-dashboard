@@ -9,6 +9,7 @@ import {
   type AccountSessionInfo,
   type IpcChannel,
   type WorkbenchV2MutationRequest,
+  type WorkbenchV2MutationResult,
   type WorkbenchV2OverviewDto,
   type WorkbenchV2ProjectPageRequest,
 } from '../../src/shared/ipc';
@@ -380,17 +381,19 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     expect(String(feeAfter.logistics_cost_cents)).toBe('1250000');
   });
 
-  // domain/persistence 已支持 set_window_days(0)（见 domain/sqlite 测试）；
-  // 本用例针对接线缺口：v2Mutate 目前没有该 op，运行时将以 V2_MUTATION_UNKNOWN 拒绝 → Red。
+  // domain/persistence 已支持 set_window_days(0)（见 domain/sqlite 测试）。
+  // 全局展示配置写 app_settings——schema-v10 明确 app_settings 不挂 business_revision 触发器：
+  // 它不是业务事实，businessRevision 不应增长；不能为了测试给产品伪造 revision。
   it('v2Mutate set_window_days 0 为合法配置：mutation 成功且 overview.reminderWindowDays 为 0', async () => {
     const ctx = await loggedIn();
     const before = readBusinessRevision(ctx.db());
     const result = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'set_window_days',
       windowDays: 0,
-    } as unknown as WorkbenchV2MutationRequest)) as { businessRevision: number; invalidated: string[] };
-    expect(result.businessRevision).toBeGreaterThan(before);
+    } as unknown as WorkbenchV2MutationRequest)) as WorkbenchV2MutationResult;
+    expect(result.businessRevision).toBe(before);
     expect(result.invalidated).toContain('overview');
+    expect(result.changed).toBeNull();
     const overview = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Overview, 100)) as WorkbenchV2OverviewDto;
     expect(overview.reminderWindowDays).toBe(0);
   });

@@ -1094,16 +1094,8 @@ export class WorkbenchFacade {
     this.reminderService().clearReminder(projectId, this.actor());
   }
 
-  /**
-   * 配置临期窗口（v2 set_window_days）。
-   * 刻意错误校验（preset-failure 培训阶段）：领域 ReminderService.setUpcomingWindowDays
-   * 允许 0（校验为「不小于 0 的整数」），此处却以 days <= 0 拒绝，0 被错误拒绝；
-   * 修复前不得改动领域服务或持久化。
-   */
+  /** 配置临期窗口（v2 set_window_days）：直接委托领域服务（非负整数、允许 0）。 */
   private writeSetUpcomingWindowDays(days: number): void {
-    if (!Number.isInteger(days) || days <= 0) {
-      throw new ValidationError('INVALID_WINDOW_DAYS', '临期窗口必须为不小于 1 的整数天');
-    }
     this.reminderService().setUpcomingWindowDays(days);
   }
 

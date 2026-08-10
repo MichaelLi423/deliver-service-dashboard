@@ -583,8 +583,8 @@ export function WorkbenchV2({
     if (reminderWindowSaving) return;
     const value = reminderWindowInput.trim();
     const days = Number(value);
-    if (!/^\d+$/.test(value) || !Number.isInteger(days) || days < 1) {
-      setReminderWindowError("临期窗口至少为 1 天");
+    if (value === "" || !Number.isInteger(days) || days < 0) {
+      setReminderWindowError("请输入 0 或更大的整数天");
       return;
     }
     setReminderWindowSaving(true);
@@ -991,7 +991,7 @@ export function WorkbenchV2({
                     <input
                       id="reminder-window-days"
                       type="number"
-                      min={1}
+                      min={0}
                       step={1}
                       inputMode="numeric"
                       value={reminderWindowInput}
@@ -999,8 +999,8 @@ export function WorkbenchV2({
                       aria-invalid={Boolean(reminderWindowError)}
                       aria-describedby={
                         reminderWindowError
-                          ? "reminder-window-error"
-                          : undefined
+                          ? "reminder-window-help reminder-window-error"
+                          : "reminder-window-help"
                       }
                       onChange={(event) => {
                         setReminderWindowInput(event.target.value);
@@ -1015,6 +1015,9 @@ export function WorkbenchV2({
                       {reminderWindowSaving ? "保存中…" : "保存"}
                     </button>
                   </div>
+                  <p id="reminder-window-help">
+                    0 天表示不标记未来临期；今日到期和已逾期仍正常显示
+                  </p>
                   {reminderWindowError && (
                     <small id="reminder-window-error" role="alert">
                       {reminderWindowError}
