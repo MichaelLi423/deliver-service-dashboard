@@ -22,6 +22,12 @@ import type {
   WorkbenchV2ProjectDetailDto,
   WorkbenchV2ProjectPageDto,
   WorkbenchV2ProjectPageRequest,
+  WorkbenchV2ReminderLane,
+  WorkbenchV2ReminderLanesDto,
+  WorkbenchV2ReminderLanesRequest,
+  WorkbenchV2ReminderPageDto,
+  WorkbenchV2ReminderPageRequest,
+  WorkbenchV2ReminderPageRow,
   WorkbenchV2SectionKind,
   WorkbenchV2SectionPageDto,
   WorkbenchV2SectionPageRequest,
@@ -57,6 +63,17 @@ const STAGE_STATUSES: ProjectStatus[] = [
 export const V2_PROJECT_PAGE_DEFAULT_LIMIT = 50;
 export const V2_PROJECT_PAGE_MAX_LIMIT = 100;
 
+/**
+ * 高密度项目队列固定每页 20（tasks 7.5 / design D6/D9）。
+ * 共享 IPC 契约不接受 renderer 任意 page size：主进程统一应用本值，
+ * renderer 请求中的 legacy limit 一律忽略。非项目队列的其它分页
+ * （section/independent/lookup/history）仍走 pageLimit（默认 50、上限 100）。
+ */
+export const PROJECT_PAGE_SIZE = 20;
+
+/** 提醒泳道日期列数上限（tasks 7.6 / design D6）。 */
+export const REMINDER_LANE_MAX_DATES = 7;
+
 /** keyset 游标：[sortKey, id]，JSON 编码；sortKey 可为 null（提醒/COALESCE 场景）。 */
 interface Cursor {
   sortKey: string | null;
@@ -82,6 +99,36 @@ export function decodeCursor(cursor: string): Cursor {
     // fall through to error
   }
   throw new Error(`非法分页游标: ${cursor}`);
+}
+
+/**
+ * 项目队列游标（tasks 7.5 / design D6/D9）：与规范化筛选状态绑定。
+ * 形状为 [stateKey, sortKey, id]——stateKey 为规范化 query/region/status/reminder/
+ * repair/sort 的指纹；筛选状态变化后传入的旧 cursor 会被丢弃（回到第一页），
+ * 防止跨筛选条件复用游标造成重复/遗漏。游标排序键后追加唯一稳定 id tie-breaker。
+ */
+function encodeProjectCursor(stateKey: string, sortKey: string | null, id: string): string {
+  return JSON.stringify([stateKey, sortKey, id]);
+}
+
+/** 解码项目队列游标；状态不匹配或形状非法返回 null（调用方丢弃游标回第一页）。 */
+function decodeProjectCursor(cursor: string, stateKey: string): Cursor | null {
+  try {
+    const parsed = JSON.parse(cursor) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 3 &&
+      typeof parsed[0] === 'string' &&
+      (parsed[1] === null || typeof parsed[1] === 'string') &&
+      typeof parsed[2] === 'string'
+    ) {
+      if (parsed[0] !== stateKey) return null;
+      return { sortKey: parsed[1], id: parsed[2] };
+    }
+  } catch {
+    // fall through
+  }
+  return null;
 }
 
 export interface WorkbenchReadOptions {
@@ -269,20 +316,25 @@ export class WorkbenchReadRepository {
     };
   }
 
-  // ---- 项目 keyset 分页 ----
+  // ---- 项目 keyset 分页（tasks 7.5：固定每页 20） ----
 
   projectPage(request: WorkbenchV2ProjectPageRequest): WorkbenchV2ProjectPageDto {
-    const limit = pageLimit(request.limit);
+    // 固定每页 20：共享契约不接受 renderer 任意 page size，legacy limit 忽略。
+    const limit = PROJECT_PAGE_SIZE;
     const sort = request.sort ?? 'updated';
+    const stateKey = this.projectStateKey(request);
     const where = this.buildProjectWhere(request);
     const order = this.projectOrder(sort);
     const params: SQLInputValue[] = [...where.params];
     let cursorSql = '';
     if (request.cursor) {
-      const cursor = decodeCursor(request.cursor);
-      const cursorPred = this.projectCursorPredicate(sort);
-      cursorSql = ` AND ${cursorPred.sql}`;
-      params.push(...cursorPred.params(cursor));
+      // 游标与规范化筛选状态绑定：状态不匹配/形状非法 → 丢弃并回第一页。
+      const cursor = decodeProjectCursor(request.cursor, stateKey);
+      if (cursor) {
+        const cursorPred = this.projectCursorPredicate(sort);
+        cursorSql = ` AND ${cursorPred.sql}`;
+        params.push(...cursorPred.params(cursor));
+      }
     }
     params.push(limit);
 
@@ -306,7 +358,7 @@ export class WorkbenchReadRepository {
     const projects = this.enrichProjects(rows);
 
     const last = rows[rows.length - 1];
-    const nextCursor = rows.length === limit && last ? this.projectCursor(sort, last) : null;
+    const nextCursor = rows.length === limit && last ? this.projectCursor(sort, last, stateKey) : null;
 
     return {
       businessRevision: readBusinessRevision(this.db),
@@ -314,6 +366,7 @@ export class WorkbenchReadRepository {
       total,
       nextCursor,
       limit,
+      pageSize: limit,
     };
   }
 
@@ -669,6 +722,161 @@ export class WorkbenchReadRepository {
     };
   }
 
+  // ---- 完整提醒视图（tasks 7.3） ----
+  // 全部带当前提醒项目（reminder_at 或 reminder_note 任一非空）+ 到期分类；
+  // 按提醒日期 asc/desc（缺省 desc = 最近日期优先），游标列 COALESCE 成可比较
+  // 字符串并追加 id 稳定 tie-breaker；与泳道（7.6）排序独立。
+
+  reminderPage(request: WorkbenchV2ReminderPageRequest): WorkbenchV2ReminderPageDto {
+    const limit = pageLimit(request.limit);
+    const sort = request.sort === 'asc' ? 'asc' : 'desc';
+    const orderDir = sort === 'asc' ? 'ASC' : 'DESC';
+    const cursorOp = sort === 'asc' ? '>' : '<';
+    const baseWhere = '(p.reminder_at IS NOT NULL OR p.reminder_note IS NOT NULL)';
+
+    let cursorSql = '';
+    const cursorParams: SQLInputValue[] = [];
+    if (request.cursor) {
+      const cursor = decodeCursor(request.cursor);
+      cursorSql = ` AND (COALESCE(p.reminder_at, ''), p.id) ${cursorOp} (?, ?)`;
+      cursorParams.push(cursor.sortKey ?? '', cursor.id);
+    }
+
+    const rows = prepareReadBigInt(
+      this.db,
+      `SELECT p.id, p.temp_no, p.reminder_at, p.reminder_note, c.ecc, cu.name AS customer_name
+       FROM projects p
+       LEFT JOIN contracts c ON c.project_id = p.id
+       LEFT JOIN customers cu ON cu.id = p.customer_id
+       WHERE ${baseWhere} ${cursorSql}
+       ORDER BY COALESCE(p.reminder_at, '') ${orderDir}, p.id ${orderDir}
+       LIMIT ?`,
+    ).all(...cursorParams, limit) as Row[];
+    const totalRow = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM projects p WHERE ${baseWhere}`)
+      .get() as { n: number };
+    const total = totalRow.n;
+    const last = rows[rows.length - 1];
+    const nextCursor =
+      rows.length === limit && last
+        ? encodeCursor(last.reminder_at === null ? '' : String(last.reminder_at), String(last.id))
+        : null;
+
+    return {
+      businessRevision: readBusinessRevision(this.db),
+      rows: rows.map((r) => this.toReminderRow(r)),
+      total,
+      nextCursor,
+      limit,
+      sort,
+    };
+  }
+
+  // ---- 提醒泳道「先日期后项目」有界读取（tasks 7.6 / design D6） ----
+  // 1) 先按提醒日期升序选取最多 7 个不同非空业务日期（不要求连续自然日；
+  //    全量不足 7 个时仅返回已有的非空日期列，不制造空列）——
+  //    MUST NOT 先按记录数截断再分组；
+  // 2) 再仅对选中日期读取列内项目：列内 id 稳定 tie-breaker，高量日期列可带
+  //    独立 column cursor/page size；推进某列携带 selectedDates 锁定日期集合，
+  //    不得重算或改变该集合。本泳道升序不影响完整提醒视图默认降序（7.3）。
+
+  reminderLanes(request: WorkbenchV2ReminderLanesRequest): WorkbenchV2ReminderLanesDto {
+    const laneLimit = pageLimit(request.limit);
+    const today = this.options.today;
+    const windowDays = this.options.windowDays;
+
+    // 日期集合：已锁定（请求回传）或首次计算（升序最多 7 个不同非空日期）。
+    let dates: string[];
+    if (request.selectedDates && request.selectedDates.length > 0) {
+      dates = request.selectedDates.slice(0, REMINDER_LANE_MAX_DATES);
+    } else {
+      const dateRows = this.db
+        .prepare(
+          `SELECT DISTINCT substr(reminder_at, 1, 10) AS d
+           FROM projects
+           WHERE reminder_at IS NOT NULL
+           ORDER BY d ASC
+           LIMIT ?`,
+        )
+        .all(REMINDER_LANE_MAX_DATES) as Array<{ d: string }>;
+      dates = dateRows.map((r) => r.d);
+    }
+
+    const lanes: WorkbenchV2ReminderLane[] = dates.map((date) => {
+      const advancing = request.date === date;
+      const columnCursor = advancing ? request.cursor ?? null : null;
+      const params: SQLInputValue[] = [date];
+      let cursorSql = '';
+      if (columnCursor) {
+        const parsed = decodeCursor(columnCursor);
+        cursorSql = ' AND p.id > ?';
+        params.push(parsed.id);
+      }
+      params.push(laneLimit);
+      const rows = prepareReadBigInt(
+        this.db,
+        `SELECT p.id, p.temp_no, p.reminder_at, p.reminder_note, c.ecc, cu.name AS customer_name
+         FROM projects p
+         LEFT JOIN contracts c ON c.project_id = p.id
+         LEFT JOIN customers cu ON cu.id = p.customer_id
+         WHERE p.reminder_at = ? ${cursorSql}
+         ORDER BY p.id ASC
+         LIMIT ?`,
+      ).all(...params) as Row[];
+      const totalRow = this.db
+        .prepare('SELECT COUNT(*) AS n FROM projects WHERE reminder_at = ?')
+        .get(date) as { n: number };
+      const last = rows[rows.length - 1];
+      const nextCursor =
+        rows.length === laneLimit && last
+          ? encodeCursor(String(last.id), String(last.id))
+          : null;
+      return {
+        date,
+        projects: rows.map((r) => ({
+          projectId: String(r.id),
+          customerName: this.customerNameOf(r),
+          ecc: r.ecc === null ? null : String(r.ecc),
+          tempNo: String(r.temp_no),
+          reminderAt: String(r.reminder_at),
+          reminderNote: r.reminder_note === null ? null : String(r.reminder_note),
+          reminderDueClass: classifyReminder(
+            r.reminder_at === null ? null : String(r.reminder_at),
+            today,
+            windowDays,
+          ),
+        })),
+        total: totalRow.n,
+        nextCursor,
+        limit: laneLimit,
+      };
+    });
+
+    return {
+      businessRevision: readBusinessRevision(this.db),
+      dates,
+      lanes,
+      lanePageSize: laneLimit,
+    };
+  }
+
+  /** 完整提醒视图行映射（泳道行内 reminderAt 非空，单独内联映射）。 */
+  private toReminderRow(r: Row): WorkbenchV2ReminderPageRow {
+    return {
+      projectId: String(r.id),
+      customerName: this.customerNameOf(r),
+      ecc: r.ecc === null ? null : String(r.ecc),
+      tempNo: String(r.temp_no),
+      reminderAt: r.reminder_at === null ? null : String(r.reminder_at),
+      reminderNote: r.reminder_note === null ? null : String(r.reminder_note),
+      reminderDueClass: classifyReminder(
+        r.reminder_at === null ? null : String(r.reminder_at),
+        this.options.today,
+        this.options.windowDays,
+      ),
+    };
+  }
+
   private toHistoryRow(kind: WorkbenchV2HistoryKind, r: Row): WorkbenchV2HistoryRow {
     const ctx = (): { projectId: string; customerName: string; ecc: string | null; tempNo: string } => ({
       projectId: String(r.project_id),
@@ -779,9 +987,18 @@ export class WorkbenchReadRepository {
       clauses.push('p.status = ?');
       params.push(request.status);
     }
+    // 区域筛选（tasks 7.4）：仅接受五个固定枚举（trim 后）；runtime 非枚举值
+    // 显式拒绝（一致明确行为，不自由输入、不静默空结果）。
     if (request.region && request.region.trim()) {
+      const region = request.region.trim();
+      if (!isProjectRegion(region)) {
+        throw new ValidationError(
+          'INVALID_REGION',
+          `区域筛选仅支持 East、South、West、Central、North 五个固定选项：${region}`,
+        );
+      }
       clauses.push('p.region = ?');
-      params.push(request.region.trim());
+      params.push(region);
     }
     if (request.query && request.query.trim()) {
       const pattern = likePattern(request.query.trim());
@@ -849,18 +1066,37 @@ export class WorkbenchReadRepository {
     }
   }
 
-  private projectCursor(sort: string, row: Row): string {
+  private projectCursor(sort: string, row: Row, stateKey: string): string {
     switch (sort) {
       case 'created':
-        return encodeCursor(String(row.created_at), String(row.id));
+        return encodeProjectCursor(stateKey, String(row.created_at), String(row.id));
       case 'temp':
-        return encodeCursor(String(row.temp_no), String(row.id));
+        return encodeProjectCursor(stateKey, String(row.temp_no), String(row.id));
       case 'reminder':
-        return encodeCursor(row.reminder_at === null ? '' : String(row.reminder_at), String(row.id));
+        return encodeProjectCursor(stateKey, row.reminder_at === null ? '' : String(row.reminder_at), String(row.id));
       case 'updated':
       default:
-        return encodeCursor(String(row.updated_at), String(row.id));
+        return encodeProjectCursor(stateKey, String(row.updated_at), String(row.id));
     }
+  }
+
+  /**
+   * 项目队列规范化筛选状态指纹（tasks 7.5 / design D6）：cursor 必须与
+   * query/region/sort/status/reminder/repair 的规范化状态绑定，任一变化即丢弃旧游标。
+   */
+  private projectStateKey(request: WorkbenchV2ProjectPageRequest): string {
+    const region =
+      request.region === undefined || request.region === null ? null : request.region.trim() || null;
+    const query =
+      request.query === undefined || request.query === null ? null : request.query.trim() || null;
+    return JSON.stringify([
+      request.sort ?? 'updated',
+      request.status ?? null,
+      region,
+      query,
+      request.reminder ?? null,
+      request.repair ?? null,
+    ]);
   }
 
   private customerNameOf(row: Row): string {

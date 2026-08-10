@@ -23,6 +23,10 @@ export const IPC_CHANNELS = {
   workbenchV2IndependentPage: 'workbench:v2:independent-page',
   workbenchV2LookupPage: 'workbench:v2:lookup-page',
   workbenchV2HistoryPage: 'workbench:v2:history-page',
+  /** 完整提醒视图（tasks 7.3）：全部项目提醒 + 到期分类，按提醒日期 asc/desc（默认 desc）。 */
+  workbenchV2ReminderPage: 'workbench:v2:reminder-page',
+  /** 提醒泳道（tasks 7.6）：先选日期列、再按列读取项目（列可带独立 cursor，不重算日期集合）。 */
+  workbenchV2ReminderLanes: 'workbench:v2:reminder-lanes',
   workbenchV2Mutate: 'workbench:v2:mutate',
   /** 受保护登记记录删除（判别联合 + 预期业务修订防并发）。 */
   workbenchV2Delete: 'workbench:v2:delete',
@@ -435,7 +439,12 @@ export interface WorkbenchV2PageRequest {
   cursor?: string | null;
 }
 
-/** 项目 keyset 分页请求。sort 默认 updated（稳定 id 游标）。 */
+/**
+ * 项目 keyset 分页请求（tasks 7.5 / design D9）。
+ * 注意：继承自 WorkbenchV2PageRequest 的 `limit` 字段在本契约中已废弃——主进程固定每页
+ * 20 个，renderer 传入的任意 limit 一律忽略（legacy 兼容，不产生分页漂移）；新 UI 不应提交。
+ * sort 默认 updated（稳定 id 游标）。
+ */
 export interface WorkbenchV2ProjectPageRequest extends WorkbenchV2PageRequest {
   status?: ProjectStatus | null;
   region?: string | null;
@@ -456,7 +465,10 @@ export interface WorkbenchV2ProjectPageDto {
   projects: readonly WorkbenchProjectRow[];
   total: number;
   nextCursor: string | null;
+  /** 固定每页 20（主进程统一；renderer 请求的 limit 被忽略）。 */
   limit: number;
+  /** 固定每页 20 的显式契约字段（与 limit 同值；新 UI 可优先使用）。 */
+  pageSize?: number;
 }
 
 /** 首页/概览 DTO（bounded：提醒预览最多 6 条，其余为聚合指标）。 */
@@ -910,6 +922,91 @@ export interface WorkbenchV2HistoryPageDto {
 }
 
 // ---------------------------------------------------------------------------
+// 完整提醒视图与提醒泳道（tasks 7.3 / 7.6，design D6/D9）
+// - reminderPage：完整提醒视图，全部带当前提醒项目 + 到期分类，按提醒日期
+//   asc/desc 排序（未选择时默认 desc = 最近日期优先），与泳道排序独立；
+// - reminderLanes：泳道「先日期后项目」有界读取——先按提醒日期升序选取最多 7 个
+//   不同非空日期（不要求连续自然日、全量不足仅返回已有），再按列读取项目；
+//   MUST NOT 先按记录数截断再分组；列内 id 稳定 tie-breaker，高量日期列可带
+//   独立 column cursor/page size，推进某列携带 selectedDates 锁定日期集合。
+// ---------------------------------------------------------------------------
+
+/** 完整提醒视图分页请求。 */
+export interface WorkbenchV2ReminderPageRequest {
+  /** 排序方向：'asc' 升序 / 'desc' 降序；缺省 desc（最近日期优先）。 */
+  sort?: 'asc' | 'desc' | null;
+  /** 上一页返回的 nextCursor（首页为空）。 */
+  cursor?: string | null;
+  limit?: number;
+}
+
+export interface WorkbenchV2ReminderPageRow {
+  projectId: string;
+  customerName: string;
+  ecc: string | null;
+  tempNo: string;
+  /** 项目提醒日期（业务日期 yyyy-mm-dd；仅备注无日期时为 null）。 */
+  reminderAt: string | null;
+  reminderNote: string | null;
+  reminderDueClass: WorkbenchReminderDueClass | null;
+}
+
+export interface WorkbenchV2ReminderPageDto {
+  businessRevision: number;
+  rows: readonly WorkbenchV2ReminderPageRow[];
+  total: number;
+  nextCursor: string | null;
+  limit: number;
+  sort: 'asc' | 'desc';
+}
+
+/** 提醒泳道请求。 */
+export interface WorkbenchV2ReminderLanesRequest {
+  /**
+   * 已锁定的日期列（业务日期 yyyy-mm-dd，升序，最多 7）。
+   * 首次请求可不传（主进程计算）；推进某列时必须回传以锁定日期集合，
+   * 主进程不得重算或改变该集合。
+   */
+  selectedDates?: readonly string[] | null;
+  /** 要推进的日期列（必须属于 selectedDates）；缺省 = 全部列取首页。 */
+  date?: string | null;
+  /** 推进该列时的列内 keyset 游标（首页为空）。 */
+  cursor?: string | null;
+  /** 列内每页大小（可选；主进程有界，默认 50、上限 100）。 */
+  limit?: number;
+}
+
+/** 泳道列内项目（同一日期列内 reminderAt 非空）。 */
+export interface WorkbenchV2ReminderLaneRow {
+  projectId: string;
+  customerName: string;
+  ecc: string | null;
+  tempNo: string;
+  /** 所在日期列的业务日期（yyyy-mm-dd，非空）。 */
+  reminderAt: string;
+  reminderNote: string | null;
+  reminderDueClass: WorkbenchReminderDueClass | null;
+}
+
+export interface WorkbenchV2ReminderLane {
+  date: string;
+  projects: readonly WorkbenchV2ReminderLaneRow[];
+  total: number;
+  nextCursor: string | null;
+  limit: number;
+}
+
+export interface WorkbenchV2ReminderLanesDto {
+  businessRevision: number;
+  /** 已选日期列（升序；最多 7；全量提醒不足时仅已有非空日期列）。 */
+  dates: readonly string[];
+  /** 各日期列项目（列内稳定顺序；推进列返回后续页、其余列返回首页）。 */
+  lanes: readonly WorkbenchV2ReminderLane[];
+  /** 列内每页大小（有界）。 */
+  lanePageSize: number;
+}
+
+// ---------------------------------------------------------------------------
 // 受保护登记记录删除（判别联合 API）
 // - 预期业务修订（expectedRevision）防并发：不等于当前 business_revision 时整体拒绝；
 // - invoice 不可物理删除：删除必须携带撤销日期与原因，映射到现有 revoke；
@@ -1103,6 +1200,7 @@ export type WorkbenchV2MutationOp =
 export type WorkbenchV2InvalidateTag =
   | 'overview'
   | 'projects'
+  | 'reminders'
   | `project:${string}`
   | `sections:${string}`
   | 'independent:serial_address'
@@ -1495,6 +1593,10 @@ export interface WorkbenchApi {
   v2LookupPage(request: WorkbenchV2LookupPageRequest): Promise<WorkbenchV2LookupPageDto>;
   /** 跨项目历史有界分页：按 kind/from/to/cursor/limit 浏览快速记录模块（含项目上下文与可删除 id）。 */
   v2HistoryPage(request: WorkbenchV2HistoryPageRequest): Promise<WorkbenchV2HistoryPageDto>;
+  /** 完整提醒视图（tasks 7.3）：全部项目提醒 + 到期分类，sort asc/desc 默认 desc（与泳道排序独立）。 */
+  v2ReminderPage(request: WorkbenchV2ReminderPageRequest): Promise<WorkbenchV2ReminderPageDto>;
+  /** 提醒泳道（tasks 7.6）：先按日期选列、再按列读取项目；列可带独立 cursor，推进列不重算日期集合。 */
+  v2ReminderLanes(request: WorkbenchV2ReminderLanesRequest): Promise<WorkbenchV2ReminderLanesDto>;
   /** 有界 mutation：复用现有写逻辑，返回 businessRevision + invalidate tags（不含快照）。 */
   v2Mutate(request: WorkbenchV2MutationRequest): Promise<WorkbenchV2MutationResult>;
   /**

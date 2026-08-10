@@ -211,10 +211,20 @@ class DeleteOperation {
       );
     }
     const executionStarted = this.projectExecutionStarted(projectId);
-    this.ctx.projectService().clearAcceptance(projectId, {
-      hasAnyInvoiceHistory: false,
-      executionStarted,
-    });
+    try {
+      this.ctx.projectService().clearAcceptance(projectId, {
+        hasAnyInvoiceHistory: false,
+        executionStarted,
+      });
+    } catch (error) {
+      if (error instanceof ValidationError && error.code === 'ACCEPTANCE_STATUS_RECALC_FAILED') {
+        throw new ValidationError(
+          DELETE_REJECTION_CODES.STATUS_RECALC_UNRELIABLE,
+          `验收报告删除后状态重算未通过：${error.message}`,
+        );
+      }
+      throw error;
+    }
     // acceptance 无物理业务行删除：tombstone 记录「验收报告已删除」这一审计事实。
     this.tombstone('acceptance', projectId, 0);
     this.changed = { kind: 'acceptance', id: projectId, projectId };

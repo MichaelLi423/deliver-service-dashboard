@@ -119,6 +119,8 @@ const SESSION_REQUIRED_CHANNELS: IpcChannel[] = [
   IPC_CHANNELS.workbenchV2SectionPage,
   IPC_CHANNELS.workbenchV2IndependentPage,
   IPC_CHANNELS.workbenchV2LookupPage,
+  IPC_CHANNELS.workbenchV2ReminderPage,
+  IPC_CHANNELS.workbenchV2ReminderLanes,
   IPC_CHANNELS.workbenchV2Mutate,
   IPC_CHANNELS.shipToCreateRequest,
   IPC_CHANNELS.shipToSubmitRequest,

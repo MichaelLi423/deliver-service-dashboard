@@ -38,8 +38,9 @@ import type {
   WorkbenchV2IndependentPageDto, WorkbenchV2IndependentPageRequest, WorkbenchV2InvalidateTag,
   WorkbenchV2LookupPageDto, WorkbenchV2LookupPageRequest, WorkbenchV2MutationRequest,
   WorkbenchV2MutationResult, WorkbenchV2OverviewDto, WorkbenchV2ProjectDetailDto,
-  WorkbenchV2ProjectPageDto, WorkbenchV2ProjectPageRequest, WorkbenchV2SectionPageDto,
-  WorkbenchV2SectionPageRequest,
+  WorkbenchV2ProjectPageDto, WorkbenchV2ProjectPageRequest, WorkbenchV2ReminderLanesDto,
+  WorkbenchV2ReminderLanesRequest, WorkbenchV2ReminderPageDto, WorkbenchV2ReminderPageRequest,
+  WorkbenchV2SectionPageDto, WorkbenchV2SectionPageRequest,
 } from '../shared/ipc';
 import type { ShipToRequest as ShipToRequestRecord } from '../domain/capabilities/ship-to-management/ship-to';
 
@@ -173,6 +174,16 @@ export class WorkbenchFacade {
     return this.v2Reader().historyPage(request);
   }
 
+  /** 完整提醒视图（tasks 7.3）：全部项目提醒 + 到期分类，sort asc/desc 默认 desc。 */
+  v2ReminderPage(request: WorkbenchV2ReminderPageRequest): WorkbenchV2ReminderPageDto {
+    return this.v2Reader().reminderPage(request);
+  }
+
+  /** 提醒泳道（tasks 7.6）：先按日期选列、再按列读取项目（列 cursor 不重算日期集合）。 */
+  v2ReminderLanes(request: WorkbenchV2ReminderLanesRequest): WorkbenchV2ReminderLanesDto {
+    return this.v2Reader().reminderLanes(request);
+  }
+
   // ---------------------------------------------------------------------------
   // 「清理全部业务数据」两阶段 API（prepare → confirm）。
   // 备份执行器由接线层注入（复用现有备份机制）；token 绑定 DB identity/generation/revision。
@@ -258,10 +269,12 @@ export class WorkbenchFacade {
       case 'set_reminder':
         this.writeSetReminder(request.projectId!, request.reminderAt ?? null, request.reminderNote ?? null);
         changed = { projectId: request.projectId };
+        extraTags.push('reminders');
         break;
       case 'clear_reminder':
         this.writeClearReminder(request.projectId!);
         changed = { projectId: request.projectId };
+        extraTags.push('reminders');
         break;
       case 'adjust_status':
         this.writeAdjustStatus(request.projectId!, request.status!);

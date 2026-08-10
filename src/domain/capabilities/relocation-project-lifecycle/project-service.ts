@@ -424,8 +424,9 @@ export class ProjectService {
     project.acceptanceReport = false;
     project.acceptanceReportDate = null;
     project.updatedAt = this.now();
+    this.projects.save(project);
 
-    // 确定性回退主状态（与 lifecycle 自动触发/约束同口径）。
+    // 先按统一 lifecycle 规则重算状态（状态转换与校验唯一入口）。
     let target: ProjectStatusOrCancelled;
     if (project.preEntryExecution) {
       target = 'pending_entry'; // 未进单先执行标签：主状态保持待进单（TBD-08）
@@ -438,9 +439,20 @@ export class ProjectService {
     } else {
       target = 'pending_entry';
     }
-    project.status = target;
-    this.projects.save(project);
-    return project;
+
+    const result = this.adjustStatus(projectId, target, {
+      executionStarted: facts.executionStarted,
+      hasAnyInvoiceHistory: false,
+    });
+
+    if (!result.ok) {
+      throw new ValidationError(
+        'ACCEPTANCE_STATUS_RECALC_FAILED',
+        `验收报告删除后状态重算失败：${result.errors.join('；')}`,
+      );
+    }
+
+    return this.requireProject(projectId);
   }
 
   // ---- 2.5 取消 ----

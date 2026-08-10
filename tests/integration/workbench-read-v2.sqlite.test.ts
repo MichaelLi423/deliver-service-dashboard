@@ -4,7 +4,7 @@ import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-pers
 import { closeDatabase, openDatabase } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { readBusinessRevision } from '../../src/domain/capabilities/local-data-persistence/identity';
 import {
-  V2_PROJECT_PAGE_DEFAULT_LIMIT,
+  PROJECT_PAGE_SIZE,
   WorkbenchReadRepository,
 } from '../../src/domain/capabilities/local-data-persistence/workbench-read-repository';
 import { classifyReminder } from '../../src/domain/capabilities/workbench-todos';
@@ -342,14 +342,15 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
 });
 
 describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
-  it('默认 50 / 上限 100：翻页无重复无遗漏、游标稳定、total 正确', () => {
+  it('任务7.5：固定每页 20（renderer 任意 limit 忽略）、翻页无重复无遗漏、游标稳定、total 正确', () => {
     const ctx = makeFacade();
     seedProjects(ctx.db, 120);
     const repo = reader(ctx);
 
     const first = repo.projectPage({});
-    expect(first.limit).toBe(V2_PROJECT_PAGE_DEFAULT_LIMIT);
-    expect(first.projects.length).toBe(50);
+    expect(first.limit).toBe(PROJECT_PAGE_SIZE);
+    expect(first.pageSize).toBe(PROJECT_PAGE_SIZE);
+    expect(first.projects.length).toBe(20);
     expect(first.total).toBe(121); // 120 + makeFacade 的 1 个
     expect(first.nextCursor).toBeTruthy();
 
@@ -366,15 +367,16 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
       collected.push(...page.projects);
       cursor = page.nextCursor;
       pages += 1;
-      expect(pages).toBeLessThanOrEqual(5);
+      expect(pages).toBeLessThanOrEqual(7); // 121/20 → 6 满页 + 1 末页
     } while (cursor !== null);
     expect(collected.length).toBe(121);
     expect(seen.size).toBe(121);
 
-    // 上限 100：请求 1000 只返回 100
+    // 主进程统一 20：renderer 请求任意 limit（含超上限 1000）一律忽略
     const capped = repo.projectPage({ limit: 1000 });
-    expect(capped.projects.length).toBe(100);
-    expect(capped.limit).toBe(100);
+    expect(capped.projects.length).toBe(20);
+    expect(capped.limit).toBe(20);
+    expect(capped.pageSize).toBe(20);
 
     // 游标稳定：同一 cursor 两次请求返回完全相同
     const again = repo.projectPage({ cursor: first.nextCursor });
@@ -411,25 +413,32 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
     closeDatabase(ctx.db);
   });
 
-  it('任务1.5：query/region 过滤后 total 按过滤集合重算，cursor 仅在过滤集合内继续翻页', () => {
+  it('任务7.5：过滤后 total 重算、cursor 与筛选状态绑定（筛选变化丢弃旧 cursor）、末页少于 20', () => {
     const ctx = makeFacade();
     const { db } = ctx;
     seedProjects(db, 55);
     const repo = reader(ctx);
-    // 过滤前：全量 total 与默认分页（50）
+    // 过滤前：全量 total 与固定页 20
     const all = repo.projectPage({});
     expect(all.total).toBe(56); // 55 seed + makeFacade 1
-    expect(all.projects.length).toBe(50);
+    expect(all.projects.length).toBe(PROJECT_PAGE_SIZE);
     expect(all.nextCursor).toBeTruthy();
 
-    // region 过滤（North = i 为奇数 → 27 条）：total 重算为过滤集合，而不是全量
+    // region 过滤（East = i 为偶数 28 条 + makeFacade 1 条）：total 重算为过滤集合，而不是全量
     const east = repo.projectPage({ region: 'East' });
     const eastCount = east.total;
-    expect(eastCount).toBe(29); // i 为偶数 28 条 + makeFacade 1 条
+    expect(eastCount).toBe(29);
     expect(east.projects.every((p) => p.region === 'East')).toBe(true);
-    // 过滤集合不足默认页 50 → 首页即返回全部过滤集合且无 nextCursor
-    expect(east.projects.length).toBe(29);
-    expect(east.nextCursor).toBeNull();
+    // 固定页 20：过滤集合 29 条 → 首页 20 条 + nextCursor
+    expect(east.projects.length).toBe(20);
+    expect(east.nextCursor).toBeTruthy();
+    // 末页少于 20：第二页 9 条且无 nextCursor
+    const eastLast = repo.projectPage({ region: 'East', cursor: east.nextCursor! });
+    expect(eastLast.projects.length).toBe(9);
+    expect(eastLast.nextCursor).toBeNull();
+    // 两页拼接不重复不遗漏（并集=过滤集合）
+    expect([...east.projects, ...eastLast.projects].map((p) => p.id).length).toBe(eastCount);
+    expect(new Set([...east.projects, ...eastLast.projects].map((p) => p.id)).size).toBe(eastCount);
 
     // query 过滤（makeFacade 客户名唯一命中）：total=1、无 cursor；不存在的关键词 total=0
     expect(repo.projectPage({ query: '集成客户' }).total).toBe(1);
@@ -439,16 +448,16 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
     // query + region 组合：同时满足才计入（region=North 且 客户名=集成客户 → 0）
     expect(repo.projectPage({ query: '集成客户', region: 'North' }).total).toBe(0);
 
-    // 过滤集合超过默认页（50）时：cursor 翻页只覆盖过滤集合、无重复无遗漏
-    const many = repo.projectPage({ region: 'East', limit: 20 });
+    // 筛选集合超过固定页 20 时：cursor 翻页只覆盖过滤集合、无重复无遗漏
+    const many = repo.projectPage({ region: 'East' });
     expect(many.projects.length).toBe(20);
     const seen = new Set<string>(many.projects.map((p) => p.id));
     let cursor: string | null = many.nextCursor;
     let guard = 0;
     while (cursor) {
       guard += 1;
-      expect(guard).toBeLessThanOrEqual(3);
-      const page = repo.projectPage({ region: 'East', limit: 20, cursor });
+      expect(guard).toBeLessThanOrEqual(2);
+      const page = repo.projectPage({ region: 'East', cursor });
       for (const p of page.projects) {
         expect(seen.has(p.id), `过滤翻页不应重复: ${p.id}`).toBe(false);
         seen.add(p.id);
@@ -456,6 +465,13 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
       cursor = page.nextCursor;
     }
     expect(seen.size).toBe(eastCount);
+
+    // 筛选变化后携带旧 cursor：丢弃旧游标并从第一页返回（不跨筛选条件翻页）
+    const stale = repo.projectPage({ region: 'East', cursor: all.nextCursor! });
+    expect(stale.projects.map((p) => p.id)).toEqual(repo.projectPage({ region: 'East' }).projects.map((p) => p.id));
+    // query 变化同理：携带 region 过滤下的 cursor 会回到 query 过滤第一页
+    const staleQuery = repo.projectPage({ query: '集成客户', cursor: east.nextCursor! });
+    expect(staleQuery.projects.map((p) => p.id)).toEqual(repo.projectPage({ query: '集成客户' }).projects.map((p) => p.id));
     closeDatabase(ctx.db);
   });
 
@@ -503,6 +519,48 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
         expect(reminderSortKeys.every((k, idx) => idx === 0 || reminderSortKeys[idx - 1] <= k)).toBe(true);
       }
     }
+    closeDatabase(ctx.db);
+  });
+
+  it('任务7.4：关键词覆盖客户/ECC/临时编号；区域仅五枚举（runtime 非枚举拒绝）；query+region AND', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    // ECC 与 temp_no 已在 makeFacade（ECC-V2-001 / 系统临时编号）；再建一项目验证 ECC 命中
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: {
+        intent: 'formal',
+        customerName: 'ECC搜索客户',
+        ecc: 'ECC-SEARCH-0810',
+        region: 'West',
+        instrumentCount: 1,
+        contractAmount: '1000',
+      },
+    });
+    const secondId = created.changed!.projectId!;
+    const repo = reader(ctx);
+    const tempNo = String(db.prepare('SELECT temp_no FROM projects WHERE id = ?').get(secondId)!.temp_no);
+
+    // 关键词任一匹配即筛选：客户名称 / ECC / 系统临时编号
+    expect(repo.projectPage({ query: 'ECC-SEARCH-0810' }).total).toBe(1);
+    expect(repo.projectPage({ query: 'ECC-SEARCH-0810' }).projects[0].id).toBe(secondId);
+    expect(repo.projectPage({ query: tempNo }).projects[0].id).toBe(secondId);
+    expect(repo.projectPage({ query: '集成客户' }).projects[0].id).toBe(projectId);
+    expect(repo.projectPage({ query: '绝无此名' }).total).toBe(0);
+
+    // 区域筛选仅五固定枚举：runtime 非枚举值显式拒绝（不自由输入、不静默空结果）
+    expect(() => repo.projectPage({ region: '华东' })).toThrow(/五个固定选项/);
+    expect(() => repo.projectPage({ region: '  华南  ' })).toThrow(/五个固定选项/);
+    expect(() => repo.projectPage({ region: '' })).not.toThrow(); // 空 = 不过滤
+    expect(() => repo.projectPage({ region: null })).not.toThrow();
+    // 五枚举均可用（trim 后匹配；makeFacade/新项目区域 East/West）
+    expect(repo.projectPage({ region: 'East' }).projects.every((p) => p.region === 'East')).toBe(true);
+    expect(repo.projectPage({ region: '  West  ' }).projects.every((p) => p.region === 'West')).toBe(true);
+
+    // query + region 组合 AND：同时满足才展示
+    expect(repo.projectPage({ query: 'ECC-SEARCH-0810', region: 'West' }).total).toBe(1);
+    expect(repo.projectPage({ query: 'ECC-SEARCH-0810', region: 'East' }).total).toBe(0);
+    expect(repo.projectPage({ query: '集成客户', region: 'North' }).total).toBe(0);
     closeDatabase(ctx.db);
   });
 });
@@ -596,6 +654,71 @@ describe('工作台 v2 项目详情 + 子记录分页（Oracle #10）', () => {
     expect(second.nextCursor).toBeNull();
     const ids = [...first.rows, ...second.rows].map((r) => r.id);
     expect(new Set(ids).size).toBe(2);
+    closeDatabase(db);
+  });
+
+  it('任务7.1：detail 标量完整返回客户/ECC-temp/raw region+needsAdjustment/status-entry/地址/执行准备/备注/暂存/暂定数量', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    // 补齐 0810 标量事实：备注/暂存/是否暂存/暂定数量/计划装机/计划上门/计划运输/场地确认
+    facade.v2Mutate({
+      op: 'update_project',
+      payload: {
+        projectId,
+        projectNote: '客户要求 0815 前完工',
+        temporaryStorageAddress: '临时仓 A',
+        isTemporaryStorage: true,
+        temporaryInstrumentCount: 3,
+        plannedInstallAt: '2026-09-01',
+        plannedVisitAt: '2026-08-20',
+        plannedTransportAt: '2026-08-18',
+        siteConfirmed: true,
+      },
+    });
+    const detail = facade.v2ProjectDetail(projectId);
+    expect(detail.project).not.toBeNull();
+    const p = detail.project!;
+    const d = detail.detail!;
+
+    // 客户 / ECC / 系统临时编号 / raw region + needsAdjustment / 主状态 / 进单日期
+    expect(p.customerName).toBe('集成客户甲');
+    expect(p.ecc).toBe('ECC-V2-001');
+    expect(p.tempNo).toBeTruthy();
+    expect(p.region).toBe('East');
+    expect(p.regionNeedsAdjustment).toBe(false);
+    expect(p.status).toBe('pending_execution');
+    expect(p.entryAt).toBeTruthy();
+
+    // 旧址/新址地址 + 联系人与合同起止
+    expect(d.oldSiteAddress).toBe('旧址');
+    expect(d.newSiteAddress).toBe('新址');
+    expect(d.contractStartDate).toBe('2026-08-01');
+    expect(d.contractEndDate).toBe('2027-07-31');
+
+    // 执行准备：计划上门/计划运输/场地确认/是否暂存 + 计划装机日期（更名契约字段）
+    expect(d.planVisitAt).toBe('2026-08-20');
+    expect(d.planTransportAt).toBe('2026-08-18');
+    expect(d.siteConfirmed).toBe(true);
+    expect(d.isTemporaryStorage).toBe(true);
+    expect(d.temporaryStorageAddress).toBe('临时仓 A');
+    expect(d.plannedInstallAt).toBe('2026-09-01');
+    expect(d.plannedInstallDoneAt).toBe('2026-09-01'); // 兼容 alias 同值
+
+    // 项目备注 + 暂定仪器数量（既有事实）
+    expect(d.projectNote).toBe('客户要求 0815 前完工');
+    expect(d.temporaryInstrumentCount).toBe(3);
+
+    // legacy 非枚举区域：raw 保留原值 + regionNeedsAdjustment=true（不猜测映射）
+    db.prepare("UPDATE projects SET region = '华东' WHERE id = ?").run(projectId);
+    const legacy = facade.v2ProjectDetail(projectId);
+    expect(legacy.project!.region).toBe('华东');
+    expect(legacy.project!.regionNeedsAdjustment).toBe(true);
+
+    // 关联登记事实不走巨型快照：经 section（项目内子记录）与 independent（独立模块）分页读取
+    expect(facade.v2SectionPage({ projectId, kind: 'invoices' }).total).toBeGreaterThanOrEqual(0);
+    // serial/QR 有独立 module read（independentPage 而非藏在 section）
+    expect(facade.v2IndependentPage({ kind: 'serial_address' })).toBeTruthy();
+    expect(facade.v2IndependentPage({ kind: 'qr_request' })).toBeTruthy();
     closeDatabase(db);
   });
 });
@@ -1025,6 +1148,70 @@ describe('工作台 v2 跨项目历史分页（historyPage）', () => {
     closeDatabase(db);
   });
 
+  it('任务7.2：各类型业务日期倒序 + id 稳定 tie-breaker，keyset 重复加载不改变顺序', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    // batch：同业务日期（计划运输日期）多条 + 不同日期，验证倒序 + id tie-breaker
+    const batchStmt = db.prepare(
+      `INSERT INTO batches (id, project_id, plan_transport_date, created_at, updated_at)
+       VALUES (?,?,?,?,?)`,
+    );
+    batchStmt.run('b-1', projectId, '2026-08-10', 't', 't');
+    batchStmt.run('b-2', projectId, '2026-08-15', 't', 't');
+    batchStmt.run('b-3', projectId, '2026-08-15', 't', 't'); // 与 b-2 同日，id 更大应在前
+    const batch = facade.v2HistoryPage({ kind: 'batch' });
+    expect(batch.total).toBe(3);
+    const batchRows = batch.rows as Array<Extract<typeof batch.rows[number], { kind: 'batch' }>>;
+    expect(batchRows.map((r) => r.businessDate)).toEqual(['2026-08-15', '2026-08-15', '2026-08-10']);
+    expect(batchRows.map((r) => r.id)).toEqual(['b-3', 'b-2', 'b-1']);
+
+    // damage：同注册日期多条，按 registered_at 倒序 + id tie-breaker
+    const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
+    const damageStmt = db.prepare(
+      `INSERT INTO damage_repair_items (id, project_id, instrument_id, issue_status, registered_at, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+    );
+    damageStmt.run('d-1', projectId, instrumentId, 'untreated', '2026-08-12', 't', 't');
+    damageStmt.run('d-2', projectId, instrumentId, 'untreated', '2026-08-12', 't', 't');
+    const damage = facade.v2HistoryPage({ kind: 'damage' });
+    const damageRows = damage.rows as Array<Extract<typeof damage.rows[number], { kind: 'damage' }>>;
+    expect(damageRows.map((r) => r.id)).toEqual(['d-2', 'd-1']);
+
+    // keyset 重复加载稳定性（activity/acceptance/ship_to_request 同批验证）：
+    // 同一 cursor 两次请求返回相同顺序，跨页拼接与一次性读取一致
+    const invStmt = db.prepare(
+      `INSERT INTO invoices (id, project_id, amount_cents, invoiced_at, last_modified_at, created_at)
+       VALUES (?,?,?,?,?,?)`,
+    );
+    for (const [id, date] of [
+      ['k-1', '2026-08-01'],
+      ['k-2', '2026-08-02'],
+      ['k-3', '2026-08-03'],
+      ['k-4', '2026-08-04'],
+      ['k-5', '2026-08-05'],
+    ] as const) {
+      invStmt.run(id, projectId, 1000, date, 't', 't');
+    }
+    const walk = (cursor: string | null): { rows: readonly { id: string }[]; nextCursor: string | null } =>
+      facade.v2HistoryPage({ kind: 'invoice', limit: 2, cursor });
+    const all: string[] = [];
+    let cursor: string | null = null;
+    let guard = 0;
+    do {
+      const page = walk(cursor);
+      all.push(...page.rows.map((r) => r.id));
+      cursor = page.nextCursor;
+      guard += 1;
+      expect(guard).toBeLessThanOrEqual(4);
+    } while (cursor !== null);
+    expect(all).toEqual(['k-5', 'k-4', 'k-3', 'k-2', 'k-1']);
+    // 重复加载同一页：顺序不变
+    const p2 = facade.v2HistoryPage({ kind: 'invoice', limit: 2, cursor: facade.v2HistoryPage({ kind: 'invoice', limit: 2 }).nextCursor! });
+    const p2again = facade.v2HistoryPage({ kind: 'invoice', limit: 2, cursor: facade.v2HistoryPage({ kind: 'invoice', limit: 2 }).nextCursor! });
+    expect(p2.rows.map((r) => r.id)).toEqual(p2again.rows.map((r) => r.id));
+    closeDatabase(db);
+  });
+
   it('acceptance（仅已验收项目）与 ship_to_request（无项目上下文）：分页与筛选', () => {
     const ctx = makeFacade();
     const { db, facade, projectId } = ctx;
@@ -1211,10 +1398,10 @@ describe('工作台 v2 有界性（Oracle #10 反全量约束）', () => {
     seedProjects(ctx.db, 5000);
     const repo = reader(ctx);
     const page = repo.projectPage({ limit: 50 });
-    expect(page.projects.length).toBe(50);
+    expect(page.projects.length).toBe(PROJECT_PAGE_SIZE); // 固定 20，limit 被忽略
     expect(page.total).toBe(5001);
     const serialized = JSON.stringify(page);
-    // 有界：页大小固定（50 行），序列化体积与总数据量无关
+    // 有界：页大小固定（20 行），序列化体积与总数据量无关
     expect(serialized.length).toBeLessThan(200_000);
     closeDatabase(ctx.db);
   });

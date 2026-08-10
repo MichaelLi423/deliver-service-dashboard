@@ -102,6 +102,8 @@ const V2_CHANNELS: IpcChannel[] = [
   IPC_CHANNELS.workbenchV2IndependentPage,
   IPC_CHANNELS.workbenchV2LookupPage,
   IPC_CHANNELS.workbenchV2HistoryPage,
+  IPC_CHANNELS.workbenchV2ReminderPage,
+  IPC_CHANNELS.workbenchV2ReminderLanes,
   IPC_CHANNELS.workbenchV2Mutate,
 ];
 
@@ -531,5 +533,129 @@ describe('IPC：受保护删除（v2Delete）与清理全部业务数据（clean
     })) as { ok: false; error: { code: string } };
     expect(result.ok).toBe(false);
     expect(result.error.code).toBe('CLEAN_TOKEN_MISMATCH');
+  });
+});
+
+describe('IPC：固定每页 20 与完整提醒/泳道读取（tasks 7.3/7.5/7.6）', () => {
+  async function loggedIn() {
+    const dir = makeTempDir('ipc-reminder-');
+    dirs.push(dir);
+    const ctx = makeContext(dir);
+    registerIpcHandlers(ctx.bus, ctx.deps);
+    await establishSession(ctx);
+    return ctx;
+  }
+
+  it('v2ProjectPage 经 IPC：固定每页 20（任意 limit 忽略），DTO 返回 pageSize=20', async () => {
+    const ctx = await loggedIn();
+    const bus = ctx.bus;
+    // 播种 25 个项目（直接 SQL，temp_no 唯一）
+    const stmt = ctx.db().prepare(
+      `INSERT INTO projects (id, temp_no, status, region, created_at, updated_at)
+       VALUES (?,?,?,?,?,?)`,
+    );
+    for (let i = 0; i < 25; i++) {
+      stmt.run(`ipc-p-${i}`, `TP-IPC-${String(i).padStart(3, '0')}`, 'pending_execution', 'East', 't', `2026-08-${String((i % 28) + 1).padStart(2, '0')}T00:00:00+08:00`);
+    }
+    // 任意 limit（含超大值）一律忽略，返回固定 20
+    const page = (await bus.invoke(IPC_CHANNELS.workbenchV2ProjectPage, 100, {
+      limit: 1000,
+    } as never)) as { projects: unknown[]; total: number; limit: number; pageSize: number; nextCursor: string | null };
+    expect(page.projects.length).toBe(20);
+    expect(page.limit).toBe(20);
+    expect(page.pageSize).toBe(20);
+    expect(page.total).toBe(25);
+    expect(page.nextCursor).toBeTruthy();
+    // 第二页 5 条（末页少于 20）
+    const last = (await bus.invoke(IPC_CHANNELS.workbenchV2ProjectPage, 100, {
+      cursor: page.nextCursor,
+    } as never)) as { projects: unknown[]; nextCursor: string | null };
+    expect(last.projects.length).toBe(5);
+    expect(last.nextCursor).toBeNull();
+  });
+
+  it('v2ReminderPage 经 IPC：默认降序、切换升序、keyset 分页', async () => {
+    const ctx = await loggedIn();
+    const bus = ctx.bus;
+    const seed = (id: string, at: string | null): void => {
+      ctx.db().prepare(
+        `INSERT INTO projects (id, temp_no, status, region, reminder_at, reminder_note, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?)`,
+      ).run(id, `TP-${id}`, 'pending_execution', 'East', at, '备注', 't', 't');
+    };
+    seed('rm-1', '2026-08-05');
+    seed('rm-2', '2026-08-10');
+    seed('rm-3', '2026-08-16');
+
+    const desc = (await bus.invoke(IPC_CHANNELS.workbenchV2ReminderPage, 100, {})) as {
+      sort: string;
+      rows: Array<{ projectId: string }>;
+      total: number;
+      nextCursor: string | null;
+    };
+    expect(desc.sort).toBe('desc');
+    expect(desc.total).toBe(3);
+    expect(desc.rows.map((r) => r.projectId)).toEqual(['rm-3', 'rm-2', 'rm-1']);
+
+    const asc = (await bus.invoke(IPC_CHANNELS.workbenchV2ReminderPage, 100, { sort: 'asc' })) as {
+      sort: string;
+      rows: Array<{ projectId: string }>;
+    };
+    expect(asc.sort).toBe('asc');
+    expect(asc.rows.map((r) => r.projectId)).toEqual(['rm-1', 'rm-2', 'rm-3']);
+
+    // keyset 分页稳定：limit=2 拼接与一次性一致
+    const first = (await bus.invoke(IPC_CHANNELS.workbenchV2ReminderPage, 100, { limit: 2 })) as {
+      rows: Array<{ projectId: string }>;
+      nextCursor: string | null;
+    };
+    const second = (await bus.invoke(IPC_CHANNELS.workbenchV2ReminderPage, 100, {
+      limit: 2,
+      cursor: first.nextCursor,
+    })) as { rows: Array<{ projectId: string }> };
+    expect([...first.rows, ...second.rows].map((r) => r.projectId)).toEqual(['rm-3', 'rm-2', 'rm-1']);
+  });
+
+  it('v2ReminderLanes 经 IPC：先日期后项目、同日归列、列内稳定、按列分页不改日期集合', async () => {
+    const ctx = await loggedIn();
+    const bus = ctx.bus;
+    const seed = (id: string, at: string): void => {
+      ctx.db().prepare(
+        `INSERT INTO projects (id, temp_no, status, region, reminder_at, reminder_note, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?)`,
+      ).run(id, `TP-${id}`, 'pending_execution', 'East', at, '备注', 't', 't');
+    };
+    for (let i = 0; i < 25; i++) {
+      seed(`lane-${String(i).padStart(2, '0')}`, '2026-08-01');
+    }
+    seed('lane-other', '2026-08-10');
+
+    const first = (await bus.invoke(IPC_CHANNELS.workbenchV2ReminderLanes, 100, { limit: 10 })) as {
+      dates: string[];
+      lanes: Array<{ date: string; projects: Array<{ projectId: string }>; total: number; nextCursor: string | null }>;
+      lanePageSize: number;
+    };
+    expect(first.dates).toEqual(['2026-08-01', '2026-08-10']);
+    expect(first.lanePageSize).toBe(10);
+    const col = first.lanes.find((l) => l.date === '2026-08-01')!;
+    expect(col.total).toBe(25);
+    expect(col.projects.map((p) => p.projectId)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `lane-${String(i).padStart(2, '0')}`),
+    );
+
+    const next = (await bus.invoke(IPC_CHANNELS.workbenchV2ReminderLanes, 100, {
+      selectedDates: first.dates,
+      date: '2026-08-01',
+      cursor: col.nextCursor,
+      limit: 10,
+    })) as {
+      dates: string[];
+      lanes: Array<{ date: string; projects: Array<{ projectId: string }> }>;
+    };
+    expect(next.dates).toEqual(first.dates); // 推进列不改日期集合
+    const nextCol = next.lanes.find((l) => l.date === '2026-08-01')!;
+    expect(nextCol.projects.map((p) => p.projectId)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `lane-${String(i + 10).padStart(2, '0')}`),
+    );
   });
 });

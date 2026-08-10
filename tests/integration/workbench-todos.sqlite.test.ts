@@ -33,6 +33,7 @@ import type { ExecutionLifecycleGateway } from '../../src/domain/capabilities/re
 import { FixedClock } from '../../src/domain/core/time';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 import { makeAccount } from '../helpers/fact-builder';
+import { WorkbenchReadRepository } from '../../src/domain/capabilities/local-data-persistence/workbench-read-repository';
 
 /**
  * workbench-todos SQLite 集成（tasks 6.5）。
@@ -242,6 +243,203 @@ describe('workbench-todos SQLite 集成（6.5）', () => {
       ctx.reminders.setReminder('p1', { at: '2026-08-09', note: '手工跟进' }, ACTOR);
       expect(ctx.projects.findById('p1')!.reminderNote).toBe('手工跟进');
       closeDatabase(ctx.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+});
+
+/**
+ * tasks 7.3 / 7.6：完整提醒视图与提醒泳道读取模型。
+ * - reminderPage：全部项目提醒 + 到期分类，sort asc/desc 默认 desc（最近日期优先）；
+ * - reminderLanes：先按提醒日期升序选取最多 7 个不同非空日期（无连续日要求、
+ *   全量不足仅返回已有），再按列读取项目；列内 id 稳定 tie-breaker；推进某列
+ *   携带 selectedDates 锁定日期集合、不得重算。
+ */
+describe('完整提醒视图与提醒泳道读取模型（tasks 7.3 / 7.6）', () => {
+  const TODAY = '2026-08-08';
+  const WINDOW = 7;
+
+  function reminderDb(dataDir: string): DatabaseSync {
+    const { db } = bootstrapDatabase({ dataDir });
+    db.prepare(
+      'INSERT OR IGNORE INTO accounts (id, username, password_hash, password_salt, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+    ).run('account-1', '负责人甲', 'hash', 'salt', 't', 't');
+    return db;
+  }
+
+  function seed(db: DatabaseSync, id: string, date: string | null, note: string | null): void {
+    db.prepare(
+      `INSERT INTO projects (id, temp_no, status, region, reminder_at, reminder_note, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+    ).run(id, `TP-${id}`, 'pending_execution', 'East', date, note, 't', 't');
+  }
+
+  function repo(db: DatabaseSync): WorkbenchReadRepository {
+    return new WorkbenchReadRepository(db, { today: TODAY, windowDays: WINDOW });
+  }
+
+  it('任务7.3：完整提醒视图默认按提醒日期降序（最近日期优先），含到期分类，仅备注项目也计入', () => {
+    const dir = makeTempDir();
+    try {
+      const db = reminderDb(dir);
+      seed(db, 'r-1', '2026-08-05', '逾期');
+      seed(db, 'r-2', '2026-08-10', '临期');
+      seed(db, 'r-3', '2026-08-16', '窗口外');
+      seed(db, 'r-4', null, '仅备注无日期');
+
+      const page = repo(db).reminderPage({});
+      expect(page.sort).toBe('desc');
+      expect(page.total).toBe(4);
+      // 降序：有日期按提醒日期倒序（最近日期优先），无日期（COALESCE ''）排最后
+      expect(page.rows.map((r) => r.projectId)).toEqual(['r-3', 'r-2', 'r-1', 'r-4']);
+      const byId = new Map(page.rows.map((r) => [r.projectId, r.reminderDueClass]));
+      expect(byId.get('r-1')).toBe('overdue');
+      expect(byId.get('r-2')).toBe('upcoming');
+      expect(byId.get('r-3')).toBeNull(); // 超出临期窗口
+      expect(byId.get('r-4')).toBeNull(); // 仅备注无日期不分类
+
+      // 降序 keyset 分页重复加载稳定
+      const first = repo(db).reminderPage({ limit: 2 });
+      const second = repo(db).reminderPage({ limit: 2, cursor: first.nextCursor! });
+      expect([...first.rows, ...second.rows].map((r) => r.projectId)).toEqual(['r-3', 'r-2', 'r-1', 'r-4']);
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('任务7.3：切换升序立即生效；asc/desc 与泳道（7.6）排序独立', () => {
+    const dir = makeTempDir();
+    try {
+      const db = reminderDb(dir);
+      seed(db, 'r-1', '2026-08-05', '逾期');
+      seed(db, 'r-2', '2026-08-10', '临期');
+      seed(db, 'r-3', '2026-08-16', '窗口外');
+
+      const asc = repo(db).reminderPage({ sort: 'asc' });
+      expect(asc.sort).toBe('asc');
+      // 升序：最早日期在前；无日期（COALESCE ''）在最前（与项目队列 reminder 排序同口径）
+      expect(asc.rows.map((r) => r.projectId)).toEqual(['r-1', 'r-2', 'r-3']);
+
+      // 排序选择立即生效于同一读取模型；泳道升序不影响完整提醒默认降序
+      expect(repo(db).reminderPage({}).rows.map((r) => r.projectId)).toEqual(['r-3', 'r-2', 'r-1']);
+      expect(repo(db).reminderLanes({}).dates[0]).toBe('2026-08-05'); // 泳道升序
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('任务7.6：同日归列、非连续日期只取有提醒的日期、首批最多 7 个日期、全量不足不制造空列', () => {
+    const dir = makeTempDir();
+    try {
+      const db = reminderDb(dir);
+      // 4 个不同日期、日期之间有无提醒的自然日间隔；同日多条
+      seed(db, 'd-1', '2026-08-01', '逾期1');
+      seed(db, 'd-2', '2026-08-01', '逾期2');
+      seed(db, 'd-3', '2026-08-01', '逾期3');
+      seed(db, 'e-1', '2026-08-10', '临期');
+      seed(db, 'e-2', '2026-08-10', '临期2');
+      seed(db, 'f-1', '2026-08-20', '未来');
+      seed(db, 'g-1', '2026-08-25', '未来2');
+
+      const lanes = repo(db).reminderLanes({});
+      // 日期升序、无连续日要求（08-02..08-09 无提醒不占用列）
+      expect(lanes.dates).toEqual(['2026-08-01', '2026-08-10', '2026-08-20', '2026-08-25']);
+      expect(lanes.lanes.map((l) => l.date)).toEqual(lanes.dates);
+
+      // 同一提醒日期归入同一列
+      const sameDay = lanes.lanes.find((l) => l.date === '2026-08-01')!;
+      expect(sameDay.total).toBe(3);
+      expect(sameDay.projects.length).toBe(3);
+      expect(sameDay.projects.map((p) => p.projectId).sort()).toEqual(['d-1', 'd-2', 'd-3']);
+
+      // 全量不足 7 个日期：仅返回已有非空日期列，不制造空列
+      expect(lanes.dates.length).toBe(4);
+      expect(lanes.lanes.every((l) => l.projects.length > 0)).toBe(true);
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('任务7.6：首批不足 7 个不同日期继续向未来补列；超过 7 个时只取最早 7 个', () => {
+    const dir = makeTempDir();
+    try {
+      const db = reminderDb(dir);
+      // 10 个不同日期（08-01..08-10）→ 只取最早 7 个
+      for (let i = 1; i <= 10; i++) {
+        const day = String(i).padStart(2, '0');
+        seed(db, `n-${i}`, `2026-08-${day}`, `备注${i}`);
+      }
+      const lanes = repo(db).reminderLanes({});
+      expect(lanes.dates).toEqual([
+        '2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04',
+        '2026-08-05', '2026-08-06', '2026-08-07',
+      ]);
+      expect(lanes.lanes).toHaveLength(7);
+      closeDatabase(db);
+
+      // 首批不足 7 个不同日期：仅返回已有的非空日期列
+      const dir2 = makeTempDir('reminder-sparse-');
+      try {
+        const db2 = reminderDb(dir2);
+        seed(db2, 'x-1', '2026-08-03', 'a');
+        seed(db2, 'x-2', '2026-08-09', 'b');
+        const sparse = repo(db2).reminderLanes({});
+        expect(sparse.dates).toEqual(['2026-08-03', '2026-08-09']);
+        expect(sparse.lanes).toHaveLength(2);
+        closeDatabase(db2);
+      } finally {
+        cleanupTempDir(dir2);
+      }
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('任务7.6：列内 id 稳定 tie-breaker；按列分页携带 selectedDates 锁定日期集合、不重算不重读', () => {
+    const dir = makeTempDir();
+    try {
+      const db = reminderDb(dir);
+      // 高量日期列：2026-08-01 共 25 个项目；另两列各 1 个
+      for (let i = 0; i < 25; i++) {
+        seed(db, `c-${String(i).padStart(2, '0')}`, '2026-08-01', '高量');
+      }
+      seed(db, 'other-1', '2026-08-10', '另一日期');
+      seed(db, 'other-2', '2026-08-15', '再一日期');
+
+      const first = repo(db).reminderLanes({ limit: 10 });
+      expect(first.dates).toEqual(['2026-08-01', '2026-08-10', '2026-08-15']);
+      const col = first.lanes.find((l) => l.date === '2026-08-01')!;
+      expect(col.total).toBe(25);
+      expect(col.projects.length).toBe(10);
+      // 列内稳定：id 升序（c-00..c-09）
+      expect(col.projects.map((p) => p.projectId)).toEqual(
+        Array.from({ length: 10 }, (_, i) => `c-${String(i).padStart(2, '0')}`),
+      );
+
+      // 推进该列：携带 selectedDates 锁定日期集合，不得重算或改变
+      const next = repo(db).reminderLanes({
+        selectedDates: first.dates,
+        date: '2026-08-01',
+        cursor: col.nextCursor!,
+        limit: 10,
+      });
+      expect(next.dates).toEqual(first.dates); // 日期集合不变
+      const nextCol = next.lanes.find((l) => l.date === '2026-08-01')!;
+      expect(nextCol.projects.length).toBe(10);
+      expect(nextCol.projects.map((p) => p.projectId)).toEqual(
+        Array.from({ length: 10 }, (_, i) => `c-${String(i + 10).padStart(2, '0')}`),
+      );
+      // 其它列仍在响应中（首页），未因推进某列被丢弃
+      expect(next.lanes.map((l) => l.date)).toEqual(first.dates);
+
+      // 列内不重复：首页 + 推进页拼接无重复
+      const ids = [...col.projects, ...nextCol.projects].map((p) => p.projectId);
+      expect(new Set(ids).size).toBe(20);
+      closeDatabase(db);
     } finally {
       cleanupTempDir(dir);
     }
