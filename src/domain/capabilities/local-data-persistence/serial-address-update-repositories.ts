@@ -52,6 +52,10 @@ export class SqliteSerialAddressUpdateRepository implements SerialAddressUpdateR
     const rows = this.db.prepare('SELECT * FROM serial_address_updates').all() as Record<string, unknown>[];
     return rows.map(rowToSerialAddressUpdate);
   }
+
+  deleteById(id: string): void {
+    this.db.prepare('DELETE FROM serial_address_updates WHERE id = ?').run(id);
+  }
 }
 
 /**

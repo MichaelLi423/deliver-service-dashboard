@@ -391,13 +391,25 @@ export class WorkbenchFacade {
   // ---------------------------------------------------------------------------
 
   private writeCreateProject(input: ProjectWizardPayload): { projectId: string } {
-    // 契约收紧（ora-1）：废弃字段有值即稳定拒绝（绝不静默忽略）。
+    // 契约收紧（ora-1 / tasks 2.5 / 6.4）：废弃字段有值即稳定拒绝（绝不静默忽略）。
+    // 建档公开类型已移除 finalAmount/serviceOrderNo/engineers/serviceOrderNote/missingItems
+    // （approvalReason 亦被 managerApproved 替代、不再收集），但外部 JS/旧调用仍可能传入
+    // 有值 → 经运行时探测形状检查并返回既有 WIZARD_REJECTION_CODES，绝不静默丢弃。
+    const legacy = input as ProjectWizardPayload & {
+      finalAmount?: unknown;
+      serviceOrderNo?: unknown;
+      engineers?: unknown;
+      serviceOrderNote?: unknown;
+      missingItems?: unknown;
+    };
     const deprecatedFields: Array<[string, unknown]> = [
-      ['finalAmount', input.finalAmount],
-      ['serviceOrderNo', input.serviceOrderNo],
-      ['engineers', input.engineers],
-      ['serviceOrderNote', input.serviceOrderNote],
-      ['missingItems', input.missingItems],
+      ['finalAmount', legacy.finalAmount],
+      ['serviceOrderNo', legacy.serviceOrderNo],
+      ['engineers', legacy.engineers],
+      ['serviceOrderNote', legacy.serviceOrderNote],
+      ['missingItems', legacy.missingItems],
+      // 0810：未进单先执行以 managerApproved boolean 事实为准，不再收集批复原因。
+      ['approvalReason', input.approvalReason],
     ];
     for (const [name, value] of deprecatedFields) {
       if (String(value ?? '').trim() !== '') {
@@ -434,9 +446,22 @@ export class WorkbenchFacade {
         planTransportAt: input.planTransportAt ? businessDate(input.planTransportAt, '计划运输日期') ?? null : null,
         siteConfirmed: input.siteConfirmed ?? false,
       });
-      // 计划装机完成日期：独立字段，不触发生命周期。
-      if (input.plannedInstallDoneAt) {
-        projectService.setPlannedInstallDoneAt(project.id, businessDate(input.plannedInstallDoneAt, '计划装机完成日期') ?? null);
+      // 计划装机日期（「计划装机完成日期」更名；公开契约字段 plannedInstallAt，
+      // 兼容 alias plannedInstallDoneAt 同值）：独立字段，不触发生命周期。
+      const plannedInstallRaw = input.plannedInstallAt ?? input.plannedInstallDoneAt;
+      if (plannedInstallRaw) {
+        projectService.setPlannedInstallDoneAt(project.id, businessDate(plannedInstallRaw, '计划装机日期') ?? null);
+      }
+      // 项目备注（可空；不影响主状态）。
+      if (input.projectNote !== undefined) {
+        projectService.setProjectNote(project.id, input.projectNote ?? null);
+      }
+      // 暂存信息（手工维护执行事实，不触发主状态流转）。
+      if (input.temporaryStorageAddress !== undefined || input.isTemporaryStorage !== undefined) {
+        projectService.updateTemporaryStorage(project.id, {
+          temporaryStorageAddress: input.temporaryStorageAddress,
+          isTemporaryStorage: input.isTemporaryStorage,
+        });
       }
       // 暂定仪器数量（正整数，可空）：有值（正整数）才记录数量并确认搬迁范围，
       // 不生成虚拟仪器；未提供/0/空则不确定范围（正式进单已不再要求搬迁范围）。
@@ -466,8 +491,9 @@ export class WorkbenchFacade {
           entryAt: businessDate(input.entryAt, '进单日期'),
         });
       } else if (input.intent === 'pre_entry_execution') {
-        // 后端拒绝 wizard 的 missingItems（见上方废弃字段检查）：缺失项改经 supplement_project 补齐。
-        projectService.setPreEntryExecution(project.id, { reason: input.approvalReason ?? '', missingItems: '' });
+        // 0810：未进单先执行以「是否批复」boolean 事实为准（managerApproved），
+        // 不再收集批复原因/缺失资料（后端拒绝 wizard 的 approvalReason，见上方废弃字段检查）。
+        projectService.setPreEntryExecution(project.id, { approved: input.managerApproved });
       }
       // intent='draft'：仅待进单草稿（无合同、无 ECC、不正式进单）。
       if (input.actualInstallDoneAt) projectService.recordActualInstallDone(project.id, businessDate(input.actualInstallDoneAt, '实际装机完成日期') ?? '');
@@ -535,11 +561,13 @@ export class WorkbenchFacade {
 
       if (update.region !== undefined) projectService.setRegion(projectId, update.region);
 
-      // 执行准备：计划上门/运输日期（null=清空，业务日期 yyyy-mm-dd）、计划装机完成日期
-      // （独立字段不触发生命周期）与现场确认（显式 false=清除）。
+      // 执行准备：计划上门/运输日期（null=清空，业务日期 yyyy-mm-dd）、计划装机日期
+      // （「计划装机完成日期」更名，独立字段不触发生命周期；公开字段 plannedInstallAt、
+      //  兼容 alias plannedInstallDoneAt 同值）与现场确认（显式 false=清除）。
       if (
         update.plannedVisitAt !== undefined || update.plannedTransportAt !== undefined ||
-        update.plannedInstallDoneAt !== undefined || update.siteConfirmed !== undefined
+        update.plannedInstallAt !== undefined || update.plannedInstallDoneAt !== undefined ||
+        update.siteConfirmed !== undefined
       ) {
         projectService.updateExecutionPreparation(projectId, {
           planVisitAt: update.plannedVisitAt === undefined ? undefined : update.plannedVisitAt === null ? null : businessDate(update.plannedVisitAt, '计划上门日期'),
@@ -547,13 +575,38 @@ export class WorkbenchFacade {
           siteConfirmed: update.siteConfirmed,
         });
       }
-      if (update.plannedInstallDoneAt !== undefined) {
+      const plannedInstallRaw =
+        update.plannedInstallAt !== undefined ? update.plannedInstallAt : update.plannedInstallDoneAt;
+      if (plannedInstallRaw !== undefined) {
         projectService.setPlannedInstallDoneAt(
           projectId,
-          update.plannedInstallDoneAt === null || update.plannedInstallDoneAt === ''
+          plannedInstallRaw === null || plannedInstallRaw === ''
             ? null
-            : (businessDate(update.plannedInstallDoneAt, '计划装机完成日期') ?? null),
+            : (businessDate(plannedInstallRaw, '计划装机日期') ?? null),
         );
+      }
+
+      // 0810 标量事实（tasks 2.5 / 6.4 / 6.5）：项目备注、暂存信息、是否批复与
+      // 暂定仪器数量。均只更新项目标量：不创建/删除/修改任何仪器记录、
+      // 不触发主状态流转（无 lifecycle/status 副作用）。
+      if (update.projectNote !== undefined) {
+        projectService.setProjectNote(projectId, update.projectNote ?? null);
+      }
+      if (update.temporaryStorageAddress !== undefined || update.isTemporaryStorage !== undefined) {
+        projectService.updateTemporaryStorage(projectId, {
+          temporaryStorageAddress: update.temporaryStorageAddress,
+          isTemporaryStorage: update.isTemporaryStorage,
+        });
+      }
+      if (update.managerApproved !== undefined) {
+        projectService.setManagerApproved(projectId, update.managerApproved ?? null);
+      }
+      if (update.temporaryInstrumentCount !== undefined) {
+        if (update.temporaryInstrumentCount === null) {
+          projectService.clearTemporaryInstrumentCount(projectId);
+        } else {
+          projectService.setTemporaryInstrumentCount(projectId, update.temporaryInstrumentCount);
+        }
       }
 
       // 以下更正仅允许已正式进单项目；待进单项目必须走 core/formalEntry 语义。
@@ -630,7 +683,8 @@ export class WorkbenchFacade {
 
       if (input.region !== undefined) projectService.setRegion(projectId, input.region);
 
-      // 执行准备：计划上门/运输日期与现场确认；计划装机完成日期为独立字段不触发生命周期。
+      // 执行准备：计划上门/运输日期与现场确认；计划装机日期为独立字段不触发生命周期
+      // （「计划装机完成日期」更名；公开字段 plannedInstallAt、兼容 alias plannedInstallDoneAt 同值）。
       if (
         input.plannedVisitAt !== undefined || input.plannedTransportAt !== undefined ||
         input.siteConfirmed !== undefined
@@ -641,12 +695,14 @@ export class WorkbenchFacade {
           siteConfirmed: input.siteConfirmed,
         });
       }
-      if (input.plannedInstallDoneAt !== undefined) {
+      const plannedInstallRaw =
+        input.plannedInstallAt !== undefined ? input.plannedInstallAt : input.plannedInstallDoneAt;
+      if (plannedInstallRaw !== undefined) {
         projectService.setPlannedInstallDoneAt(
           projectId,
-          input.plannedInstallDoneAt === null || input.plannedInstallDoneAt === ''
+          plannedInstallRaw === null || plannedInstallRaw === ''
             ? null
-            : (businessDate(input.plannedInstallDoneAt, '计划装机完成日期') ?? null),
+            : (businessDate(plannedInstallRaw, '计划装机日期') ?? null),
         );
       }
 
@@ -694,12 +750,13 @@ export class WorkbenchFacade {
       }
 
       // 未进单先执行：仅对待进单项目生效（正式进单后忽略）。
-      if (input.approvalReason !== undefined && input.approvalReason !== null && input.approvalReason.trim() !== '') {
-        if (!isFormallyEntered(this.projects.findById(projectId)!)) {
-          projectService.setPreEntryExecution(projectId, {
-            reason: input.approvalReason,
-            missingItems: input.missingItems ?? '',
-          });
+      // 0810：以「是否批复」boolean 事实为准（managerApproved 显式提供优先）；
+      // 旧调用仅传 approvalReason（非空）视为已批复，不再收集批复原因/缺失资料。
+      if (!isFormallyEntered(this.projects.findById(projectId)!)) {
+        if (input.managerApproved !== undefined) {
+          projectService.setPreEntryExecution(projectId, { approved: input.managerApproved });
+        } else if (input.approvalReason !== undefined && (input.approvalReason ?? '').trim() !== '') {
+          projectService.setPreEntryExecution(projectId, { approved: true });
         }
       }
 

@@ -225,27 +225,15 @@ class DeleteOperation {
     if (!item) {
       throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `损坏/维修事项不存在: ${id}`);
     }
-    // 严格守卫：仅未处理、备件未使用、无维修活动关联可删除。
-    if (item.issueStatus !== 'untreated') {
-      throw new ValidationError(
-        DELETE_REJECTION_CODES.DEPENDENCIES,
-        `该损坏/维修事项已处理（${item.issueStatus}），无法删除；仅未处理事项可删除`,
-      );
-    }
-    if (item.partStatus === 'used') {
-      throw new ValidationError(
-        DELETE_REJECTION_CODES.DEPENDENCIES,
-        '该损坏/维修事项备件已使用（计入维修费用），无法删除',
-      );
-    }
-    if (this.existsWhere('activity_damage_links', 'damage_item_id', id)) {
-      throw new ValidationError(
-        DELETE_REJECTION_CODES.DEPENDENCIES,
-        '该损坏/维修事项已关联上门活动，无法删除；请先解除维修关联',
-      );
-    }
+    // 5.2：按 TBD-24 引用关系原子清理仅指向该事项的维修上门活动关联
+    // （activity_damage_links），不删除活动本身、不影响其他事项与该活动的关联、
+    // 不因存在关联直接拒绝；关联仪器与搬迁项目保留、项目生命周期不变。
+    // 事项自身的处理/备件状态属该记录内部事实，删除后维修报表统计由剩余事项派生，
+    // 不存在真正下游不可安全删除的事实，故不做依赖拒绝。
+    const linkCount = this.countWhere('activity_damage_links', 'damage_item_id', id);
+    this.db.prepare('DELETE FROM activity_damage_links WHERE damage_item_id = ?').run(id);
     this.db.prepare('DELETE FROM damage_repair_items WHERE id = ?').run(id);
-    this.tombstone('damage_repair_item', id, 0);
+    this.tombstone('damage_repair_item', id, linkCount);
     this.importTarget('damage_repair_items', id);
     this.changed = { kind: 'damage_repair_item', id, projectId: item.projectId };
   }
@@ -343,12 +331,45 @@ class DeleteOperation {
     if (!shipRequest) {
       throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `Ship-to 申请记录不存在: ${id}`);
     }
-    if (shipRequest.status === 'completed') {
-      throw new ValidationError(DELETE_REJECTION_CODES.DEPENDENCIES, '已完成的 Ship-to 申请不可删除');
+    // 记录级删除，非「退回/取消」语义：不影响其他申请的状态与线性流转。
+    if (shipRequest.status !== 'completed') {
+      // 未完成且未补入 Account ID → 直接删除（不产生任何 Ship-to 主数据遗留）。
+      if (shipRequest.accountId === null) {
+        this.db.prepare('DELETE FROM ship_to_requests WHERE id = ?').run(id);
+        this.tombstone('ship_to_request', id, 0);
+        this.importTarget('ship_to_requests', id);
+        this.changed = { kind: 'ship_to_request', id };
+        this.extraTags.push('lookup:ship_to_requests');
+        return;
+      }
+      // 异常未完成但已有 Account ID → 保守拒绝（无法安全证明未产生主数据）。
+      throw new ValidationError(
+        DELETE_REJECTION_CODES.DEPENDENCIES,
+        '该申请未完成但已补入 Account ID，无法安全直接删除；请先完成该申请或由负责人人工处理',
+      );
     }
+    // completed：必须经 ship_tos.origin_request_id 证明该不可变 Ship-to 由本申请产生；
+    // legacy null（无法证明来源）保守拒绝。
+    const shipToId = this.shipToIdOfOriginRequest(id);
+    if (shipToId === undefined) {
+      throw new ValidationError(
+        DELETE_REJECTION_CODES.DEPENDENCIES,
+        '已完成申请对应的不可变 Ship-to 无法证明来源（legacy 记录无 origin_request_id），拒绝删除',
+      );
+    }
+    // 被搬迁仪器（及经仪器关联的批次/项目间接引用）引用时原子拒绝并说明原因。
+    if (this.existsWhere('instruments', 'destination_ship_to_id', shipToId)) {
+      throw new ValidationError(
+        DELETE_REJECTION_CODES.DEPENDENCIES,
+        '已完成申请对应的不可变 Ship-to 仍被搬迁仪器（或经仪器关联的批次/项目）引用，无法删除',
+      );
+    }
+    // 无任何引用且仅由该申请产生 → 同事务先删 Ship-to 主数据再删申请，不留孤立。
+    this.db.prepare('DELETE FROM ship_tos WHERE id = ?').run(shipToId);
     this.db.prepare('DELETE FROM ship_to_requests WHERE id = ?').run(id);
-    this.tombstone('ship_to_request', id, 0);
+    this.tombstone('ship_to_request', id, 1);
     this.importTarget('ship_to_requests', id);
+    this.importTarget('ship_tos', shipToId);
     this.changed = { kind: 'ship_to_request', id };
     this.extraTags.push('lookup:ship_to_requests');
   }
@@ -419,6 +440,22 @@ class DeleteOperation {
       | { x: number }
       | undefined;
     return row !== undefined;
+  }
+
+  /** 匹配行计数（原子清理的关联子记录数；表名/列名来自固定白名单，无注入面）。 */
+  private countWhere(table: string, column: string, value: string): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`).get(value) as {
+      n: number;
+    };
+    return row.n;
+  }
+
+  /** 由申请产生（origin_request_id）的 Ship-to 主数据 ID；无（legacy null）返回 undefined。 */
+  private shipToIdOfOriginRequest(requestId: string): string | undefined {
+    const row = this.db.prepare('SELECT id FROM ship_tos WHERE origin_request_id = ?').get(requestId) as
+      | { id: string }
+      | undefined;
+    return row ? row.id : undefined;
   }
 
   /** 项目是否存在任何掉票历史（含已撤销）：有则验收报告删除被拒绝。 */

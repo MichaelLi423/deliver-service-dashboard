@@ -3,6 +3,7 @@ import { formatCents } from '../../core/money';
 import { ValidationError } from '../../core/errors';
 import { assertValidBusinessDate, type BusinessDate } from '../../core/time';
 import type { ProjectStatus } from '../../../shared/ipc';
+import { isProjectRegion } from '../../../shared/project-fields';
 import type {
   WorkbenchProjectRow,
   WorkbenchV2HistoryKind,
@@ -342,6 +343,10 @@ export class WorkbenchReadRepository {
       detail: {
         managerApprovalReason: nullString(row.manager_approval_reason),
         managerApprovalMissing: nullString(row.manager_approval_missing),
+        managerApproved: toNullableBool(row.manager_approved),
+        projectNote: nullString(row.project_note),
+        temporaryStorageAddress: nullString(row.temporary_storage_address),
+        isTemporaryStorage: toNullableBool(row.is_temporary_storage),
         oldSiteContact: nullString(row.old_site_contact),
         newSiteContact: nullString(row.new_site_contact),
         oldSiteAddress: nullString(row.old_site_address),
@@ -350,6 +355,7 @@ export class WorkbenchReadRepository {
         contractEndDate: nullString(row.contract_end_date),
         planVisitAt: nullString(row.plan_visit_at),
         planTransportAt: nullString(row.plan_transport_at),
+        plannedInstallAt: nullString(row.planned_install_done_at),
         plannedInstallDoneAt: nullString(row.planned_install_done_at),
         siteConfirmed: toBool(row.site_confirmed),
         actualInstallDoneAt: nullString(row.actual_install_done_at),
@@ -872,6 +878,8 @@ export class WorkbenchReadRepository {
       formallyEntered: row.entry_at !== null && row.entry_at !== undefined,
       preEntryExecution: toBool(row.pre_entry_execution),
       region: row.region === null ? null : String(row.region),
+      regionNeedsAdjustment:
+        row.region !== null && row.region !== undefined && !isProjectRegion(String(row.region)),
       entryAt: row.entry_at === null ? null : String(row.entry_at),
       reminderAt: row.reminder_at === null ? null : String(row.reminder_at),
       reminderNote: row.reminder_note === null ? null : String(row.reminder_note),
@@ -1111,13 +1119,17 @@ const EMPTY_COUNTS: Counts = {
 const nullString = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
 /** readBigInts 下 INTEGER 布尔列（0/1）读为 bigint，统一转换。 */
 const toBool = (v: unknown): boolean => v === 1 || v === '1' || v === 1n;
+/** 可空 INTEGER 布尔（v15 可空列：1/true → true、0/false → false、null → null）。 */
+const toNullableBool = (v: unknown): boolean | null =>
+  v === null || v === undefined ? null : v === 1 || v === '1' || v === 1n;
 
 /** 项目分页基础 SELECT（金额列经 BigInt 读取）。 */
 const PROJECT_BASE_SELECT = `
   SELECT
     p.id, p.temp_no, p.status, p.pre_entry_execution, p.region, p.entry_at,
     p.reminder_at, p.reminder_note, p.updated_at,
-    p.manager_approval_reason, p.manager_approval_missing,
+    p.manager_approval_reason, p.manager_approval_missing, p.manager_approved,
+    p.project_note, p.temporary_storage_address, p.is_temporary_storage,
     p.old_site_contact, p.new_site_contact, p.old_site_address, p.new_site_address,
     p.contract_start_date, p.contract_end_date, p.plan_visit_at, p.plan_transport_at,
     p.planned_install_done_at,

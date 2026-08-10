@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { ValidationError } from './errors';
+import { isProjectRegion, REGION_PENDING_ADJUSTMENT } from '../../shared/project-fields';
+
+// 区域枚举唯一来源为 src/shared/project-fields.ts（tasks 2.4/2.5：renderer、IPC 与
+// 领域写边界共用同一枚举）；本模块仅在此透出，避免各自声明导致口径漂移。
+export { PROJECT_REGIONS, REGION_PENDING_ADJUSTMENT } from '../../shared/project-fields';
+export type { ProjectRegion } from '../../shared/project-fields';
 
 /**
  * 稳定内部 ID 与业务 ID 分离（design D1 / tasks 1.2）。
@@ -21,21 +27,6 @@ export function normalizeCustomerName(raw: string): string {
 }
 
 /**
- * 项目区域固定枚举（tasks 2.4 / TBD-12）：新建/编辑仅允许这五个取值。
- * 写入边界为 trim 后严格校验（parseProjectRegion）；读取/报表对存量
- * 非枚举非空文本归入 REGION_PENDING_ADJUSTMENT 独立分组，不猜测、不置空、不丢弃。
- */
-export const PROJECT_REGIONS = ['East', 'South', 'West', 'Central', 'North'] as const;
-
-/** 项目区域类型：五个固定取值之一（写入侧规范化值）。 */
-export type ProjectRegion = (typeof PROJECT_REGIONS)[number];
-
-const PROJECT_REGION_SET = new Set<string>(PROJECT_REGIONS);
-
-/** 读取/报表的「待调整」独立分组标记：存量非枚举非空区域归入该组。 */
-export const REGION_PENDING_ADJUSTMENT = '待调整';
-
-/**
  * 项目区域 trim（既有兼容入口，TBD-12）：仅去除首尾空白，不做枚举校验。
  * 保留给读取/筛选等只读口径使用；项目写边界必须走 parseProjectRegion，
  * 不得漏校验（tasks 2.4）。
@@ -51,7 +42,7 @@ export function normalizeRegion(raw: string): string {
  */
 export function parseProjectRegion(raw: string, fieldName = '区域'): string {
   const trimmed = normalizeRegion(raw);
-  if (trimmed !== '' && !PROJECT_REGION_SET.has(trimmed)) {
+  if (trimmed !== '' && !isProjectRegion(trimmed)) {
     throw new ValidationError(
       'INVALID_PROJECT_REGION',
       `${fieldName}仅允许 East、South、West、Central、North 五个固定选项`,
@@ -67,7 +58,7 @@ export function parseProjectRegion(raw: string, fieldName = '区域'): string {
 export function regionGroupKey(raw: string | null | undefined): string {
   const trimmed = normalizeRegion(raw ?? '');
   if (trimmed === '') return '';
-  return PROJECT_REGION_SET.has(trimmed) ? trimmed : REGION_PENDING_ADJUSTMENT;
+  return isProjectRegion(trimmed) ? trimmed : REGION_PENDING_ADJUSTMENT;
 }
 
 /** 非空业务 ID（ECC、服务单号、Account ID 等）去除首尾空白。 */

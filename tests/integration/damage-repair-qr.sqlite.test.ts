@@ -100,6 +100,45 @@ describe('damage-repair-tracking SQLite 集成（4.13）', () => {
     }
   });
 
+  it('确认删除事项：仅清理指向该事项的维修上门关联，活动/其他关联/仪器保留（5.2）', () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      ctx.db
+        .prepare('INSERT INTO projects (id, temp_no, status, created_at, updated_at) VALUES (?,?,?,?,?)')
+        .run('p-1', 'TP-1', 'pending_execution', 't', 't');
+      ctx.db
+        .prepare('INSERT INTO contracts (id, project_id, temp_number, usd_tax_amount_cents, created_at, updated_at) VALUES (?,?,?,?,?,?)')
+        .run('c-1', 'p-1', 'TP-1', '200000', 't', 't');
+      ctx.db
+        .prepare('INSERT INTO instruments (id, project_id, name, serial_no, created_at, updated_at) VALUES (?,?,?,?,?,?)')
+        .run('i-1', 'p-1', '仪器A', 'SN-100', 't', 't');
+      ctx.db
+        .prepare('INSERT INTO activities (id, project_id, created_at, updated_at) VALUES (?,?,?,?)')
+        .run('act-1', 'p-1', 't', 't');
+      ctx.db
+        .prepare('INSERT INTO work_facts (id, activity_id, instrument_id, work_type, status, started_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)')
+        .run('wf-1', 'act-1', 'i-1', 'repair', 'done', 't', 't', 't');
+
+      const removed = ctx.damageService.registerItem('i-1', { partNumber: 'PART-1', partQuantity: 1, partAmountCents: 10000n, partCurrency: 'USD' }, ACTOR);
+      const kept = ctx.damageService.registerItem('i-1', { partNumber: 'PART-2', partQuantity: 1, partAmountCents: 20000n, partCurrency: 'USD' }, ACTOR);
+      ctx.damageService.linkRepairActivity('act-1', removed.id, ACTOR);
+      ctx.damageService.linkRepairActivity('act-1', kept.id, ACTOR);
+
+      ctx.damageService.deleteItem(removed.id);
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM damage_repair_items WHERE id = ?').get(removed.id)!.n).toBe(0);
+      // 仅指向被删事项的关联清理；活动与其他事项关联保留
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM activity_damage_links WHERE damage_item_id = ?').get(removed.id)!.n).toBe(0);
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM activity_damage_links WHERE damage_item_id = ?').get(kept.id)!.n).toBe(1);
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM activities WHERE id = ?').get('act-1')!.n).toBe(1);
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM instruments WHERE id = ?').get('i-1')!.n).toBe(1);
+      expect(ctx.damageService.countItems('p-1')).toBe(1);
+      closeDatabase(ctx.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
   it('维修上门 × 事项关联唯一约束兜底', () => {
     const dir = makeTempDir();
     try {
@@ -183,7 +222,7 @@ describe('damage-repair-tracking SQLite 集成（4.13）', () => {
   });
 });
 
-describe('qr-request-tracking SQLite 集成（4.14）', () => {
+describe('qr-request-tracking SQLite 集成（4.14 / 6.2）', () => {
   it('申请记录与类型落库、关闭重开保留、工作量按去重类型计数', () => {
     const dir = makeTempDir();
     try {
@@ -207,6 +246,28 @@ describe('qr-request-tracking SQLite 集成（4.14）', () => {
       expect(row.account_id).toBe('account-1');
       expect(row.username_snapshot).toBe('负责人甲');
       closeDatabase(reopened.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('确认删除：多选类型一并清理，历史/工作量统计消失且不影响其他申请', () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      const removed = ctx.qrService.createRequest({ applicant: '负责人甲', types: ['A', 'B'] }, ACTOR);
+      const kept = ctx.qrService.createRequest({ applicant: '负责人甲', types: ['A'] }, ACTOR);
+
+      ctx.qrService.delete(removed.id);
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM qr_requests WHERE id = ?').get(removed.id)!.n).toBe(0);
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM qr_request_types WHERE qr_request_id = ?').get(removed.id)!.n).toBe(0);
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM qr_requests WHERE id = ?').get(kept.id)!.n).toBe(1);
+      // 工作量仅计剩余申请：kept 的 A 计一次
+      const workload = ctx.qrService.countWorkloadByType();
+      expect(workload.find((w) => w.typeCode === 'A')?.count).toBe(1);
+      expect(workload.find((w) => w.typeCode === 'B')).toBeUndefined();
+      expect(ctx.qrService.countByMonth()).toEqual([{ month: '2026-08', count: 1 }]);
+      closeDatabase(ctx.db);
     } finally {
       cleanupTempDir(dir);
     }

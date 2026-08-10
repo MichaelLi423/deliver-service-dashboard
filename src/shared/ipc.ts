@@ -309,6 +309,18 @@ export interface ImportWizardCheckpointDto {
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 
+// ---------------------------------------------------------------------------
+// 项目区域固定枚举（唯一共享来源：src/shared/project-fields.ts，tasks 2.4/2.5）。
+// 领域写边界 trim + 严格校验（parseProjectRegion）；存量 legacy 非枚举区域
+// 保留原值并以 regionNeedsAdjustment 显式标记（不猜测映射）。
+// ---------------------------------------------------------------------------
+export {
+  PROJECT_REGIONS,
+  REGION_PENDING_ADJUSTMENT,
+  isProjectRegion,
+} from './project-fields';
+export type { ProjectRegion } from './project-fields';
+
 /** 访问会话的对外形状（不暴露口令与恢复码派生值）。 */
 export interface AccountSessionInfo {
   accountId: string;
@@ -383,7 +395,10 @@ export interface WorkbenchProjectRow {
   status: ProjectStatus;
   formallyEntered: boolean;
   preEntryExecution: boolean;
+  /** 区域原值（trim 后保存的规范化枚举；存量 legacy 非枚举文本保留原文）。 */
   region: string | null;
+  /** 存量 legacy 非枚举区域显式标记：true = 原值不属于五个固定枚举、归入「待调整」（不猜测映射）。 */
+  regionNeedsAdjustment: boolean;
   /** 进单日期（业务日期 yyyy-mm-dd）。 */
   entryAt: string | null;
   /** 项目提醒日期（业务日期 yyyy-mm-dd）。 */
@@ -485,6 +500,14 @@ export interface WorkbenchV2ProjectDetailDto {
   detail: {
     managerApprovalReason: string | null;
     managerApprovalMissing: string | null;
+    /** 是否批复（v15 新增可空 boolean 事实；空 = 未填写）。 */
+    managerApproved: boolean | null;
+    /** 项目备注（可空；建档后补充/修改不影响主状态）。 */
+    projectNote: string | null;
+    /** 暂存地址（可空；手工维护执行事实，不触发主状态流转）。 */
+    temporaryStorageAddress: string | null;
+    /** 是否暂存（可空；空表示「未填写」而非推断「否」）。 */
+    isTemporaryStorage: boolean | null;
     oldSiteContact: string | null;
     newSiteContact: string | null;
     oldSiteAddress: string | null;
@@ -497,7 +520,11 @@ export interface WorkbenchV2ProjectDetailDto {
     planVisitAt: string | null;
     /** 计划运输日期（业务日期 yyyy-mm-dd）。 */
     planTransportAt: string | null;
-    /** 计划装机完成日期（业务日期 yyyy-mm-dd；独立字段，不触发生命周期）。 */
+    /** 计划装机日期（业务日期 yyyy-mm-dd；独立字段，不触发生命周期）。
+     *  公开字段名（「计划装机日期」更名后的契约字段）。 */
+    plannedInstallAt: string | null;
+    /** @deprecated 兼容读取 alias：同 plannedInstallAt（「计划装机完成日期」旧名）；
+     *  新 UI 应使用 plannedInstallAt。 */
     plannedInstallDoneAt: string | null;
     siteConfirmed: boolean;
     /** 实际装机完成日期（业务日期 yyyy-mm-dd）。 */
@@ -1210,43 +1237,34 @@ export interface ProjectWizardPayload {
    * 空字符串/未提供 = 未录入（合同金额保持 null，绝不虚构 0）。
    */
   contractAmount?: string;
-  /**
-   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD，绝不静默忽略）：
-   * 正式进单的最终可确认金额缺省取合同金额、合同金额为空/0 时保持 null。
-   * 保留字段仅为兼容既有 renderer 编译；新 UI 不应提交。
-   */
-  finalAmount?: string;
+  /** 项目备注（可空；建档时填写或建档后补充，不影响主状态）。 */
+  projectNote?: string | null;
+  /** 暂存地址（可空；手工维护执行事实，不触发主状态流转）。 */
+  temporaryStorageAddress?: string | null;
+  /** 是否暂存（可空；空表示「未填写」而非推断「否」，不触发主状态流转）。 */
+  isTemporaryStorage?: boolean | null;
   /** 计划上门日期（业务日期 yyyy-mm-dd）。 */
   planVisitAt?: string;
   /** 计划运输日期（业务日期 yyyy-mm-dd）。 */
   planTransportAt?: string;
-  /** 计划装机完成日期（业务日期 yyyy-mm-dd；独立字段，不触发生命周期）。 */
+  /** 计划装机日期（业务日期 yyyy-mm-dd；「计划装机完成日期」更名后的公开契约字段，独立字段不触发生命周期）。 */
+  plannedInstallAt?: string;
+  /** @deprecated 兼容既有 renderer 编译：与 plannedInstallAt 同值（「计划装机完成日期」旧名）；新 UI 应提交 plannedInstallAt。 */
   plannedInstallDoneAt?: string;
   siteConfirmed?: boolean;
   /** 实际装机完成日期（业务日期 yyyy-mm-dd）。 */
   actualInstallDoneAt?: string;
   /**
-   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD）：搬迁开单请使用独立
-   * submit_action（type='order'）或 supplement_project。保留字段仅为兼容既有 renderer 编译。
+   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD）：未进单先执行
+   * 以 managerApproved 是否批复为事实，不再收集批复原因。保留字段仅为兼容既有
+   * renderer 编译；新 UI 不应提交。
    */
-  serviceOrderNo?: string;
-  /**
-   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD）：同 serviceOrderNo。
-   * 保留字段仅为兼容既有 renderer 编译。
-   */
-  engineers?: string;
-  /**
-   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD）：同 serviceOrderNo。
-   * 保留字段仅为兼容既有 renderer 编译。
-   */
-  serviceOrderNote?: string;
-  /** pre_entry_execution 的经理批复原因（必填）。 */
   approvalReason?: string;
   /**
-   * @deprecated 后端拒绝该字段（有值即 WIZARD_DEPRECATED_FIELD）：缺失项请经
-   * supplement_project 补齐。保留字段仅为兼容既有 renderer 编译。
+   * 未进单先执行（intent='pre_entry_execution'）的「是否批复」boolean 事实：
+   * managerApproved 替代原批复原因/缺失资料；不再收集原因与缺失项。
    */
-  missingItems?: string;
+  managerApproved?: boolean | null;
 }
 
 /**
@@ -1285,10 +1303,26 @@ export interface ProjectUpdatePayload {
   plannedVisitAt?: string | null;
   /** 计划运输日期（yyyy-mm-dd）；null = 清空。 */
   plannedTransportAt?: string | null;
-  /** 计划装机完成日期（yyyy-mm-dd；独立字段不触发生命周期）；null = 清空。 */
+  /** 计划装机日期（yyyy-mm-dd；「计划装机完成日期」更名后的公开契约字段，独立字段不触发生命周期）；null = 清空。 */
+  plannedInstallAt?: string | null;
+  /** @deprecated 兼容读取 alias：同 plannedInstallAt（「计划装机完成日期」旧名）；新 UI 应提交 plannedInstallAt。 */
   plannedInstallDoneAt?: string | null;
   /** 场地确认状态；显式 false = 清除确认。 */
   siteConfirmed?: boolean;
+  /** 项目备注（可空；null = 清空；不影响主状态）。 */
+  projectNote?: string | null;
+  /** 暂存地址（可空；null = 清空；手工维护执行事实，不触发主状态流转）。 */
+  temporaryStorageAddress?: string | null;
+  /** 是否暂存（可空；null = 未填写，不触发主状态流转）。 */
+  isTemporaryStorage?: boolean | null;
+  /** 是否批复（可空；null = 未填写；managerApproved 替代原批复原因/缺失资料）。 */
+  managerApproved?: boolean | null;
+  /**
+   * 暂定仪器数量（可空整数）：查看/补录/调整均经本字段；null = 留空。
+   * 只更新项目标量，不创建/删除/修改任何仪器记录，不触发主状态流转；
+   * 取值校验遵循既有 setTemporaryInstrumentCount 规则（不小于 0 的整数）。
+   */
+  temporaryInstrumentCount?: number | null;
   /** 已正式进单项目更正：ECC（去除首尾空白后全局唯一，必填非空；null 视为未提交）。 */
   ecc?: string | null;
   /** 已正式进单项目更正：进单日期（业务日期 yyyy-mm-dd，允许补录修正；null 视为未提交）。 */
@@ -1334,7 +1368,9 @@ export interface ProjectSupplementPayload {
   plannedVisitAt?: string | null;
   /** 计划运输日期（yyyy-mm-dd）；null = 清空。 */
   plannedTransportAt?: string | null;
-  /** 计划装机完成日期（yyyy-mm-dd；独立字段不触发生命周期）；null = 清空。 */
+  /** 计划装机日期（yyyy-mm-dd；「计划装机完成日期」更名后的公开契约字段，独立字段不触发生命周期）；null = 清空。 */
+  plannedInstallAt?: string | null;
+  /** @deprecated 兼容读取 alias：同 plannedInstallAt（「计划装机完成日期」旧名）；新 UI 应提交 plannedInstallAt。 */
   plannedInstallDoneAt?: string | null;
   /**
    * 实际装机完成日期（yyyy-mm-dd）：在正式进单之前记录实际装机事实并触发
@@ -1354,6 +1390,8 @@ export interface ProjectSupplementPayload {
   /** 未进单先执行经理批复原因（携带时 setPreEntryExecution；正式进单后忽略）。 */
   approvalReason?: string | null;
   missingItems?: string | null;
+  /** 未进单先执行「是否批复」boolean 事实（managerApproved 替代批复原因/缺失资料；正式进单后忽略）。 */
+  managerApproved?: boolean | null;
   /**
    * 可选正式进单：携带非空 ECC → 同一事务内完成正式进单（补建合同、校验
    * 客户/搬迁范围、锁定金额快照、清除未进单先执行标签）；缺合同/客户/范围时

@@ -35,17 +35,26 @@ function prepareEnterableProject(
 }
 
 describe('主状态与标签（2.2）', () => {
-  it('未进单先执行标签与主状态并存：记录批复/原因/缺失项，主状态保持待进单', () => {
+  it('未进单先执行标签与主状态并存：记录「是否批复」boolean 事实，主状态保持待进单', () => {
     const { projects, service } = setup();
     const projectId = service.createPendingProject().id;
-    service.setPreEntryExecution(projectId, {
-      reason: '客户产线停产急需搬迁',
-      missingItems: '合同、搬迁范围',
-    });
+    service.setPreEntryExecution(projectId, { approved: true });
     const project = projects.findById(projectId)!;
     expect(project.preEntryExecution).toBe(true);
-    expect(project.managerApprovalReason).toBe('客户产线停产急需搬迁');
-    expect(project.managerApprovalMissing).toBe('合同、搬迁范围');
+    expect(project.managerApproved).toBe(true);
+    // 0810：不再收集批复原因/缺失资料（legacy 列保持可读历史，不写入）。
+    expect(project.managerApprovalReason).toBeNull();
+    expect(project.managerApprovalMissing).toBeNull();
+    expect(project.status).toBe('pending_entry');
+  });
+
+  it('未进单先执行「是否批复」可留空（boolean 事实为空 = 未填写，标签仍生效）', () => {
+    const { projects, service } = setup();
+    const projectId = service.createPendingProject().id;
+    service.setPreEntryExecution(projectId, { approved: null });
+    const project = projects.findById(projectId)!;
+    expect(project.preEntryExecution).toBe(true);
+    expect(project.managerApproved).toBeNull();
     expect(project.status).toBe('pending_entry');
   });
 
@@ -92,7 +101,7 @@ describe('主状态人工调整与系统校验（2.2 / TBD-09）', () => {
   it('未进单先执行期间主状态保持待进单（TBD-08）', () => {
     const { projects, service } = setup();
     const projectId = service.createPendingProject().id;
-    service.setPreEntryExecution(projectId, { reason: 'r', missingItems: 'm' });
+    service.setPreEntryExecution(projectId, { approved: true });
     const result = service.adjustStatus(projectId, 'executing');
     expectRejected(result, '未进单先执行');
     expect(projects.findById(projectId)!.status).toBe('pending_entry');
@@ -101,10 +110,7 @@ describe('主状态人工调整与系统校验（2.2 / TBD-09）', () => {
   it('先执行后进单：正式进单基线待执行（无自动触发时），主状态由负责人后续确定', () => {
     const { projects, service } = setup();
     const projectId = prepareEnterableProject(service);
-    service.setPreEntryExecution(projectId, {
-      reason: '客户产线停产急需搬迁',
-      missingItems: '合同金额待定',
-    });
+    service.setPreEntryExecution(projectId, { approved: true });
 
     // 正式进单（在原项目上完成、不新建项目）
     service.formalEntry(projectId, { ecc: 'ECC-001' });
@@ -123,7 +129,7 @@ describe('主状态人工调整与系统校验（2.2 / TBD-09）', () => {
   it('先录入实际装机完成时间后进单自动待验收（TBD-07）', () => {
     const { projects, service } = setup();
     const projectId = prepareEnterableProject(service);
-    service.setPreEntryExecution(projectId, { reason: 'r', missingItems: 'm' });
+    service.setPreEntryExecution(projectId, { approved: true });
 
     // 带标签期间录入实际装机完成时间：主状态保持待进单
     service.recordActualInstallDone(projectId, '2026-07-20');
@@ -216,7 +222,7 @@ describe('项目验收（2.4 / TBD-07）', () => {
   it('未进单先执行项目标记验收报告保持待进单，正式进单后自动进入待掉票', () => {
     const { projects, service } = setup();
     const projectId = prepareEnterableProject(service);
-    service.setPreEntryExecution(projectId, { reason: '客户产线停产急需搬迁', missingItems: '合同金额待定' });
+    service.setPreEntryExecution(projectId, { approved: true });
     service.markAcceptance(projectId, '2026-08-06');
     expect(projects.findById(projectId)!.status).toBe('pending_entry'); // 标签约束保持待进单
     service.formalEntry(projectId, { ecc: 'ECC-001' });
@@ -295,7 +301,7 @@ describe('删除验收报告（clearAcceptance，2.4 反向操作）：按事实
     const p1 = service.createPendingProject().id;
     service.attachContract(p1);
     service.linkCustomer(p1, 'customer-1');
-    service.setPreEntryExecution(p1, { reason: 'r', missingItems: 'm' });
+    service.setPreEntryExecution(p1, { approved: true });
     service.markAcceptance(p1, '2026-08-06');
     expect(projects.findById(p1)!.status).toBe('pending_entry');
     service.clearAcceptance(p1, { hasAnyInvoiceHistory: false, executionStarted: false });

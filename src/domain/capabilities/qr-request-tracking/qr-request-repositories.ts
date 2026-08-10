@@ -10,6 +10,8 @@ export interface QrRequestRepository {
   save(request: QrRequest): void;
   /** 独立保存、可查询；历史申请不覆盖、不删除。 */
   listAll(): QrRequest[];
+  /** 确认后删除一条申请（6.2：同时清理该申请的多选类型行；不影响其他申请与仪器标记）。 */
+  deleteById(id: string): void;
 }
 
 /** 类型行（qr_request_types 表）：申请记录 × 选中类型，同条内唯一。 */

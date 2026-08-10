@@ -128,7 +128,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '待进单客户', region: 'North' }),
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '待进单客户', region: 'North' }),
     });
     const projectId = projectIdOf(created);
     expect(() => facade.v2Mutate({ op: 'adjust_status', projectId, status: 'completed' })).toThrow();
@@ -317,7 +317,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       op: 'create_project',
       payload: wizard({
         intent: 'pre_entry_execution',
-        approvalReason: '测试批复：经理批准未进单先执行',
+        managerApproved: true,
         customerName: '资料更新客户',
         region: 'East',
         oldSiteContact: '旧址王工',
@@ -373,7 +373,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '原客户', region: 'East', oldSiteContact: '旧址王工' }),
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '原客户', region: 'East', oldSiteContact: '旧址王工' }),
     });
     const projectId = projectIdOf(created);
 
@@ -430,7 +430,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '待进单更正客户' }),
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '待进单更正客户' }),
     });
     const projectId = projectIdOf(created);
     expect(() =>
@@ -501,7 +501,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade, db } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '批次快速记录客户' }),
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '批次快速记录客户' }),
     });
     const projectId = projectIdOf(created);
 
@@ -553,7 +553,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '原子批次客户' }),
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '原子批次客户' }),
     });
     const projectId = projectIdOf(created);
 
@@ -604,7 +604,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade, db } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '批次编辑客户' }),
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '批次编辑客户' }),
     });
     const projectId = projectIdOf(created);
     facade.v2Mutate({
@@ -668,7 +668,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade, db, accountId } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '历史批次客户' }),
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '历史批次客户' }),
     });
     const projectId = projectIdOf(created);
 

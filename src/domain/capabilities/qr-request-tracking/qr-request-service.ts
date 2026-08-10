@@ -58,9 +58,22 @@ export class QrRequestService {
     return request;
   }
 
-  /** 全部申请（历史完整保留，不覆盖、不删除）。 */
+  /** 全部申请（历史完整保留，不覆盖；仅在负责人确认后按删除规则移除）。 */
   listRequests(): QrRequest[] {
     return this.requests.listAll();
+  }
+
+  /**
+   * 确认后删除一条二维码申请（6.2）。
+   * - 删除后不再出现在申请历史、详情与二维码申请工作量统计中；
+   * - 申请独立记录，不关联仪器/项目：删除 MUST NOT 影响任何搬迁仪器/项目的
+   *   「二维码是否申请」手工标记（该标记独立维护，不由申请记录推导）。
+   */
+  delete(id: string): void {
+    if (!this.requests.findById(id)) {
+      throw new ValidationError('QR_REQUEST_NOT_FOUND', `二维码申请记录不存在: ${id}`);
+    }
+    this.requests.deleteById(id);
   }
 
   /**

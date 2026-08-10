@@ -203,33 +203,48 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
     expect(facade.v2ProjectDetail(projectId).detail!.acceptanceReport).toBe(true);
   });
 
-  it('damage：已处理/备件已使用/有活动关联 → 拒绝；未处理且无关联 → 删除成功', async () => {
+  it('damage：确认后删除（含已处理），同事务仅清理指向该事项的维修上门关联、不删活动/仪器/项目', async () => {
     const ctx = await makeCtx();
     const { facade, db, projectId } = ctx;
     const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
 
-    // 已处理（processing）→ 拒绝
+    // 已处理 + 已使用备件 + 维修上门关联 → 按 5.2 口径仍可确认删除
     facade.v2Mutate({
       op: 'submit_action',
       projectId,
-      action: { type: 'damage', projectId, values: { instrumentId, damageReason: '磕碰', partNumber: 'P-1', partQuantity: '1', partAmount: '100', partCurrency: 'USD', partStatus: 'arrived', issueStatus: 'processing', registeredAt: '2026-08-12' } },
+      action: { type: 'damage', projectId, values: { instrumentId, damageReason: '磕碰', partNumber: 'P-1', partQuantity: '1', partAmount: '100', partCurrency: 'USD', partStatus: 'used', issueStatus: 'processing', registeredAt: '2026-08-12' } },
     });
-    const processedDamageId = String(db.prepare('SELECT id FROM damage_repair_items WHERE project_id = ?').get(projectId)!.id);
-    expectRejected(
-      () => facade.v2Delete({ kind: 'damage_repair_item', id: processedDamageId, expectedRevision: readBusinessRevision(db) }),
-      DELETE_REJECTION_CODES.DEPENDENCIES,
-    );
+    const damageId = String(db.prepare('SELECT id FROM damage_repair_items WHERE project_id = ?').get(projectId)!.id);
+    // 另一台仪器上再建一条事项（保留其关联，验证仅指向被删事项的关联被清理）
+    db.prepare('INSERT INTO instruments (id, project_id, name, created_at, updated_at) VALUES (?,?,?,?,?)').run('i-other', projectId, '其他仪器', 't', 't');
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'damage', projectId, values: { instrumentId: 'i-other', damageReason: '磕碰2', partNumber: 'P-2', partQuantity: '1', partAmount: '50', partCurrency: 'USD', partStatus: 'pending_submit', issueStatus: 'untreated', registeredAt: '2026-08-13' } },
+    });
+    const otherDamageId = String(db.prepare('SELECT id FROM damage_repair_items WHERE id <> ? AND project_id = ?').get(damageId, projectId)!.id);
+    // 构造维修上门活动 + 维修工作事实 + 事项关联（活动属执行事实，应保留）
+    db.prepare('INSERT INTO activities (id, project_id, visit_at, created_at, updated_at) VALUES (?,?,?,?,?)').run('act-repair', projectId, '2026-08-13', 't', 't');
+    db.prepare('INSERT INTO work_facts (id, activity_id, instrument_id, work_type, status, started_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)').run('wf-repair', 'act-repair', instrumentId, 'repair', 'done', 't', 't', 't');
+    db.prepare('INSERT INTO activity_damage_links (id, activity_id, damage_item_id, created_at) VALUES (?,?,?,?)').run('link-1', 'act-repair', damageId, 't');
+    db.prepare('INSERT INTO activity_damage_links (id, activity_id, damage_item_id, created_at) VALUES (?,?,?,?)').run('link-2', 'act-repair', otherDamageId, 't');
 
-    // 未处理 → 删除成功
-    facade.v2Mutate({
-      op: 'submit_action',
-      projectId,
-      action: { type: 'damage', projectId, values: { instrumentId, damageReason: '运输磕碰', partNumber: 'P-2', partQuantity: '1', partAmount: '50', partCurrency: 'USD', partStatus: 'pending_submit', issueStatus: 'untreated', registeredAt: '2026-08-13' } },
-    });
-    const untreatedDamageId = String(db.prepare('SELECT id FROM damage_repair_items WHERE project_id = ? AND id <> ?').get(projectId, processedDamageId)!.id);
-    const result = facade.v2Delete({ kind: 'damage_repair_item', id: untreatedDamageId, expectedRevision: readBusinessRevision(db) });
+    const result = facade.v2Delete({ kind: 'damage_repair_item', id: damageId, expectedRevision: readBusinessRevision(db) });
     expect(result.changed?.kind).toBe('damage_repair_item');
-    expect(facade.v2SectionPage({ projectId, kind: 'damage_items' }).total).toBe(1); // 仅剩已处理事项
+    // 事项已删除；仅指向该事项的关联被清理，其他事项的关联与活动本身保留
+    expect(db.prepare('SELECT COUNT(*) AS n FROM damage_repair_items WHERE id = ?').get(damageId)!.n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM activity_damage_links WHERE damage_item_id = ?').get(damageId)!.n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM activity_damage_links WHERE id = ?').get('link-2')!.n).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM activities WHERE id = ?').get('act-repair')!.n).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM work_facts WHERE activity_id = ?').get('act-repair')!.n).toBe(1);
+    // 仪器与项目保留、状态不变
+    expect(db.prepare('SELECT COUNT(*) AS n FROM instruments WHERE id = ?').get(instrumentId)!.n).toBe(1);
+    expect(db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)!.status).toBe('pending_execution');
+    expect(facade.v2SectionPage({ projectId, kind: 'damage_items' }).total).toBe(1); // 仅剩其他事项
+    // tombstone：owned_child_count = 原子清理的关联数（1）
+    const tomb = db.prepare('SELECT * FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('damage_repair_item', damageId) as { owned_child_count: number };
+    expect(tomb).toBeDefined();
+    expect(tomb.owned_child_count).toBe(1);
   });
 
   it('serial_address 独立记录删除成功（instrumentId 为 null）', async () => {
@@ -326,23 +341,86 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
     );
   });
 
-  it('ship_to_request：已完成禁止；待提交/处理中可删除', async () => {
+  it('ship_to_request：未完成且无 Account ID 直接删除；异常未完成已有 Account ID 保守拒绝', async () => {
     const ctx = await makeCtx();
     const { facade, db } = ctx;
+    // 待提交（未补入 Account ID）→ 直接删除
     const pending = facade.createShipToRequest({ customerName: 'ShipTo 客户', newSiteAddress: '新址' });
-    facade.submitShipToRequest(pending.request.id);
-    facade.v2Mutate({ op: 'ship_to_complete', requestId: pending.request.id, accountId: 'ACC-DONE' });
-    // 已完成 → 禁止
-    expectRejected(
-      () => facade.v2Delete({ kind: 'ship_to_request', id: pending.request.id, expectedRevision: readBusinessRevision(db) }),
-      DELETE_REJECTION_CODES.DEPENDENCIES,
-    );
-    // 处理中（新申请提交后未完成）→ 可删除
+    const r1 = facade.v2Delete({ kind: 'ship_to_request', id: pending.request.id, expectedRevision: readBusinessRevision(db) });
+    expect(r1.invalidated).toContain('lookup:ship_to_requests');
+    expect(facade.v2LookupPage({ kind: 'ship_to_requests' }).total).toBe(0);
+
+    // 处理中（未补入 Account ID）→ 直接删除
     const processing = facade.createShipToRequest({ customerName: 'ShipTo 客户乙', newSiteAddress: '新址乙' });
     facade.submitShipToRequest(processing.request.id);
-    const result = facade.v2Delete({ kind: 'ship_to_request', id: processing.request.id, expectedRevision: readBusinessRevision(db) });
-    expect(result.invalidated).toContain('lookup:ship_to_requests');
-    expect(facade.v2LookupPage({ kind: 'ship_to_requests' }).total).toBe(1); // 仅剩已完成
+    facade.v2Delete({ kind: 'ship_to_request', id: processing.request.id, expectedRevision: readBusinessRevision(db) });
+    expect(facade.v2LookupPage({ kind: 'ship_to_requests' }).total).toBe(0);
+
+    // 异常未完成但已补入 Account ID → 保守拒绝（无安全证明未产生主数据）
+    const abnormal = facade.createShipToRequest({ customerName: 'ShipTo 客户丙', newSiteAddress: '新址丙' });
+    facade.submitShipToRequest(abnormal.request.id);
+    db.prepare('UPDATE ship_to_requests SET account_id = ? WHERE id = ?').run('ACC-ABNORMAL', abnormal.request.id);
+    expectRejected(
+      () => facade.v2Delete({ kind: 'ship_to_request', id: abnormal.request.id, expectedRevision: readBusinessRevision(db) }),
+      DELETE_REJECTION_CODES.DEPENDENCIES,
+    );
+    expect(facade.v2LookupPage({ kind: 'ship_to_requests' }).total).toBe(1); // 拒绝零写
+  });
+
+  it('ship_to_request：completed 经 origin_request_id 证明来源，无引用随申请原子清理 Ship-to', async () => {
+    const ctx = await makeCtx();
+    const { facade, db } = ctx;
+    const pending = facade.createShipToRequest({ customerName: 'ShipTo 完成客户', newSiteAddress: '新址' });
+    facade.submitShipToRequest(pending.request.id);
+    facade.v2Mutate({ op: 'ship_to_complete', requestId: pending.request.id, accountId: 'ACC-DONE' });
+    // 完成生成的不可变 Ship-to 记录来源申请
+    const shipToRow = db.prepare('SELECT id, origin_request_id FROM ship_tos WHERE account_id = ?').get('ACC-DONE') as { id: string; origin_request_id: string | null };
+    expect(shipToRow).toBeDefined();
+    expect(shipToRow.origin_request_id).toBe(pending.request.id);
+
+    // 无任何引用且仅由该申请产生 → 同事务先删 Ship-to 再删申请，不留孤立
+    const revision = readBusinessRevision(db);
+    facade.v2Delete({ kind: 'ship_to_request', id: pending.request.id, expectedRevision: revision });
+    expect(facade.v2LookupPage({ kind: 'ship_to_requests' }).total).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ship_tos WHERE id = ?').get(shipToRow.id)!.n).toBe(0);
+    // tombstone：owned_child_count=1（原子清理的 Ship-to 主数据）
+    const tomb = db.prepare('SELECT * FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('ship_to_request', pending.request.id) as { owned_child_count: number };
+    expect(tomb).toBeDefined();
+    expect(tomb.owned_child_count).toBe(1);
+  });
+
+  it('ship_to_request：completed 对应 Ship-to 仍被仪器引用时原子拒绝；legacy 无来源也拒绝', async () => {
+    const ctx = await makeCtx();
+    const { facade, db, projectId } = ctx;
+    const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
+
+    // 引用拒绝：已完成申请产生的 Ship-to 被仪器 destination_ship_to_id 引用
+    const referenced = facade.createShipToRequest({ customerName: 'ShipTo 引用客户', newSiteAddress: '新址引用' });
+    facade.submitShipToRequest(referenced.request.id);
+    facade.v2Mutate({ op: 'ship_to_complete', requestId: referenced.request.id, accountId: 'ACC-REF' });
+    const shipToId = String(db.prepare('SELECT id FROM ship_tos WHERE account_id = ?').get('ACC-REF')!.id);
+    db.prepare('UPDATE instruments SET destination_ship_to_id = ? WHERE id = ?').run(shipToId, instrumentId);
+    expectRejected(
+      () => facade.v2Delete({ kind: 'ship_to_request', id: referenced.request.id, expectedRevision: readBusinessRevision(db) }),
+      DELETE_REJECTION_CODES.DEPENDENCIES,
+    );
+    // 申请与 Ship-to 均保持不变（拒绝零写）
+    expect(facade.v2LookupPage({ kind: 'ship_to_requests' }).total).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ship_tos WHERE id = ?').get(shipToId)!.n).toBe(1);
+    db.prepare('UPDATE instruments SET destination_ship_to_id = NULL WHERE id = ?').run(instrumentId);
+
+    // legacy 拒绝：completed 申请对应 Ship-to 无 origin_request_id（无法证明来源）
+    const legacy = facade.createShipToRequest({ customerName: 'ShipTo legacy 客户', newSiteAddress: '新址 legacy' });
+    facade.submitShipToRequest(legacy.request.id);
+    facade.v2Mutate({ op: 'ship_to_complete', requestId: legacy.request.id, accountId: 'ACC-LEGACY' });
+    db.prepare('UPDATE ship_tos SET origin_request_id = NULL WHERE account_id = ?').run('ACC-LEGACY');
+    expectRejected(
+      () => facade.v2Delete({ kind: 'ship_to_request', id: legacy.request.id, expectedRevision: readBusinessRevision(db) }),
+      DELETE_REJECTION_CODES.DEPENDENCIES,
+    );
+    // 拒绝零写：申请与 Ship-to 均保留
+    expect(facade.v2LookupPage({ kind: 'ship_to_requests' }).total).toBe(2);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM ship_tos WHERE account_id = ?').get('ACC-LEGACY')!.n).toBe(1);
   });
 
   it('invoice 删除映射为撤销：必填撤销日期/原因，行不物理删除', async () => {
@@ -523,27 +601,28 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
     expect(tomb.operation_id).toBe(feeAudit.target_delete_operation_id);
 
     // 拒绝路径：业务行、tombstone、import marker 全零写（来源审计原样保留、无标记）
+    // 用 instrument（存在损坏事项依赖，任务 5.3 保留的依赖拒绝）作为拒绝样例；
+    // damage 已按 5.2 口径放开为确认后删除，不再作为拒绝样例。
     const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
     facade.v2Mutate({
       op: 'submit_action',
       projectId,
-      action: { type: 'damage', projectId, values: { instrumentId, damageReason: '磕碰', partNumber: 'P-3', partQuantity: '1', partAmount: '100', partCurrency: 'USD', partStatus: 'arrived', issueStatus: 'processing', registeredAt: '2026-08-12' } },
+      action: { type: 'damage', projectId, values: { instrumentId, damageReason: '磕碰', partNumber: 'P-3', partQuantity: '1', partAmount: '100', partCurrency: 'USD', partStatus: 'arrived', issueStatus: 'untreated', registeredAt: '2026-08-12' } },
     });
-    const damageId = String(db.prepare('SELECT id FROM damage_repair_items WHERE project_id = ?').get(projectId)!.id);
     db.prepare(
-      "INSERT INTO import_record_audit (id, source_key, target_table, target_id, import_source_hash, target_snapshot_hash, imported_at) VALUES ('audit-damage', 'd-1', 'damage_repair_items', ?, 'h', 'h', '2026-08-11T00:00:00+08:00')",
-    ).run(damageId);
+      "INSERT INTO import_record_audit (id, source_key, target_table, target_id, import_source_hash, target_snapshot_hash, imported_at) VALUES ('audit-instrument', 'ins-1', 'instruments', ?, 'h', 'h', '2026-08-11T00:00:00+08:00')",
+    ).run(instrumentId);
     const revisionAtReject = readBusinessRevision(db);
     expectRejected(
-      () => facade.v2Delete({ kind: 'damage_repair_item', id: damageId, expectedRevision: revisionAtReject }),
+      () => facade.v2Delete({ kind: 'instrument', id: instrumentId, expectedRevision: revisionAtReject }),
       DELETE_REJECTION_CODES.DEPENDENCIES,
     );
     // 业务行仍在（未被级联删除）
-    expect(db.prepare('SELECT COUNT(*) AS n FROM damage_repair_items WHERE id = ?').get(damageId)!.n).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM instruments WHERE id = ?').get(instrumentId)!.n).toBe(1);
     // import marker 未被写入（target_deleted_at 仍为 NULL，审计原样保留）
-    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE id = ? AND target_deleted_at IS NULL').get('audit-damage')!.n).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE id = ? AND target_deleted_at IS NULL').get('audit-instrument')!.n).toBe(1);
     // 拒绝路径不写任何 tombstone
-    expect(db.prepare('SELECT COUNT(*) AS n FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('damage_repair_item', damageId)!.n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('instrument', instrumentId)!.n).toBe(0);
     expect(readBusinessRevision(db)).toBe(revisionAtReject);
   });
 

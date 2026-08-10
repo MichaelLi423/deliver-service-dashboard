@@ -97,6 +97,33 @@ describe('暂定数量登记（3.1）', () => {
   });
 });
 
+describe('编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）', () => {
+  it('留空/补录/调整只更新标量：不建仪器、不改既有仪器事实、不触发主状态', () => {
+    const { projects, projectService, instruments, service } = setup();
+    const project = projectService.createPendingProject();
+    // 既有逐台仪器事实（不受数量调整影响）。
+    const existing = service.registerInstrument(project.id, { name: '既有仪器' }, ACTOR);
+
+    // 查看：初始留空。
+    expect(projects.findById(project.id)!.temporaryInstrumentCount).toBeNull();
+    expect(projects.findById(project.id)!.status).toBe('pending_entry');
+
+    // 补录。
+    projectService.setTemporaryInstrumentCount(project.id, 3);
+    expect(projects.findById(project.id)!.temporaryInstrumentCount).toBe(3);
+    // 调整。
+    projectService.setTemporaryInstrumentCount(project.id, 5);
+    expect(projects.findById(project.id)!.temporaryInstrumentCount).toBe(5);
+    // 留空（清空）。
+    projectService.clearTemporaryInstrumentCount(project.id);
+    expect(projects.findById(project.id)!.temporaryInstrumentCount).toBeNull();
+
+    // 不创建/删除/修改仪器记录，不触发主状态。
+    expect(instruments.all).toEqual([existing]);
+    expect(projects.findById(project.id)!.status).toBe('pending_entry');
+  });
+});
+
 describe('占位仪器与序列号唯一性（3.1 / TBD-02）', () => {
   it('建立无序列号占位仪器：序列号可空', () => {
     const { service, projectService } = setup();

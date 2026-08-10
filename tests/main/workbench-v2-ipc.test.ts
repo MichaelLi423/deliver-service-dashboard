@@ -276,6 +276,62 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     expect(detail.detail?.siteConfirmed).toBe(false);
   });
 
+  it('update_project 经 IPC：0810 标量（备注/暂存/是否批复/暂定数量/计划装机日期）保存并经 detail 回显', async () => {
+    const ctx = await loggedIn();
+    const created = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'create_project',
+      payload: {
+        intent: 'draft',
+        customerName: 'IPC 标量客户',
+        region: 'East',
+        instrumentCount: null,
+      },
+    } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
+    const projectId = created.changed.projectId;
+
+    const updated = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'update_project',
+      payload: {
+        projectId,
+        projectNote: 'IPC 备注',
+        temporaryStorageAddress: 'IPC 暂存仓',
+        isTemporaryStorage: true,
+        managerApproved: true,
+        temporaryInstrumentCount: 4,
+        plannedInstallAt: '2026-09-15',
+      },
+    } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
+    expect(updated.changed).toEqual({ projectId });
+
+    const detail = (await ctx.bus.invoke(
+      IPC_CHANNELS.workbenchV2ProjectDetail,
+      100,
+      projectId,
+    )) as {
+      project: { status: string; region: string | null; regionNeedsAdjustment: boolean };
+      detail: {
+        projectNote: string | null;
+        temporaryStorageAddress: string | null;
+        isTemporaryStorage: boolean | null;
+        managerApproved: boolean | null;
+        temporaryInstrumentCount: number | null;
+        plannedInstallAt: string | null;
+        plannedInstallDoneAt: string | null;
+      } | null;
+    };
+    expect(detail.detail?.projectNote).toBe('IPC 备注');
+    expect(detail.detail?.temporaryStorageAddress).toBe('IPC 暂存仓');
+    expect(detail.detail?.isTemporaryStorage).toBe(true);
+    expect(detail.detail?.managerApproved).toBe(true);
+    expect(detail.detail?.temporaryInstrumentCount).toBe(4);
+    // 「计划装机日期」公开字段 + 兼容 alias 同值；主状态不被标量保存触发。
+    expect(detail.detail?.plannedInstallAt).toBe('2026-09-15');
+    expect(detail.detail?.plannedInstallDoneAt).toBe('2026-09-15');
+    expect(detail.project.status).toBe('pending_entry');
+    expect(detail.project.region).toBe('East');
+    expect(detail.project.regionNeedsAdjustment).toBe(false);
+  });
+
   it('batch 快速记录与 batch_edit 经 IPC：原子创建批次+费用、价格双口径、编辑不改变 appliedAt', async () => {
     const ctx = await loggedIn();
     const created = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {

@@ -9,6 +9,8 @@ export interface SerialAddressUpdateRepository {
   findById(id: string): SerialAddressUpdate | undefined;
   save(update: SerialAddressUpdate): void;
   listAll(): SerialAddressUpdate[];
+  /** 确认后删除一条更新事实（5.2：不触碰仪器/项目/Ship-to，实际关联以剩余最近事实为准）。 */
+  deleteById(id: string): void;
 }
 
 /**

@@ -77,6 +77,10 @@ export class SqliteServiceOrderRepository implements ServiceOrderRepository {
       .all(projectId) as Record<string, unknown>[];
     return rows.map(rowToServiceOrder);
   }
+
+  deleteById(id: string): void {
+    this.db.prepare('DELETE FROM service_orders WHERE id = ?').run(id);
+  }
 }
 
 /**

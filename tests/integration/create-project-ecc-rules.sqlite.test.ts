@@ -38,7 +38,7 @@ function expectRejected(fn: () => unknown, code: string): void {
   expect.unreachable('应当抛出拒绝错误');
 }
 
-function wizard(overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPayload {
+function wizard(overrides: Partial<ProjectWizardPayload> & Record<string, unknown> = {}): ProjectWizardPayload {
   return {
     intent: 'formal',
     customerName: '客户',
@@ -50,7 +50,7 @@ function wizard(overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPay
     instrumentCount: 1,
     siteConfirmed: false,
     ...overrides,
-  };
+  } as ProjectWizardPayload;
 }
 
 async function makeFacade(): Promise<{ facade: WorkbenchFacade; db: import('node:sqlite').DatabaseSync }> {
@@ -97,7 +97,7 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
       WIZARD_REJECTION_CODES.ENTRY_AT_ONLY_FORMAL,
     );
     expectRejected(
-      () => facade.v2Mutate({ op: 'create_project', payload: wizard({ intent: 'pre_entry_execution', customerName: '先执行带合同金额', approvalReason: '经理批复', contractAmount: '10000' }) }),
+      () => facade.v2Mutate({ op: 'create_project', payload: wizard({ intent: 'pre_entry_execution', customerName: '先执行带合同金额', managerApproved: true, contractAmount: '10000' }) }),
       WIZARD_REJECTION_CODES.CONTRACT_AMOUNT_ONLY_FORMAL,
     );
     expect(facade.v2Overview().metrics.totalProjects).toBe(0);
@@ -111,6 +111,11 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
     );
     expectRejected(
       () => facade.v2Mutate({ op: 'create_project', payload: wizard({ customerName: '废弃字段客户2', ecc: 'ECC-DEP-002', serviceOrderNo: 'SO-X' }) }),
+      WIZARD_REJECTION_CODES.DEPRECATED_FIELD,
+    );
+    // 0810：批复原因被 managerApproved 替代、不再收集 → 有值即稳定拒绝（绝不静默忽略）。
+    expectRejected(
+      () => facade.v2Mutate({ op: 'create_project', payload: wizard({ intent: 'pre_entry_execution', customerName: '废弃字段客户3', approvalReason: '经理批复' }) }),
       WIZARD_REJECTION_CODES.DEPRECATED_FIELD,
     );
     expect(facade.v2Overview().metrics.totalProjects).toBe(0);
@@ -196,15 +201,21 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
     expect(facade.v2Overview().metrics.totalProjects).toBe(0);
   });
 
-  it('无 ECC 的 pre_entry_execution 缺少经理批复原因被拒（沿用既有校验）', async () => {
+  it('pre_entry_execution 不再要求批复原因：managerApproved 可空、以 boolean 事实为准', async () => {
     const { facade } = await makeFacade();
-    expect(() =>
-      facade.v2Mutate({
-        op: 'create_project',
-        payload: wizard({ intent: 'pre_entry_execution', customerName: '缺批复客户', region: 'North' }),
-      }),
-    ).toThrow(/经理批复原因/);
-    expect(facade.v2Overview().metrics.totalProjects).toBe(0);
+    // 0810：未进单先执行以「是否批复」boolean 事实为准，不再收集批复原因/缺失资料；
+    // 未提供 managerApproved 时标签仍生效（boolean 事实为「未填写」）。
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'pre_entry_execution', customerName: '无批复事实客户', region: 'North' }),
+    });
+    const projectId = projectIdOf(created);
+    const detail = facade.v2ProjectDetail(projectId);
+    expect(detail.project!.status).toBe('pending_entry');
+    expect(detail.project!.preEntryExecution).toBe(true);
+    expect(detail.project!.formallyEntered).toBe(false);
+    expect(detail.detail!.managerApproved).toBeNull();
+    expect(facade.v2Overview().metrics.totalProjects).toBe(1);
   });
 
   it('非枚举区域值创建项目被拒（INVALID_PROJECT_REGION，legacy 文本不得再写入）', async () => {
@@ -220,7 +231,7 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
     expect(facade.v2Overview().metrics.totalProjects).toBe(0);
   });
 
-  it('无 ECC + pre_entry_execution + 经理批复原因：pending_entry、preEntryExecution=true、formallyEntered=false', async () => {
+  it('无 ECC + pre_entry_execution + managerApproved=true：pending_entry、preEntryExecution=true、formallyEntered=false', async () => {
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
@@ -228,7 +239,7 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
         intent: 'pre_entry_execution',
         customerName: '未进单先执行客户',
         region: 'South',
-        approvalReason: '客户进度紧急，经理已批复优先执行',
+        managerApproved: true,
       }),
     });
     const projectId = projectIdOf(created);
@@ -237,5 +248,156 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
     expect(detail.preEntryExecution).toBe(true);
     expect(detail.formallyEntered).toBe(false);
     expect(detail.entryAt).toBeNull();
+  });
+
+  it('建档新字段持久化与回显：项目备注/暂存地址/是否暂存/是否批复 + 计划装机日期（plannedInstallAt）', async () => {
+    const { facade, db } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({
+        intent: 'pre_entry_execution',
+        customerName: '新字段客户',
+        region: 'West',
+        projectNote: '  客户要求周末作业  ',
+        temporaryStorageAddress: '临时仓 3 号',
+        isTemporaryStorage: true,
+        managerApproved: true,
+        plannedInstallAt: '2026-09-01',
+      }),
+    });
+    const projectId = projectIdOf(created);
+    // detail DTO 回显最新值（项目备注 trim 后保存）。
+    const detail = facade.v2ProjectDetail(projectId).detail!;
+    expect(detail.projectNote).toBe('客户要求周末作业');
+    expect(detail.temporaryStorageAddress).toBe('临时仓 3 号');
+    expect(detail.isTemporaryStorage).toBe(true);
+    expect(detail.managerApproved).toBe(true);
+    // 「计划装机日期」公开字段与兼容 alias 同值。
+    expect(detail.plannedInstallAt).toBe('2026-09-01');
+    expect(detail.plannedInstallDoneAt).toBe('2026-09-01');
+    // 物理列复用既有 planned_install_done_at，未新增 schema 列。
+    const row = db
+      .prepare(
+        `SELECT project_note, temporary_storage_address, is_temporary_storage, manager_approved,
+                planned_install_done_at FROM projects WHERE id = ?`,
+      )
+      .get(projectId) as Record<string, unknown>;
+    expect(row.project_note).toBe('客户要求周末作业');
+    expect(row.temporary_storage_address).toBe('临时仓 3 号');
+    expect(row.is_temporary_storage).toBe(1);
+    expect(row.manager_approved).toBe(1);
+    expect(row.planned_install_done_at).toBe('2026-09-01');
+  });
+
+  it('项目备注/暂存地址留空保存：可空字段不因缺失拒绝建档', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'draft', customerName: '留空客户', instrumentCount: null }),
+    });
+    const projectId = projectIdOf(created);
+    const detail = facade.v2ProjectDetail(projectId).detail!;
+    expect(detail.projectNote).toBeNull();
+    expect(detail.temporaryStorageAddress).toBeNull();
+    expect(detail.isTemporaryStorage).toBeNull();
+    expect(detail.managerApproved).toBeNull();
+  });
+
+  it('暂存地址/是否暂存为手工维护执行事实：建档后修改不影响主状态', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'draft', customerName: '暂存维护客户', instrumentCount: null }),
+    });
+    const projectId = projectIdOf(created);
+    const before = facade.v2ProjectDetail(projectId).project!.status;
+    facade.v2Mutate({
+      op: 'update_project',
+      payload: { projectId, temporaryStorageAddress: '新临时仓', isTemporaryStorage: false },
+    });
+    const detail = facade.v2ProjectDetail(projectId);
+    expect(detail.detail!.temporaryStorageAddress).toBe('新临时仓');
+    expect(detail.detail!.isTemporaryStorage).toBe(false);
+    expect(detail.project!.status).toBe(before); // 主状态不因暂存信息改变
+  });
+
+  it('暂定数量经 update_project 查看/留空/补录/调整回显最新值，不建仪器、不改状态', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'draft', customerName: '暂定数量客户', instrumentCount: null }),
+    });
+    const projectId = projectIdOf(created);
+    // 查看：初始为空（留空）。
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryInstrumentCount).toBeNull();
+    // 补录 3。
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, temporaryInstrumentCount: 3 } });
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryInstrumentCount).toBe(3);
+    // 调整 5。
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, temporaryInstrumentCount: 5 } });
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryInstrumentCount).toBe(5);
+    // 留空（null 清除）。
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, temporaryInstrumentCount: null } });
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryInstrumentCount).toBeNull();
+    // 不创建/删除/修改任何仪器记录，不触发主状态流转。
+    expect(facade.v2SectionPage({ projectId, kind: 'instruments' }).total).toBe(0);
+    const project = facade.v2ProjectDetail(projectId).project!;
+    expect(project.status).toBe('pending_entry');
+    expect(project.formallyEntered).toBe(false);
+  });
+
+  it('暂定数量非法值沿用既有校验（负数/非整数拒绝，INVALID_TEMP_COUNT）', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'draft', customerName: '非法数量客户2', instrumentCount: null }),
+    });
+    const projectId = projectIdOf(created);
+    for (const bad of [-1, 1.5]) {
+      try {
+        facade.v2Mutate({ op: 'update_project', payload: { projectId, temporaryInstrumentCount: bad } });
+      } catch (err) {
+        expect((err as { code?: string }).code).toBe('INVALID_TEMP_COUNT');
+        continue;
+      }
+      expect.unreachable('应当抛出拒绝错误');
+    }
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryInstrumentCount).toBeNull();
+  });
+
+  it('legacy 非枚举区域原文保留并显式标记 regionNeedsAdjustment（不猜测、不置空）', async () => {
+    const { facade, db } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'draft', customerName: 'legacy区域客户', instrumentCount: null }),
+    });
+    const projectId = projectIdOf(created);
+    // 模拟升级前已存在的 legacy 非枚举区域文本（直接落库，不经写边界）。
+    db.prepare('UPDATE projects SET region = ? WHERE id = ?').run('华东', projectId);
+    const detail = facade.v2ProjectDetail(projectId);
+    expect(detail.project!.region).toBe('华东'); // 原文保留
+    expect(detail.project!.regionNeedsAdjustment).toBe(true); // 显式「待调整」标记
+    // 五个枚举区域不标记。
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, region: 'North' } });
+    const fixed = facade.v2ProjectDetail(projectId).project!;
+    expect(fixed.region).toBe('North');
+    expect(fixed.regionNeedsAdjustment).toBe(false);
+  });
+
+  it('项目备注建档后补充/修改不影响主状态', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'formal', customerName: '备注维护客户', ecc: 'ECC-NOTE-001', contractAmount: '1000' }),
+    });
+    const projectId = projectIdOf(created);
+    const statusBefore = facade.v2ProjectDetail(projectId).project!.status;
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, projectNote: '补充备注' } });
+    const after = facade.v2ProjectDetail(projectId);
+    expect(after.detail!.projectNote).toBe('补充备注');
+    expect(after.project!.status).toBe(statusBefore);
+    // 清空备注。
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, projectNote: null } });
+    expect(facade.v2ProjectDetail(projectId).detail!.projectNote).toBeNull();
   });
 });

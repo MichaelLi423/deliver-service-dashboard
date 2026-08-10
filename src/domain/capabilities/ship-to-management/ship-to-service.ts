@@ -40,9 +40,17 @@ export class ShipToService {
    * 创建不可变 Ship-to（由申请补入 Account ID 完成时创建）。
    * Account ID 全局唯一：与已有 Ship-to 或已完成申请重复时拒绝创建。
    * exceptRequestId 用于申请完成场景：当前申请即将写入同一 Account ID。
+   * originRequestId 为产生该 Ship-to 的申请（5.4：完成申请时回填来源；
+   * 系统外/legacy 直接创建时为 null，不猜测）。
    * 本模块不提供任何 Ship-to 修改方法：创建后不可修改，目的地址变化重新申请。
    */
-  createShipTo(accountId: string, customerName: string, newSiteAddress: string, exceptRequestId?: string): ShipTo {
+  createShipTo(
+    accountId: string,
+    customerName: string,
+    newSiteAddress: string,
+    exceptRequestId?: string,
+    originRequestId?: string | null,
+  ): ShipTo {
     const acc = assertRequiredText(accountId, 'Account ID');
     this.assertAccountIdUnique(acc, exceptRequestId);
     const shipTo: ShipTo = {
@@ -51,6 +59,7 @@ export class ShipToService {
       customerName,
       newSiteAddress,
       createdAt: this.now(),
+      originRequestId: originRequestId === undefined ? null : originRequestId,
     };
     this.shipTos.save(shipTo);
     return shipTo;
@@ -142,8 +151,9 @@ export class ShipToService {
     request.completedAt = this.today();
     this.touch(request, actor);
     this.requests.save(request);
-    // 补入的 Account ID 创建/对应不可变 Ship-to
-    this.createShipTo(acc, request.customerName, request.newSiteAddress, request.id);
+    // 补入的 Account ID 创建/对应不可变 Ship-to；回填来源申请（5.4：删除策略
+    // 凭 ship_tos.origin_request_id 证明该 Ship-to 仅由本申请产生）。
+    this.createShipTo(acc, request.customerName, request.newSiteAddress, request.id, request.id);
     return request;
   }
 

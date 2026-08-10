@@ -298,6 +298,90 @@ describe('不阻塞项目生命周期（4.7 / TBD-07）', () => {
   });
 });
 
+describe('损坏/维修事项删除（5.2）', () => {
+  function repairActivity(ctx: ReturnType<typeof setup>, activityId: string, instrumentIds: string[]) {
+    ctx.activities.save({
+      id: activityId,
+      projectId: 'p1',
+      visitAt: null,
+      accountId: null,
+      usernameSnapshot: null,
+      createdAt: 't',
+      updatedAt: 't',
+    });
+    for (const instrumentId of instrumentIds) {
+      ctx.workFacts.save({
+        id: `wf-${activityId}-${instrumentId}`,
+        activityId,
+        instrumentId,
+        workType: 'repair',
+        status: 'done',
+        startedAt: 't',
+        completedAt: 't',
+        accountId: null,
+        usernameSnapshot: null,
+        createdAt: 't',
+        updatedAt: 't',
+      });
+    }
+  }
+
+  it('确认后删除：事项从 countItems 统计消失，且仅指向该事项的维修上门关联被清理', () => {
+    const ctx = setup(200000n);
+    const i1 = addInstrument(ctx, 'i1');
+    const i2 = addInstrument(ctx, 'i2');
+    const removed = ctx.service.registerItem(i1, partInput({ partNumber: 'P1' }), ACTOR);
+    const kept = ctx.service.registerItem(i2, partInput({ partNumber: 'P2' }), ACTOR);
+    repairActivity(ctx, 'act-1', [i1, i2]);
+    ctx.service.linkRepairActivity('act-1', removed.id, ACTOR);
+    ctx.service.linkRepairActivity('act-1', kept.id, ACTOR);
+
+    ctx.service.deleteItem(removed.id);
+    expect(ctx.items.findById(removed.id)).toBeUndefined();
+    expect(ctx.service.countItems('p1')).toBe(1); // 仅剩 kept
+    // 仅指向被删事项的关联被清理；活动与其他事项的关联保留
+    expect(ctx.links.listByDamageItem(removed.id)).toHaveLength(0);
+    expect(ctx.links.listByDamageItem(kept.id)).toHaveLength(1);
+    expect(ctx.links.listByActivity('act-1')).toHaveLength(1);
+    expect(ctx.activities.findById('act-1')).toBeDefined(); // 活动本身保留
+  });
+
+  it('删除不影响关联仪器与搬迁项目', () => {
+    const ctx = setup(200000n);
+    const projectId = ctx.projectService.createPendingProject().id;
+    ctx.contractReader.set(projectId, 200000n);
+    const i1 = addInstrument(ctx, 'i1', projectId);
+    const item = ctx.service.registerItem(i1, partInput(), ACTOR);
+    ctx.projectService.adjustStatus(projectId, 'executing');
+    const statusBefore = ctx.projects.findById(projectId)!.status;
+    ctx.service.deleteItem(item.id);
+    expect(ctx.instruments.findById(i1)).toBeDefined(); // 仪器保留
+    expect(ctx.projects.findById(projectId)!.status).toBe(statusBefore); // 项目生命周期不变
+  });
+
+  it('已处理/备件已使用的事项同样可确认后删除（spec 新口径：不因状态拒绝）', () => {
+    const ctx = setup(200000n);
+    const i1 = addInstrument(ctx, 'i1');
+    const processed = ctx.service.registerItem(
+      i1,
+      partInput({ partNumber: 'P1', issueStatus: 'processing', partStatus: 'used' }),
+      ACTOR,
+    );
+    expect(processed.issueStatus).toBe('processing');
+    expect(ctx.service.countItems('p1')).toBe(1);
+    ctx.service.deleteItem(processed.id);
+    expect(ctx.items.findById(processed.id)).toBeUndefined();
+    expect(ctx.service.countItems('p1')).toBe(0);
+    expect(ctx.links.all).toHaveLength(0); // 无孤立关联
+  });
+
+  it('未确认（不存在）不删除：记录不存在时拒绝且无副作用', () => {
+    const ctx = setup();
+    expect(() => ctx.service.deleteItem('no-such-item')).toThrow(/损坏\/维修事项不存在/);
+    expect(ctx.items.all).toHaveLength(0);
+  });
+});
+
 describe('维修报表统计口径（4.7）', () => {
   it('按事项记录数量与单条金额统计（仅已使用计入）', () => {
     const ctx = setup(200000n);

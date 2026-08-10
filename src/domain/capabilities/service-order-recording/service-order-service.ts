@@ -153,6 +153,20 @@ export class ServiceOrderService {
   }
 
   /**
+   * 确认后删除一条开单记录（5.2）。
+   * - 删除后该记录不再出现在开单详情、历史浏览与开单量统计（countWorkload）中；
+   * - 删除 MUST NOT 删除或修改其关联搬迁项目（若存在），项目主状态与进单状态
+   *   不变（本服务不调用 lifecycle，亦不触碰项目记录）。
+   */
+  delete(id: string): void {
+    const order = this.orders.findById(id);
+    if (!order) {
+      throw new ValidationError('ORDER_NOT_FOUND', `开单记录不存在: ${id}`);
+    }
+    this.orders.deleteById(id);
+  }
+
+  /**
    * 开单工作量：按唯一服务单号计数（同一服务单关联多名工程师或多次上门仍只计
    * 一次）、按搬迁/认证/单寄备件/PM 四类业务分组（3.9 / 7.4）。
    */

@@ -168,6 +168,52 @@ describe('项目区域（2.7 / 2.4 / TBD-12）', () => {
   });
 });
 
+describe('项目备注 / 暂存信息 / 是否批复（0810 现场反馈）', () => {
+  it('项目备注可空：建档后补充/修改/清空，不触发主状态流转', () => {
+    const { projects, service } = setup();
+    const projectId = service.createPendingProject().id;
+    expect(projects.findById(projectId)!.projectNote).toBeNull();
+    // 补充备注（trim 后保存）。
+    service.setProjectNote(projectId, '  客户要求周末作业  ');
+    expect(projects.findById(projectId)!.projectNote).toBe('客户要求周末作业');
+    expect(projects.findById(projectId)!.status).toBe('pending_entry');
+    // 修改备注。
+    service.setProjectNote(projectId, '改为夜间作业');
+    expect(projects.findById(projectId)!.projectNote).toBe('改为夜间作业');
+    // 清空（显式 null / 空串）。
+    service.setProjectNote(projectId, null);
+    expect(projects.findById(projectId)!.projectNote).toBeNull();
+  });
+
+  it('暂存地址/是否暂存为手工维护执行事实：修改不影响主状态', () => {
+    const { projects, service } = setup();
+    const projectId = service.createPendingProject().id;
+    service.updateTemporaryStorage(projectId, { temporaryStorageAddress: '临时仓 3 号', isTemporaryStorage: true });
+    const project = projects.findById(projectId)!;
+    expect(project.temporaryStorageAddress).toBe('临时仓 3 号');
+    expect(project.isTemporaryStorage).toBe(true);
+    expect(project.status).toBe('pending_entry');
+    // 修改与清空。
+    service.updateTemporaryStorage(projectId, { temporaryStorageAddress: null, isTemporaryStorage: null });
+    const cleared = projects.findById(projectId)!;
+    expect(cleared.temporaryStorageAddress).toBeNull();
+    expect(cleared.isTemporaryStorage).toBeNull(); // 空 = 未填写，而非推断「否」
+    expect(cleared.status).toBe('pending_entry');
+  });
+
+  it('是否批复（managerApproved）为可空 boolean 事实：标量保存不触发主状态', () => {
+    const { projects, service } = setup();
+    const projectId = service.createPendingProject().id;
+    service.setManagerApproved(projectId, true);
+    expect(projects.findById(projectId)!.managerApproved).toBe(true);
+    service.setManagerApproved(projectId, false);
+    expect(projects.findById(projectId)!.managerApproved).toBe(false);
+    service.setManagerApproved(projectId, null);
+    expect(projects.findById(projectId)!.managerApproved).toBeNull();
+    expect(projects.findById(projectId)!.status).toBe('pending_entry');
+  });
+});
+
 describe('未进单与已进单判定事实（TBD-08 视觉区分依据）', () => {
   it('提供已进单判定事实：正式进单后为已进单，待进单项目为未进单', () => {
     const { projects, service } = setup();

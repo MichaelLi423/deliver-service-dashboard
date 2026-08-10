@@ -368,6 +368,55 @@ describe('项目向导选填单号自动创建开单记录（3.10）', () => {
   });
 });
 
+describe('服务单记录删除（5.2）', () => {
+  it('确认后删除：开单记录从列表与开单量统计中消失，其他记录不受影响', () => {
+    const { orderService, orders } = setup();
+    const removed = orderService.recordOrder(
+      { orderType: 'certification', serviceOrderNo: 'ORD-DEL-001', engineer: '工程师甲', customerName: '客户A' },
+      ACTOR,
+    );
+    orderService.recordOrder(
+      { orderType: 'pm', serviceOrderNo: 'ORD-DEL-002', engineer: '工程师乙', customerName: '客户B' },
+      ACTOR,
+    );
+    orderService.delete(removed.id);
+    expect(orders.findById(removed.id)).toBeUndefined();
+    expect(orders.all).toHaveLength(1);
+    const counts = orderService.countWorkload();
+    expect(counts.find((c) => c.orderType === 'certification')).toBeUndefined();
+    expect(counts.find((c) => c.orderType === 'pm')?.count).toBe(1);
+  });
+
+  it('删除不影响关联项目：项目保留，主状态与进单状态不变', () => {
+    const { orderService, projects } = setup();
+    const project = createPendingProject();
+    projects.save(project);
+    const beforeStatus = project.status;
+    const beforeEntryAt = project.entryAt;
+    const order = orderService.recordOrder(
+      {
+        orderType: 'relocation',
+        serviceOrderNo: 'ORD-DEL-003',
+        engineer: '工程师甲',
+        customerName: '客户A',
+        projectId: project.id,
+      },
+      ACTOR,
+    );
+    orderService.delete(order.id);
+    // 项目行保留，主状态与进单状态不被删除改变
+    expect(projects.findById(project.id)).toBeDefined();
+    expect(projects.findById(project.id)!.status).toBe(beforeStatus);
+    expect(projects.findById(project.id)!.entryAt).toBe(beforeEntryAt);
+  });
+
+  it('未确认（不存在）不删除：记录不存在时拒绝且无副作用', () => {
+    const { orderService, orders } = setup();
+    expect(() => orderService.delete('no-such-order')).toThrow(/开单记录不存在/);
+    expect(orders.all).toHaveLength(0);
+  });
+});
+
 describe('开单工作量计数（3.9）', () => {
   it('同一服务单只计一次（服务单号唯一，关联多名工程师/多次上门仍只计一次）', () => {
     const { orders, wizard } = setup();

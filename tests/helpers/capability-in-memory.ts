@@ -118,6 +118,10 @@ export class InMemorySerialAddressUpdateRepository implements SerialAddressUpdat
     this.store.set(update.id, update);
   }
 
+  deleteById(id: string): void {
+    this.store.delete(id);
+  }
+
   listAll(): SerialAddressUpdate[] {
     return [...this.store.values()];
   }
@@ -138,6 +142,10 @@ export class InMemoryDamageRepairItemRepository implements DamageRepairItemRepos
 
   save(item: DamageRepairItem): void {
     this.store.set(item.id, item);
+  }
+
+  deleteById(id: string): void {
+    this.store.delete(id);
   }
 
   listByProject(projectId: string): DamageRepairItem[] {
@@ -172,6 +180,12 @@ export class InMemoryActivityDamageLinkRepository implements ActivityDamageLinkR
 
   listByDamageItem(damageItemId: string): ActivityDamageLink[] {
     return [...this.store.values()].filter((l) => l.damageItemId === damageItemId);
+  }
+
+  deleteByDamageItemId(damageItemId: string): void {
+    for (const link of this.listByDamageItem(damageItemId)) {
+      this.store.delete(link.id);
+    }
   }
 
   get all(): ActivityDamageLink[] {
@@ -228,6 +242,10 @@ export class InMemoryQrRequestRepository implements QrRequestRepository {
 
   save(request: QrRequest): void {
     this.store.set(request.id, request);
+  }
+
+  deleteById(id: string): void {
+    this.store.delete(id);
   }
 
   listAll(): QrRequest[] {

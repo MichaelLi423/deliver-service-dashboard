@@ -199,10 +199,7 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
     try {
       const { db, projects, contracts, service } = openService(dir);
       const { projectId } = prepareEnterableProject(db, contracts, service);
-      service.setPreEntryExecution(projectId, {
-        reason: '客户产线停产急需搬迁',
-        missingItems: '合同金额待定',
-      });
+      service.setPreEntryExecution(projectId, { approved: true });
       service.recordActualInstallDone(projectId, '2026-07-20');
       expect(projects.findById(projectId)!.status).toBe('pending_entry');
 
@@ -327,7 +324,7 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
     try {
       const { db, projects, service } = openService(dir);
       const projectId = service.createPendingProject().id;
-      service.setPreEntryExecution(projectId, { reason: '客户产线停产急需搬迁', missingItems: '合同金额待定' });
+      service.setPreEntryExecution(projectId, { approved: true });
       service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
       expect(projects.findById(projectId)!.status).toBe('pending_entry');
 
@@ -423,7 +420,7 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
     try {
       const { db, projects, contracts, service } = openService(dir);
       const { projectId } = prepareEnterableProject(db, contracts, service);
-      service.setPreEntryExecution(projectId, { reason: '客户产线停产急需搬迁', missingItems: '合同金额待定' });
+      service.setPreEntryExecution(projectId, { approved: true });
       service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
       const advanced = advancer(db).advanceDuePlanVisits('2026-08-07');
       expect(advanced.advanced).toBe(1);
@@ -445,7 +442,7 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
     try {
       const { db, projects, contracts, service } = openService(dir);
       const { projectId } = prepareEnterableProject(db, contracts, service);
-      service.setPreEntryExecution(projectId, { reason: '经理批复：优先安排上门', missingItems: '' });
+      service.setPreEntryExecution(projectId, { approved: true });
       service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
       expect(projects.findById(projectId)!.status).toBe('pending_entry');
 

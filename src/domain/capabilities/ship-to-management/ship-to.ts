@@ -28,6 +28,11 @@ export interface ShipTo {
   customerName: string;
   newSiteAddress: string;
   createdAt: string;
+  /**
+   * 产生该 Ship-to 的申请来源（5.4）：申请完成补入 Account ID 时回填
+   * ship_to_requests(id)；legacy 保持 null、不按 Account ID 猜测。
+   */
+  originRequestId: string | null;
 }
 
 /** Ship-to 申请（线性状态，不支持退回或取消）。 */

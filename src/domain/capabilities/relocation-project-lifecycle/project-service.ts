@@ -88,10 +88,10 @@ export interface ExecutionPreparationInput {
   siteConfirmed?: boolean;
 }
 
-/** 未进单先执行（2.2）：经理批复、原因与缺失项。 */
+/** 未进单先执行（2.2）：以「是否批复」boolean 事实为准，不再收集批复原因/缺失资料（0810）。 */
 export interface PreEntryExecutionInput {
-  reason: string;
-  missingItems: string;
+  /** 是否批复（可空；null = 未填写）。 */
+  approved?: boolean | null;
 }
 
 /** 取消（2.5）：取消日期与原因。 */
@@ -322,7 +322,11 @@ export class ProjectService {
     return result;
   }
 
-  /** 未进单先执行（2.2/TBD-08）：经理批复原因必填；记录批复、原因与缺失项，主状态保持待进单。 */
+  /**
+   * 未进单先执行（2.2/TBD-08 / 0810）：以「是否批复」boolean 事实为准，
+   * 不再收集批复原因/缺失资料（legacy 批复原因列仅保留历史可读，不写入）。
+   * 主状态保持待进单。
+   */
   setPreEntryExecution(projectId: string, input: PreEntryExecutionInput): Project {
     const project = this.requireProject(projectId);
     if (isFormallyEntered(project)) {
@@ -331,14 +335,8 @@ export class ProjectService {
     if (project.status !== 'pending_entry') {
       throw new ValidationError('LABEL_ONLY_PENDING', '未进单先执行标签仅可标记在待进单项目上');
     }
-    // 经理批复原因必填（与向导既有校验同口径：未进单先执行必须记录经理批复原因）。
-    const reason = input.reason.trim();
-    if (reason === '') {
-      throw new ValidationError('PRE_ENTRY_REASON_REQUIRED', '未进单先执行必须填写经理批复原因');
-    }
     project.preEntryExecution = true;
-    project.managerApprovalReason = reason;
-    project.managerApprovalMissing = input.missingItems.trim() === '' ? null : input.missingItems.trim();
+    project.managerApproved = input.approved ?? null;
     project.updatedAt = this.now();
     this.projects.save(project);
     return project;
@@ -512,9 +510,55 @@ export class ProjectService {
   setPlannedInstallDoneAt(projectId: string, at: BusinessDate | null): Project {
     const project = this.requireProject(projectId);
     if (at !== null) {
-      assertValidBusinessDate(at, '计划装机完成日期');
+      assertValidBusinessDate(at, '计划装机日期');
     }
     project.plannedInstallDoneAt = at;
+    project.updatedAt = this.now();
+    this.projects.save(project);
+    return project;
+  }
+
+  // ---- 2.8 项目备注 / 暂存信息 / 是否批复（0810 现场反馈，design D1） ----
+
+  /**
+   * 设置项目备注（0810）：可空，建档后补充/修改不影响主状态。
+   * 去除首尾空白；空串/纯空白/显式 null = 清空。
+   */
+  setProjectNote(projectId: string, note: string | null): Project {
+    const project = this.requireProject(projectId);
+    const trimmed = note?.trim() ?? '';
+    project.projectNote = trimmed === '' ? null : trimmed;
+    project.updatedAt = this.now();
+    this.projects.save(project);
+    return project;
+  }
+
+  /**
+   * 维护暂存信息（0810 / relocation-execution）：暂存地址与是否暂存均为
+   * 负责人手工维护的执行事实，不触发主状态流转、不影响建档或正式进单。
+   * 三态语义：undefined = 未提交保持现值；null = 显式清空（是否暂存 null = 未填写）。
+   */
+  updateTemporaryStorage(
+    projectId: string,
+    input: { temporaryStorageAddress?: string | null; isTemporaryStorage?: boolean | null },
+  ): Project {
+    const project = this.requireProject(projectId);
+    if (input.temporaryStorageAddress !== undefined) {
+      const trimmed = input.temporaryStorageAddress?.trim() ?? '';
+      project.temporaryStorageAddress = trimmed === '' ? null : trimmed;
+    }
+    if (input.isTemporaryStorage !== undefined) {
+      project.isTemporaryStorage = input.isTemporaryStorage;
+    }
+    project.updatedAt = this.now();
+    this.projects.save(project);
+    return project;
+  }
+
+  /** 维护「是否批复」（0810）：managerApproved 替代批复原因/缺失资料；标量保存不触发主状态。 */
+  setManagerApproved(projectId: string, approved: boolean | null): Project {
+    const project = this.requireProject(projectId);
+    project.managerApproved = approved;
     project.updatedAt = this.now();
     this.projects.save(project);
     return project;
@@ -539,7 +583,11 @@ export class ProjectService {
 
   // ---- 3.1 暂定仪器数量 ----
 
-  /** 记录暂定仪器数量（TBD-02）：仅保存数量信息，不生成任何虚拟仪器记录。 */
+  /**
+   * 记录暂定仪器数量（TBD-02 / 6.5）：仅保存数量信息，不生成任何虚拟仪器记录、
+   * 不改变既有逐台仪器事实、不触发主状态流转。
+   * 取值校验遵循既有输入校验规则（不小于 0 的整数），本调整不引入新格式约束。
+   */
   setTemporaryInstrumentCount(projectId: string, count: number): Project {
     const project = this.requireProject(projectId);
     if (!Number.isInteger(count) || count < 0) {
@@ -549,6 +597,15 @@ export class ProjectService {
       );
     }
     project.temporaryInstrumentCount = count;
+    project.updatedAt = this.now();
+    this.projects.save(project);
+    return project;
+  }
+
+  /** 清空暂定仪器数量（「编辑项目资料」留空保存）：只更新标量，不建仪器/不改状态。 */
+  clearTemporaryInstrumentCount(projectId: string): Project {
+    const project = this.requireProject(projectId);
+    project.temporaryInstrumentCount = null;
     project.updatedAt = this.now();
     this.projects.save(project);
     return project;

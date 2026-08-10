@@ -33,6 +33,10 @@ export class InMemoryServiceOrderRepository implements ServiceOrderRepository {
     return [...this.store.values()].filter((o) => o.projectId === projectId);
   }
 
+  deleteById(id: string): void {
+    this.store.delete(id);
+  }
+
   get all(): ServiceOrder[] {
     return [...this.store.values()];
   }

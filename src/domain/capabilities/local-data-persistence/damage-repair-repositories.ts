@@ -92,6 +92,10 @@ export class SqliteDamageRepairItemRepository implements DamageRepairItemReposit
     >[];
     return rows.map(rowToDamageRepairItem);
   }
+
+  deleteById(id: string): void {
+    this.db.prepare('DELETE FROM damage_repair_items WHERE id = ?').run(id);
+  }
 }
 
 export class SqliteActivityDamageLinkRepository implements ActivityDamageLinkRepository {
@@ -138,6 +142,10 @@ export class SqliteActivityDamageLinkRepository implements ActivityDamageLinkRep
       .prepare('SELECT * FROM activity_damage_links WHERE damage_item_id = ?')
       .all(damageItemId) as Record<string, unknown>[];
     return rows.map(rowToActivityDamageLink);
+  }
+
+  deleteByDamageItemId(damageItemId: string): void {
+    this.db.prepare('DELETE FROM activity_damage_links WHERE damage_item_id = ?').run(damageItemId);
   }
 }
 

@@ -104,11 +104,69 @@ describe('重复申请保留历史（4.9）', () => {
     expect(requests.all).toHaveLength(2);
     expect(requests.findById(first.id)?.id).toBe(first.id);
     expect(requests.findById(second.id)?.id).toBe(second.id);
-    // 无覆盖/删除能力
+    // 不覆盖、不合并：无 overwrite/merge 能力；历史仅在负责人确认后按删除规则移除
     const proto = Object.getPrototypeOf(service) as Record<string, unknown>;
-    for (const name of ['deleteRequest', 'overwriteRequest']) {
+    for (const name of ['overwriteRequest', 'mergeRequest']) {
       expect(name in proto).toBe(false);
     }
+  });
+});
+
+describe('二维码申请记录删除（5.2 / 6.2）', () => {
+  it('确认后删除：从申请历史与工作量统计中消失', () => {
+    const { service, requests } = setup();
+    const keep = service.createRequest({ applicant: '负责人甲', types: ['A', 'B'] }, ACTOR);
+    const removed = service.createRequest({ applicant: '负责人甲', types: ['A'] }, ACTOR);
+    expect(requests.all).toHaveLength(2);
+    service.delete(removed.id);
+    expect(requests.all).toHaveLength(1);
+    expect(requests.findById(removed.id)).toBeUndefined();
+    expect(requests.findById(keep.id)).toBeDefined();
+    // 工作量只计剩余申请：keep 的 A、B 各一次
+    const workload = service.countWorkloadByType();
+    expect(workload.find((w) => w.typeCode === 'A')?.count).toBe(1);
+    expect(workload.find((w) => w.typeCode === 'B')?.count).toBe(1);
+  });
+
+  it('删除不影响其他申请记录与各自的独立计数', () => {
+    const { service, requests } = setup();
+    const r1 = service.createRequest({ applicant: '负责人甲', types: ['A'] }, ACTOR);
+    const r2 = service.createRequest({ applicant: '负责人甲', types: ['A'] }, ACTOR);
+    service.delete(r1.id);
+    expect(requests.all).toHaveLength(1);
+    expect(service.countWorkloadByType().find((w) => w.typeCode === 'A')?.count).toBe(1);
+    expect(service.listRequests()[0].id).toBe(r2.id);
+  });
+
+  it('未确认（不存在）不删除：记录不存在时拒绝且无副作用', () => {
+    const { service, requests } = setup();
+    expect(() => service.delete('no-such-request')).toThrow(/二维码申请记录不存在/);
+    expect(requests.all).toHaveLength(0);
+  });
+
+  it('删除不影响仪器"二维码是否申请"手工标记', () => {
+    const { service } = setup();
+    const instruments = new InMemoryInstrumentRepository();
+    instruments.save({
+      id: 'i1',
+      projectId: 'p1',
+      batchId: null,
+      name: '仪器A',
+      model: null,
+      manufacturer: null,
+      serviceLevel: null,
+      serialNo: 'SN-100',
+      ups: false,
+      qrRequested: true, // 手工标记为是
+      destinationShipToId: null,
+      accountId: null,
+      usernameSnapshot: null,
+      createdAt: 't',
+      updatedAt: 't',
+    });
+    const request = service.createRequest({ applicant: '负责人甲', types: ['A'] }, ACTOR);
+    service.delete(request.id);
+    expect(instruments.findById('i1')!.qrRequested).toBe(true); // 手工标记保持不变
   });
 });
 

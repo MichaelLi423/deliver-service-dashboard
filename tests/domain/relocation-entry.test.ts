@@ -211,3 +211,31 @@ describe('正式进单（2.1）', () => {
     ).toThrow(ValidationError);
   });
 });
+
+describe('未进单先执行以「是否批复」boolean 事实为准（0810）', () => {
+  it('不再要求批复原因：managerApproved 可空，标签与主状态待进单仍生效', () => {
+    const { projects, service } = setup();
+    const projectId = service.createPendingProject().id;
+    // 0810：setPreEntryExecution 不再收集批复原因/缺失资料，批复原因列不再写入。
+    const project = service.setPreEntryExecution(projectId, { approved: null });
+    expect(project.preEntryExecution).toBe(true);
+    expect(project.managerApproved).toBeNull();
+    expect(project.managerApprovalReason).toBeNull();
+    expect(project.managerApprovalMissing).toBeNull();
+    expect(projects.findById(projectId)!.status).toBe('pending_entry');
+  });
+
+  it('记录是否批复 boolean 事实：true/false 均保存，不影响正式进单', () => {
+    const { contracts, projects, service } = setup();
+    const { projectId } = prepareEnterableProject(service);
+    service.setPreEntryExecution(projectId, { approved: false });
+    expect(projects.findById(projectId)!.managerApproved).toBe(false);
+
+    // 正式进单在原项目上完成、标签解除，managerApproved 事实保留。
+    service.formalEntry(projectId, { ecc: 'ECC-001' });
+    const entered = projects.findById(projectId)!;
+    expect(entered.preEntryExecution).toBe(false);
+    expect(entered.managerApproved).toBe(false);
+    expect(contracts.findByProjectId(projectId)?.ecc).toBe('ECC-001');
+  });
+});

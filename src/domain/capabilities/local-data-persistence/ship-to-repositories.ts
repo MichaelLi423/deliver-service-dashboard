@@ -34,9 +34,18 @@ export class SqliteShipToRepository implements ShipToRepository {
     try {
       this.db
         .prepare(
-          'INSERT INTO ship_tos (id, account_id, customer_name, new_site_address, created_at) VALUES (?,?,?,?,?)',
+          `INSERT INTO ship_tos (
+             id, account_id, customer_name, new_site_address, created_at, origin_request_id
+           ) VALUES (?,?,?,?,?,?)`,
         )
-        .run(shipTo.id, shipTo.accountId, shipTo.customerName, shipTo.newSiteAddress, shipTo.createdAt);
+        .run(
+          shipTo.id,
+          shipTo.accountId,
+          shipTo.customerName,
+          shipTo.newSiteAddress,
+          shipTo.createdAt,
+          shipTo.originRequestId,
+        );
     } catch (err) {
       throw mapConstraintError(err, `Ship-to 保存失败（Account ID 全局唯一且创建后不可修改）`);
     }
@@ -158,6 +167,7 @@ function rowToShipTo(row: Record<string, unknown>): ShipTo {
     customerName: String(row.customer_name),
     newSiteAddress: String(row.new_site_address),
     createdAt: String(row.created_at),
+    originRequestId: row.origin_request_id === null || row.origin_request_id === undefined ? null : String(row.origin_request_id),
   };
 }
 

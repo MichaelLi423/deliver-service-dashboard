@@ -19,7 +19,7 @@ function project(index: number): WorkbenchProjectRow {
   return {
     id: `p-${index}`, tempNo: `TMP-${String(index).padStart(6, '0')}`, ecc: `ECC-${String(index).padStart(6, '0')}`,
     customerName: `客户 ${index}`, status: index % 2 ? 'executing' : 'pending_entry', formallyEntered: index % 2 === 1,
-    preEntryExecution: index % 2 === 0, region: index % 2 ? '华东' : '华北', entryAt: null,
+    preEntryExecution: index % 2 === 0, region: index % 2 ? '华东' : '华北', regionNeedsAdjustment: true, entryAt: null,
     reminderAt: index < 3 ? '2026-08-08' : null, reminderNote: index < 3 ? `提醒 ${index}` : null,
     reminderDueClass: index < 3 ? 'today' : null, finalAmount: '100000.00', invoicedAmount: '40000.00', contractAmount: '110000.00',
     counts: { batches: 1, instruments: 1, activities: 1, orders: 1, repairs: 0 }, nonBlocking: { pendingShipTo: 0, qrUnmarked: 0, repairs: 0 },
@@ -68,9 +68,11 @@ function detailOf(projectRow: WorkbenchProjectRow | null): WorkbenchV2ProjectDet
     businessRevision: 1,
     project: projectRow,
     detail: {
-      managerApprovalReason: null, managerApprovalMissing: null, oldSiteContact: null, newSiteContact: null,
+      managerApprovalReason: null, managerApprovalMissing: null, managerApproved: null,
+      projectNote: null, temporaryStorageAddress: null, isTemporaryStorage: null,
+      oldSiteContact: null, newSiteContact: null,
       oldSiteAddress: null, newSiteAddress: null, contractStartDate: null, contractEndDate: null,
-      planVisitAt: null, planTransportAt: null, siteConfirmed: false, plannedInstallDoneAt: null, actualInstallDoneAt: null,
+      planVisitAt: null, planTransportAt: null, siteConfirmed: false, plannedInstallAt: null, plannedInstallDoneAt: null, actualInstallDoneAt: null,
       acceptanceReport: false, acceptanceReportDate: null, cancelledAt: null, cancelReason: null,
       temporaryInstrumentCount: null, createdAt: '2026-08-01T00:00:00Z', customerId: 'c1', contractId: 'ct1',
     },
@@ -84,7 +86,7 @@ function mockApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
     getSession: vi.fn().mockResolvedValue({ accountId: 'a1', username: '负责人' }),
     v2Overview: vi.fn().mockResolvedValue(overview),
     v2ProjectPage: vi.fn().mockImplementation((request: { cursor?: string | null }) => Promise.resolve(request.cursor ? page(secondProjects, null) : page())),
-    v2ProjectDetail: vi.fn().mockImplementation((projectId: string) => Promise.resolve({ businessRevision: 1, project: [...firstProjects, ...secondProjects].find((row) => row.id === projectId) ?? null, detail: { managerApprovalReason: null, managerApprovalMissing: null, oldSiteContact: null, newSiteContact: null, oldSiteAddress: null, newSiteAddress: null, contractStartDate: null, contractEndDate: null, planVisitAt: null, planTransportAt: null, siteConfirmed: false, plannedInstallDoneAt: null, actualInstallDoneAt: null, acceptanceReport: false, acceptanceReportDate: null, cancelledAt: null, cancelReason: null, temporaryInstrumentCount: null, createdAt: '2026-08-01T00:00:00Z', customerId: 'c1', contractId: 'ct1' } })),
+    v2ProjectDetail: vi.fn().mockImplementation((projectId: string) => Promise.resolve({ businessRevision: 1, project: [...firstProjects, ...secondProjects].find((row) => row.id === projectId) ?? null, detail: { managerApprovalReason: null, managerApprovalMissing: null, managerApproved: null, projectNote: null, temporaryStorageAddress: null, isTemporaryStorage: null, oldSiteContact: null, newSiteContact: null, oldSiteAddress: null, newSiteAddress: null, contractStartDate: null, contractEndDate: null, planVisitAt: null, planTransportAt: null, siteConfirmed: false, plannedInstallAt: null, plannedInstallDoneAt: null, actualInstallDoneAt: null, acceptanceReport: false, acceptanceReportDate: null, cancelledAt: null, cancelReason: null, temporaryInstrumentCount: null, createdAt: '2026-08-01T00:00:00Z', customerId: 'c1', contractId: 'ct1' } })),
     v2SectionPage: vi.fn().mockImplementation((request: { kind: WorkbenchV2SectionPageDto['kind']; projectId: string }) => Promise.resolve(section(request.kind, request.projectId))),
     v2HistoryPage: vi.fn().mockImplementation((request: { kind: WorkbenchV2HistoryPageDto['kind'] }) => Promise.resolve({
       businessRevision: 1, kind: request.kind, total: 1, nextCursor: null, limit: 50,

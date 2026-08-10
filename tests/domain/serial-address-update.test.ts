@@ -129,6 +129,85 @@ describe('不修改不可变 Ship-to（4.3）', () => {
   });
 });
 
+describe('序列号地址更新记录删除（5.2）', () => {
+  it('确认后删除：更新事实从列表与按更新日期计数统计中消失', () => {
+    const ctx = setup();
+    const instrumentId = addInstrument(ctx);
+    const first = ctx.service.register(
+      instrumentId,
+      { ...BASE, newSiteAddress: '新址A', updatedAt: '2026-07-01' },
+      ACTOR,
+    );
+    ctx.service.register(
+      instrumentId,
+      { ...BASE, newSiteAddress: '新址B', updatedAt: '2026-08-01' },
+      ACTOR,
+    );
+    expect(ctx.service.list()).toHaveLength(2);
+    ctx.service.delete(first.id);
+    expect(ctx.service.list()).toHaveLength(1);
+    expect(ctx.service.list().every((u) => u.id !== first.id)).toBe(true);
+    expect(ctx.service.countByMonth()).toEqual([{ month: '2026-08', count: 1 }]);
+  });
+
+  it('未确认（不存在）不删除：记录不存在时拒绝且无副作用', () => {
+    const ctx = setup();
+    expect(() => ctx.service.delete('no-such-update')).toThrow(/序列号地址更新记录不存在/);
+    expect(ctx.updates.all).toHaveLength(0);
+  });
+
+  it('删除较新更新事实后，仪器实际关联新址回退到剩余最近更新事实', () => {
+    const ctx = setup();
+    const instrumentId = addInstrument(ctx);
+    ctx.service.register(
+      instrumentId,
+      { ...BASE, newSiteAddress: '旧地址', accountId: 'ACC-001', updatedAt: '2026-07-01' },
+      ACTOR,
+    );
+    const newer = ctx.service.register(
+      instrumentId,
+      { ...BASE, newSiteAddress: '较新地址', accountId: 'ACC-002', updatedAt: '2026-08-01' },
+      ACTOR,
+    );
+    expect(ctx.service.getActualAddress(instrumentId)!.newSiteAddress).toBe('较新地址');
+    // 删除较新一条 → 实际关联回退到剩余最近更新事实，不因删除而失去全部地址表达
+    ctx.service.delete(newer.id);
+    const actual = ctx.service.getActualAddress(instrumentId);
+    expect(actual).not.toBeNull();
+    expect(actual!.newSiteAddress).toBe('旧地址');
+    expect(actual!.accountId).toBe('ACC-001');
+  });
+
+  it('删除更新事实不修改或删除关联仪器（与 Ship-to 主数据无关）', () => {
+    const ctx = setup();
+    const instrumentId = addInstrument(ctx);
+    const update = ctx.service.register(instrumentId, BASE, ACTOR);
+    ctx.service.delete(update.id);
+    expect(ctx.instruments.findById(instrumentId)).toBeDefined(); // 仪器保留
+    expect(ctx.instruments.findById(instrumentId)!.destinationShipToId).toBeNull();
+  });
+
+  it('同一仪器多事实按更新日期+createdAt+id 稳定排序：同日登记仍确定唯一最近事实', () => {
+    const ctx = setup();
+    const instrumentId = addInstrument(ctx);
+    // 同一更新日期、同一 createdAt（FixedClock）：仅 id 不同 → 稳定排序由 id 决胜
+    const a = ctx.service.register(
+      instrumentId,
+      { ...BASE, newSiteAddress: '地址A', accountId: 'ACC-A', updatedAt: '2026-08-01' },
+      ACTOR,
+    );
+    const b = ctx.service.register(
+      instrumentId,
+      { ...BASE, newSiteAddress: '地址B', accountId: 'ACC-B', updatedAt: '2026-08-01' },
+      ACTOR,
+    );
+    const expectedLatest = a.id > b.id ? a : b;
+    expect(ctx.service.getActualAddress(instrumentId)!.id).toBe(expectedLatest.id);
+    // 再次计算结果稳定（不随遍历顺序变化）
+    expect(ctx.service.getActualAddress(instrumentId)!.id).toBe(expectedLatest.id);
+  });
+});
+
 describe('更新时间必填、默认当前、可补录（4.3）', () => {
   it('创建时默认当前时间', () => {
     const ctx = setup();

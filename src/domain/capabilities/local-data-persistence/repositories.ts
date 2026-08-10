@@ -83,7 +83,8 @@ export class SqliteProjectRepository implements ProjectRepository {
         .prepare(
           `INSERT INTO projects (
              id, temp_no, status, pre_entry_execution, scope_confirmed,
-             manager_approval_reason, manager_approval_missing,
+             manager_approval_reason, manager_approval_missing, manager_approved,
+             project_note, temporary_storage_address, is_temporary_storage,
              customer_id, contract_id, entry_at,
              region, old_site_contact, new_site_contact, old_site_address, new_site_address,
              contract_start_date, contract_end_date, plan_visit_at, plan_transport_at,
@@ -92,12 +93,16 @@ export class SqliteProjectRepository implements ProjectRepository {
              cancelled_at, cancel_reason, reminder_at, reminder_note,
              reminder_account_id, reminder_username_snapshot, temporary_instrument_count,
              created_at, updated_at
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET
              status=excluded.status, pre_entry_execution=excluded.pre_entry_execution,
              scope_confirmed=excluded.scope_confirmed,
              manager_approval_reason=excluded.manager_approval_reason,
              manager_approval_missing=excluded.manager_approval_missing,
+             manager_approved=excluded.manager_approved,
+             project_note=excluded.project_note,
+             temporary_storage_address=excluded.temporary_storage_address,
+             is_temporary_storage=excluded.is_temporary_storage,
              customer_id=excluded.customer_id, contract_id=excluded.contract_id,
              entry_at=excluded.entry_at, region=excluded.region,
              old_site_contact=excluded.old_site_contact, new_site_contact=excluded.new_site_contact,
@@ -123,6 +128,10 @@ export class SqliteProjectRepository implements ProjectRepository {
           project.scopeConfirmed ? 1 : 0,
           project.managerApprovalReason,
           project.managerApprovalMissing,
+          project.managerApproved === null ? null : project.managerApproved ? 1 : 0,
+          project.projectNote,
+          project.temporaryStorageAddress,
+          project.isTemporaryStorage === null ? null : project.isTemporaryStorage ? 1 : 0,
           project.customerId,
           project.contractId,
           project.entryAt,
@@ -333,6 +342,12 @@ export function toBool(value: unknown): boolean {
   return value === 1 || value === '1';
 }
 
+/** 可空 INTEGER 布尔（v15 可空列：1/true → true、0/false → false、null → null）。 */
+export function toNullableBool(value: unknown): boolean | null {
+  if (value === null || value === undefined) return null;
+  return value === 1 || value === '1';
+}
+
 function rowToProject(row: Record<string, unknown>): Project {
   return {
     id: String(row.id),
@@ -344,6 +359,11 @@ function rowToProject(row: Record<string, unknown>): Project {
       row.manager_approval_reason === null ? null : String(row.manager_approval_reason),
     managerApprovalMissing:
       row.manager_approval_missing === null ? null : String(row.manager_approval_missing),
+    managerApproved: toNullableBool(row.manager_approved),
+    projectNote: row.project_note === null ? null : String(row.project_note),
+    temporaryStorageAddress:
+      row.temporary_storage_address === null ? null : String(row.temporary_storage_address),
+    isTemporaryStorage: toNullableBool(row.is_temporary_storage),
     customerId: row.customer_id === null ? null : String(row.customer_id),
     contractId: row.contract_id === null ? null : String(row.contract_id),
     entryAt: row.entry_at === null ? null : String(row.entry_at),

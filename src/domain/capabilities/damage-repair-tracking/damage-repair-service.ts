@@ -247,6 +247,23 @@ export class DamageRepairService {
     return this.links.listByDamageItem(damageItemId);
   }
 
+  /**
+   * 确认后删除一条损坏/维修事项（5.2）。
+   * - 按 TBD-24 引用关系原子清理仅指向该事项的维修上门活动关联
+   *   （activity_damage_links），MUST NOT 删除或修改维修上门活动本身，
+   *   其他事项与该活动的关联不受影响；不因存在关联直接拒绝；
+   * - 关联仪器与搬迁项目 MUST NOT 被删除或修改，项目生命周期/状态不变；
+   * - 删除后该事项不再出现在事项详情、历史浏览与维修报表统计中
+   *   （countItems / usedPartUsdCents / contractRatioHundredths 由剩余事项派生）；
+   * - 本模块无其他真正下游不可安全删除的事实（活动经 work_facts 独立存在、
+   *   维修费用仅由事项记录派生），故不做依赖拒绝。
+   */
+  deleteItem(id: string): void {
+    this.requireItem(id);
+    this.links.deleteByDamageItemId(id);
+    this.items.deleteById(id);
+  }
+
   // ---- 4.7 维修报表统计口径（本能力统计函数，供 operational-reporting 消费） ----
 
   /** 事项记录数量：按损坏/维修事项计数。 */

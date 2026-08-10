@@ -111,6 +111,44 @@ describe('ship-to-management SQLite 集成（4.11）', () => {
     }
   });
 
+  it('完成申请生成的 Ship-to 回填 origin_request_id 并持久化（5.4 删除策略来源证明）', () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      const request = ctx.shipToService.createRequest({ customerName: '华东医药', newSiteAddress: '新址A' }, ACTOR);
+      ctx.shipToService.submit(request.id, ACTOR);
+      ctx.shipToService.complete(request.id, 'ACC-700', ACTOR);
+
+      // 落库即可查：Ship-to 来源指向产生它的申请
+      const persisted = ctx.db
+        .prepare('SELECT origin_request_id FROM ship_tos WHERE account_id = ?')
+        .get('ACC-700') as { origin_request_id: string | null };
+      expect(persisted.origin_request_id).toBe(request.id);
+
+      closeDatabase(ctx.db);
+      const reopened = openService(dir);
+      expect(reopened.shipTos.findByAccountId('ACC-700')?.originRequestId).toBe(request.id);
+      closeDatabase(reopened.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('直接创建（无申请来源）的 Ship-to origin_request_id 保持 null（legacy 不猜测）', () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      ctx.shipToService.createShipTo('ACC-800', '华北医药', '新址B');
+      const row = ctx.db
+        .prepare('SELECT origin_request_id FROM ship_tos WHERE account_id = ?')
+        .get('ACC-800') as { origin_request_id: string | null };
+      expect(row.origin_request_id).toBeNull();
+      closeDatabase(ctx.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
   it('Account ID 全局唯一：数据库唯一索引兜底', () => {
     const dir = makeTempDir();
     try {
@@ -163,6 +201,33 @@ describe('serial-address-update SQLite 集成（4.12）', () => {
       expect(row.actor_account_id).toBe('account-1');
       expect(row.username_snapshot).toBe('负责人甲');
       closeDatabase(reopened.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('确认删除更新事实：列表/统计消失，删除最新后实际关联回退剩余最近事实（5.2）', () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      ctx.db
+        .prepare('INSERT INTO projects (id, temp_no, status, created_at, updated_at) VALUES (?,?,?,?,?)')
+        .run('p-1', 'TP-1', 'pending_execution', 't', 't');
+      ctx.db
+        .prepare('INSERT INTO instruments (id, project_id, name, serial_no, created_at, updated_at) VALUES (?,?,?,?,?,?)')
+        .run('i-1', 'p-1', '仪器A', 'SN-100', 't', 't');
+
+      ctx.serialService.register('i-1', { customerName: '华东医药', newSiteAddress: '旧地址', serialNo: 'SN-100', accountId: 'ACC-300', updatedAt: '2026-07-01' }, ACTOR);
+      const newer = ctx.serialService.register('i-1', { customerName: '华东医药', newSiteAddress: '较新地址', serialNo: 'SN-100', accountId: 'ACC-301', updatedAt: '2026-08-01' }, ACTOR);
+
+      ctx.serialService.delete(newer.id);
+      expect(ctx.serialService.countByMonth()).toEqual([{ month: '2026-07', count: 1 }]);
+      const actual = ctx.serialService.getActualAddress('i-1');
+      expect(actual).not.toBeNull();
+      expect(actual!.newSiteAddress).toBe('旧地址'); // 回退剩余最近事实
+      // 仪器记录未被删除/修改
+      expect(ctx.db.prepare('SELECT COUNT(*) AS n FROM instruments WHERE id = ?').get('i-1')!.n).toBe(1);
+      closeDatabase(ctx.db);
     } finally {
       cleanupTempDir(dir);
     }

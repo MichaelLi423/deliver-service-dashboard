@@ -22,9 +22,17 @@ export interface Project {
   preEntryExecution: boolean;
   /** 搬迁范围是否明确（向导搬迁范围步骤至少一台仪器后标记；正式进单前必填）。 */
   scopeConfirmed: boolean;
-  /** 未进单先执行：经理批复原因与缺失项（TBD-08）。 */
+  /** 未进单先执行：经理批复原因与缺失项（legacy 只读历史字段，新流程不再采集，TBD-08/0810）。 */
   managerApprovalReason: string | null;
   managerApprovalMissing: string | null;
+  /** 是否批复（v15 新增可空 boolean 事实）：managerApproved 替代批复原因/缺失资料。 */
+  managerApproved: boolean | null;
+  /** 项目备注（可空；建档后补充/修改不影响主状态）。 */
+  projectNote: string | null;
+  /** 暂存地址（可空；手工维护执行事实，不触发主状态流转）。 */
+  temporaryStorageAddress: string | null;
+  /** 是否暂存（可空；空表示「未填写」而非推断「否」，不触发主状态流转）。 */
+  isTemporaryStorage: boolean | null;
   /** 关联客户（内部 ID）；待进单阶段可为空。 */
   customerId: string | null;
   /** 关联合同（内部 ID）；待进单阶段合同可空，正式进单前必须补齐。 */
@@ -99,6 +107,10 @@ export function createPendingProject(input: CreateProjectInput = {}): Project {
     scopeConfirmed: false,
     managerApprovalReason: null,
     managerApprovalMissing: null,
+    managerApproved: null,
+    projectNote: null,
+    temporaryStorageAddress: null,
+    isTemporaryStorage: null,
     customerId: input.customerId ?? null,
     contractId: input.contractId ?? null,
     entryAt: null,

@@ -158,7 +158,7 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
         intent: 'pre_entry_execution',
         customerName: '补齐资料客户',
         region: 'South',
-        approvalReason: '客户进度紧急，经理已批复优先执行',
+        managerApproved: true,
       }),
     });
     return { facade, projectId: created.changed!.projectId! };
@@ -264,7 +264,7 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     const facade = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }));
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', customerName: '补数量客户', region: 'North', approvalReason: '先执行，搬迁范围后补' }),
+      payload: wizard({ intent: 'pre_entry_execution', customerName: '补数量客户', region: 'North', managerApproved: true }),
     });
     const projectId = created.changed!.projectId!;
     // 模拟"搬迁范围未明确"的存量/导入项目：范围未确认、暂定数量为空。
@@ -589,7 +589,7 @@ describe('服务单快速动作 customerName 从项目客户读取 + 物流成�
       password: 'password1',
     });
     const facade2 = new WorkbenchFacade(db2, () => ({ accountId: account.id, username: account.username }));
-    const created = facade2.v2Mutate({ op: 'create_project', payload: wizard({ intent: 'pre_entry_execution', customerName: '无客户关联', region: 'North', approvalReason: '测试' }) });
+    const created = facade2.v2Mutate({ op: 'create_project', payload: wizard({ intent: 'pre_entry_execution', customerName: '无客户关联', region: 'North', managerApproved: true }) });
     const pid2 = created.changed!.projectId!;
     db2.prepare('UPDATE projects SET customer_id = NULL WHERE id = ?').run(pid2);
     expect(() =>

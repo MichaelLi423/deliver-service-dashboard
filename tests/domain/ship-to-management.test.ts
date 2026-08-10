@@ -153,6 +153,23 @@ describe('Account ID 创建时可空、外部完成后补入并进入已完成�
   });
 });
 
+describe('完成申请生成 Ship-to 时回填来源 origin_request_id（5.4）', () => {
+  it('申请完成补入 Account ID 创建的不可变 Ship-to 记录该申请为来源', () => {
+    const { shipTos, service } = setup();
+    const request = service.createRequest({ customerName: '华东医药', newSiteAddress: '新址A' }, ACTOR);
+    service.submit(request.id, ACTOR);
+    service.complete(request.id, 'ACC-500', ACTOR);
+    const shipTo = shipTos.findByAccountId('ACC-500')!;
+    expect(shipTo.originRequestId).toBe(request.id);
+  });
+
+  it('系统外直接创建（无申请来源）的 Ship-to 来源为 null，不猜测', () => {
+    const { shipTos, service } = setup();
+    service.createShipTo('ACC-600', '华北医药', '新址B');
+    expect(shipTos.findByAccountId('ACC-600')!.originRequestId).toBeNull();
+  });
+});
+
 describe('申请线性状态与首次提交工作量（4.2 / TBD-04）', () => {
   it('首次实际提交计一次工作量，待提交草稿不计', () => {
     const { service } = setup();
@@ -223,8 +240,8 @@ describe('批次与项目仅汇总展示所涉 Ship-to（4.2）', () => {
 
   it('批次仅汇总展示所涉 Ship-to，不为批次维护独立唯一地址', () => {
     const shipTos = new InMemoryShipToRepository();
-    shipTos.save({ id: 's1', accountId: 'ACC-A', customerName: '客户A', newSiteAddress: '新址A', createdAt: 't' });
-    shipTos.save({ id: 's2', accountId: 'ACC-B', customerName: '客户A', newSiteAddress: '新址B', createdAt: 't' });
+    shipTos.save({ id: 's1', accountId: 'ACC-A', customerName: '客户A', newSiteAddress: '新址A', createdAt: 't', originRequestId: null });
+    shipTos.save({ id: 's2', accountId: 'ACC-B', customerName: '客户A', newSiteAddress: '新址B', createdAt: 't', originRequestId: null });
     const service = new ShipToService(
       shipTos,
       new InMemoryShipToRequestRepository(),
@@ -239,8 +256,8 @@ describe('批次与项目仅汇总展示所涉 Ship-to（4.2）', () => {
 
   it('项目仅汇总展示所涉 Ship-to，不为项目维护独立唯一地址', () => {
     const shipTos = new InMemoryShipToRepository();
-    shipTos.save({ id: 's1', accountId: 'ACC-A', customerName: '客户A', newSiteAddress: '新址A', createdAt: 't' });
-    shipTos.save({ id: 's2', accountId: 'ACC-B', customerName: '客户A', newSiteAddress: '新址B', createdAt: 't' });
+    shipTos.save({ id: 's1', accountId: 'ACC-A', customerName: '客户A', newSiteAddress: '新址A', createdAt: 't', originRequestId: null });
+    shipTos.save({ id: 's2', accountId: 'ACC-B', customerName: '客户A', newSiteAddress: '新址B', createdAt: 't', originRequestId: null });
     const service = new ShipToService(
       shipTos,
       new InMemoryShipToRequestRepository(),

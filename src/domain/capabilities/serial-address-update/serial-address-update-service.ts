@@ -88,11 +88,23 @@ export class SerialAddressUpdateService {
   }
 
   /**
-   * 仪器实际关联新址：以最近一条更新事实为准（按更新时间，同时刻按登记先后）。
-   * 未登记更新事实返回 null（不视为已关联新址；项目级新址不替代）。
+   * 仪器实际关联新址：以最近一条更新事实为准（按更新时间，同时刻按登记先后，
+   * 再按 id 稳定排序）。未登记更新事实返回 null（不视为已关联新址；项目级新址不替代）。
    */
   getActualAddress(instrumentId: string): SerialAddressUpdate | null {
     return this.latestByInstrument(instrumentId);
+  }
+
+  /**
+   * 确认后删除一条序列号地址更新事实（5.2）。
+   * - 只删除该事实记录，MUST NOT 删除/修改关联仪器、项目或 Account ID 对应的 Ship-to；
+   * - 删除后该仪器实际关联新址以剩余最近更新事实为准（getActualAddress 读侧派生）。
+   */
+  delete(id: string): void {
+    if (!this.updates.findById(id)) {
+      throw new ValidationError('SERIAL_ADDRESS_UPDATE_NOT_FOUND', `序列号地址更新记录不存在: ${id}`);
+    }
+    this.updates.deleteById(id);
   }
 
   /** 更新事实列表与筛选：按客户、新址地址、序列号、Account ID 或更新时间。 */
@@ -133,15 +145,18 @@ export class SerialAddressUpdateService {
     let latest: SerialAddressUpdate | null = null;
     for (const row of this.updates.listAll()) {
       if (row.instrumentId !== instrumentId) continue;
-      if (
-        latest === null ||
-        row.updatedAt > latest.updatedAt ||
-        (row.updatedAt === latest.updatedAt && row.createdAt > latest.createdAt)
-      ) {
+      if (latest === null || this.isNewerThan(row, latest)) {
         latest = row;
       }
     }
     return latest;
+  }
+
+  /** 同一仪器多条更新事实的稳定排序：更新日期 → createdAt → id。 */
+  private isNewerThan(a: SerialAddressUpdate, b: SerialAddressUpdate): boolean {
+    if (a.updatedAt !== b.updatedAt) return a.updatedAt > b.updatedAt;
+    if (a.createdAt !== b.createdAt) return a.createdAt > b.createdAt;
+    return a.id > b.id;
   }
 
   private now(): string {

@@ -24,7 +24,7 @@
 - [x] 2.2 新增迁移测试（tests/persistence/migration-v15.test.ts）：全新库引导到 v15（迁移序列 1..15、user_version=15、新列已建）；v14 存量库升级保留既有业务数据、新列以空/兼容默认值初始化；region 历史文本原样保留；注入失败保留迁移前数据与可恢复状态（备份）；`PRAGMA foreign_key_check` 通过；完成态：focused vitest 全绿。
 - [x] 2.3 将孤立财务事实诊断接入迁移/启动路径：迁移执行或启动时诊断（仅计数：孤立合同、孤立掉票/最终可确认金额事实、断裂 project/contract 链接、foreign_key_check），给出治理清理路径提示，MUST NOT 静默删除财务记录；掉票记录仍仅可撤销、不物理删除；因非空项目 FK 且治理清理保留原行，结构性外键违规以 unresolved count 持续报告、不阻断迁移，不宣称 foreign_key_check 归零；完成态：诊断输出 counts、无客户值打印，focused 测试通过（与 4.3/4.4 治理路径衔接）。
 - [ ] 2.4 实现区域五枚举领域写边界与 legacy "待调整"策略：新建/编辑项目区域去除首尾空白后仅允许 East、South、West、Central、North，非枚举值拒绝保存并提示（relocation-project-lifecycle 与 workbench-interface 均不提供自由输入）；存量非枚举 region 文本保留原值、读模型/报表标注为"待调整"、不猜测映射、不置空不丢弃；完成态：domain 单测覆盖非枚举拒绝/trim 校验/存量保留"待调整"分组。
-- [ ] 2.5 更新 IPC/DTO 类型与接线（src/shared/ipc.ts、src/preload/index.ts、workbench-facade 相关 DTO）：新增/调整项目备注、暂存地址、是否暂存、计划装机日期（更名）、区域枚举类型、是否批复（替换批复原因）；建档输入类型移除最终可确认金额、服务单号、工程师、开单备注、缺失资料（既有 WIZARD_REJECTION_CODES 废弃字段有值即拒绝规则保持）；完成态：`npm run typecheck` 通过，IPC 契约测试（tests/main/workbench-v2-ipc.test.ts）通过。
+- [x] 2.5 更新 IPC/DTO 类型与接线（src/shared/ipc.ts、src/preload/index.ts、workbench-facade 相关 DTO）：新增/调整项目备注、暂存地址、是否暂存、计划装机日期（更名）、区域枚举类型、是否批复（替换批复原因）；建档输入类型移除最终可确认金额、服务单号、工程师、开单备注、缺失资料（既有 WIZARD_REJECTION_CODES 废弃字段有值即拒绝规则保持）；完成态：`npm run typecheck` 通过，IPC 契约测试（tests/main/workbench-v2-ipc.test.ts）通过。
 
 ## 3. 生命周期：plan_visit_date<=today 自动推进
 
@@ -43,18 +43,18 @@
 ## 5. 登记记录删除：type-specific 领域策略
 
 - [x] 5.1 将删除统一为主进程分发架构（design D3）：保持 v2Delete 单一命令形状（recordType/id/expectedRevision），主进程按类型分发到归属领域服务，服务在写事务内重查状态、修订与依赖；成功删除与最小 tombstone/审计事实原子写入；import-source 审计保留并标记为指向已删除记录而非擦除；完成态：现有 workbench-delete 集成测试全绿并新增分发断言。
-- [ ] 5.2 实现独立可删除类型策略：开单记录删除不影响关联项目主状态与进单状态；损坏/维修事项删除时按引用关系原子清理仅指向该事项的维修上门活动关联、不删除活动本身、不影响关联仪器与项目；序列号地址更新删除后仪器实际关联新址以剩余最近更新事实为准；二维码申请删除不影响仪器"二维码是否申请"手工标记；均要求确认、原子、不留孤立数据；完成态：各类型 domain+integration 测试覆盖确认后删除/未确认不删/关联保持。
+- [x] 5.2 实现独立可删除类型策略：开单记录删除不影响关联项目主状态与进单状态；损坏/维修事项删除时按引用关系原子清理仅指向该事项的维修上门活动关联、不删除活动本身、不影响关联仪器与项目；序列号地址更新删除后仪器实际关联新址以剩余最近更新事实为准；二维码申请删除不影响仪器"二维码是否申请"手工标记；均要求确认、原子、不留孤立数据；完成态：各类型 domain+integration 测试覆盖确认后删除/未确认不删/关联保持。
 - [ ] 5.3 实现依赖拒绝与状态重算：存在下游业务事实的记录（如被引用的批次/仪器等）原子拒绝删除并返回用户可读原因（DELETE_REJECTED_DEPENDENCIES）；删除验收报告/上门活动等执行事实引起的状态重算必须经 lifecycle 唯一入口（DELETE_REJECTED_STATUS_RECALC 语义保持）；完成态：拒绝码与重算路径测试通过。
-- [ ] 5.4 实现 Ship-to 申请删除策略：未补入 Account ID 且未完成的申请直接删除；已完成申请对应的不可变 Ship-to 仍被仪器/批次/项目引用时原子拒绝并说明原因；无任何引用且仅由该申请产生时随申请原子清理该主数据、不留孤立；记录级删除、非"退回/取消"语义、不影响其他申请线性流转；完成态：tests/integration/ship-to-serial.sqlite.test.ts（或 workbench-delete）覆盖直接删除/引用拒绝/无引用清理。
+- [x] 5.4 实现 Ship-to 申请删除策略：未补入 Account ID 且未完成的申请直接删除；已完成申请对应的不可变 Ship-to 仍被仪器/批次/项目引用时原子拒绝并说明原因；无任何引用且仅由该申请产生时随申请原子清理该主数据、不留孤立；记录级删除、非"退回/取消"语义、不影响其他申请线性流转；完成态：tests/integration/ship-to-serial.sqlite.test.ts（或 workbench-delete）覆盖直接删除/引用拒绝/无引用清理。
 - [ ] 5.5 保持项目取消与掉票撤销例外：项目不提供物理删除入口、终止仍用取消语义；掉票记录不提供物理删除入口、仅撤销且撤销为终态（禁编辑/重复撤销），发票修正不物理删除；renderer 断言无物理删除入口；完成态：workbench-interface 相关集成测试与 UI 断言通过。
 - [ ] 5.6 汇总各类型删除集成测试（tests/integration/workbench-delete.sqlite.test.ts）：登记类记录（批次、仪器、开单、验收报告、Ship-to 申请、损坏/维修事项、序列号地址更新、二维码申请）成功删除后不再出现在详情、历史浏览与对应统计；expectedRevision 不匹配拒绝；审计保留；完成态：focused vitest 全绿。
 
 ## 6. 独立登记与建档调整
 
-- [ ] 6.1 实现序列号地址更新双模式（serial-address-update）：独立登记不关联任何项目/仪器，必填客户名称、新址地址、序列号、Account ID、更新日期，序列号仅非空校验、不执行仪器一致性校验；选择关联项目/仪器时执行一致性校验（序列号与仪器一致否则拒绝）；一台仪器可有多条更新事实按更新日期保留；不引入未确认的序列号格式约束；完成态：tests/domain/serial-address-update.test.ts 全绿。
-- [ ] 6.2 确认/补齐二维码申请独立与删除语义（qr-request-tracking）：申请保持独立记录、不新增可空项目/仪器外键；重复申请保留完整历史、各自独立计数工作量；确认删除后从申请历史、详情与工作量统计中消失；删除不影响仪器"二维码是否申请"标记；完成态：tests/domain/qr-request-tracking.test.ts 与关联集成测试全绿。
+- [x] 6.1 实现序列号地址更新双模式（serial-address-update）：独立登记不关联任何项目/仪器，必填客户名称、新址地址、序列号、Account ID、更新日期，序列号仅非空校验、不执行仪器一致性校验；选择关联项目/仪器时执行一致性校验（序列号与仪器一致否则拒绝）；一台仪器可有多条更新事实按更新日期保留；不引入未确认的序列号格式约束；完成态：tests/domain/serial-address-update.test.ts 全绿。
+- [x] 6.2 确认/补齐二维码申请独立与删除语义（qr-request-tracking）：申请保持独立记录、不新增可空项目/仪器外键；重复申请保留完整历史、各自独立计数工作量；确认删除后从申请历史、详情与工作量统计中消失；删除不影响仪器"二维码是否申请"标记；完成态：tests/domain/qr-request-tracking.test.ts 与关联集成测试全绿。
 - [ ] 6.3 调整建档表单（renderer 单页分组录入）：项目与进单分组含进单日期、区域（五固定选项）、旧址/新址联系人、合同起止日期与可选项目备注，不含项目负责人、销售通知时间、最终可确认金额、服务单号、工程师、开单备注；搬迁范围含旧址/新址地址、仪器名称与数量、型号（选填）、UPS 是/否与暂存地址，旧址/新址/数量允许留空后补、无 Ship-to 地址快照；执行准备含计划上门/运输日期（分开）、场地确认、实际装机完成日期、计划装机日期（更名）与是否暂存，不含工程师与服务单号；保存意图含 待进单/正式进单/未进单先执行 三路径，未进单先执行记录是否批复、不收集缺失资料；保存不同次创建开单记录；可后补字段留空不无提示丢失、不自动生成提醒；完成态：tests/renderer/app.test.tsx 与 tests/interface/layout.test.ts 表单/导航断言全绿。
-- [ ] 6.4 落实项目领域写边界：新建/编辑项目校验五枚举区域（trim 后，非枚举拒绝，legacy 值保留待调整）；废弃字段（最终可确认金额/服务单号/工程师/开单备注/缺失资料）有值即拒绝（WIZARD_REJECTION_CODES 保持）；项目备注可空、建档后补充/修改不影响主状态；暂存地址/是否暂存为手工维护执行事实、不触发主状态流转；完成态：tests/domain/relocation-fields.test.ts、relocation-entry.test.ts 与 tests/integration/create-project-ecc-rules.sqlite.test.ts 全绿。
+- [x] 6.4 落实项目领域写边界：新建/编辑项目校验五枚举区域（trim 后，非枚举拒绝，legacy 值保留待调整）；废弃字段（最终可确认金额/服务单号/工程师/开单备注/缺失资料）有值即拒绝（WIZARD_REJECTION_CODES 保持）；项目备注可空、建档后补充/修改不影响主状态；暂存地址/是否暂存为手工维护执行事实、不触发主状态流转；完成态：tests/domain/relocation-fields.test.ts、relocation-entry.test.ts 与 tests/integration/create-project-ecc-rules.sqlite.test.ts 全绿。
 - [ ] 6.5 实现"编辑项目资料"暂定仪器数量维护（复用既有 temporaryInstrumentCount 事实与项目标量 DTO，design D6/D9，不新增迁移列）：编辑表单展示当前暂定仪器数量，允许查看、留空、补录或调整，保存走既有项目标量更新路径、保存后刷新项目标量读模型回显最新值；不生成虚拟仪器记录、不改变既有逐台仪器事实、不触发主状态流转；取值校验遵循既有输入校验规则、不引入新格式约束；完成态：tests/domain/relocation-fields.test.ts 或 relocation-execution.test.ts 覆盖 查看/留空/补录/调整/回显 与 不建仪器/不改仪器事实/不触发状态 场景全绿。
 - [ ] 6.6 落实"编辑项目资料"renderer 表单与 DTO/IPC 接线：确认项目标量 DTO 与编辑保存请求已携带 temporaryInstrumentCount（沿用既有字段与校验，不新增 schema 列），renderer 编辑表单接入并回显最新保存值；完成态：`npm run typecheck` 通过，tests/renderer/app.test.tsx 断言 查看/留空/补录/调整后回显最新值，无 schema-v15 之外的新增列改动。
 

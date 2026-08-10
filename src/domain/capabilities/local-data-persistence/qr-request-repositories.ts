@@ -58,6 +58,23 @@ export class SqliteQrRequestRepository implements QrRequestRepository {
     return rows.map((row) => this.assemble(row));
   }
 
+  /** 确认后删除：同事务清理多选类型行与申请行（不留孤立关联）。 */
+  deleteById(id: string): void {
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('DELETE FROM qr_request_types WHERE qr_request_id = ?').run(id);
+      this.db.prepare('DELETE FROM qr_requests WHERE id = ?').run(id);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // 回滚失败时继续抛出主错误
+      }
+      throw mapConstraintError(err, `二维码申请删除失败`);
+    }
+  }
+
   private assemble(row: Record<string, unknown>): QrRequest {
     const types = this.db
       .prepare('SELECT type_code FROM qr_request_types WHERE qr_request_id = ? ORDER BY id')

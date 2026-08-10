@@ -89,7 +89,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
         intent: 'pre_entry_execution',
         customerName: '未进单先执行客户',
         region: 'South',
-        approvalReason: '客户进度紧急，经理已批复优先执行',
+        managerApproved: true,
       }),
     });
     const projectId = projectIdOf(created);
@@ -178,7 +178,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     // 无 ECC 的未进单先执行项目：标签钉住主状态，离开待进单被拒
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '状态校验客户', region: 'North' }),
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '状态校验客户', region: 'North' }),
     });
     const projectId = projectIdOf(created);
     expect(() => facade.v2Mutate({ op: 'adjust_status', projectId, status: 'completed' })).toThrow(/未进单先执行/);
@@ -449,7 +449,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     const facade = await ctx.init();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '提醒客户', region: 'North' }),
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '提醒客户', region: 'North' }),
     });
     const projectId = projectIdOf(created);
 

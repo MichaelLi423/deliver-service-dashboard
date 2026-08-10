@@ -13,6 +13,8 @@ export interface ServiceOrderRepository {
   save(order: ServiceOrder): void;
   list(): ServiceOrder[];
   listByProject(projectId: string): ServiceOrder[];
+  /** 确认后删除一条开单记录（5.2：不修改/删除关联项目，主状态与进单状态不变）。 */
+  deleteById(id: string): void;
 }
 
 /**

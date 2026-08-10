@@ -10,6 +10,8 @@ export interface DamageRepairItemRepository {
   save(item: DamageRepairItem): void;
   listByProject(projectId: string): DamageRepairItem[];
   listAll(): DamageRepairItem[];
+  /** 确认后删除一条损坏/维修事项（5.2：调用方须先清理仅指向该事项的维修上门关联）。 */
+  deleteById(id: string): void;
 }
 
 export interface ActivityDamageLinkRepository {
@@ -17,6 +19,8 @@ export interface ActivityDamageLinkRepository {
   save(link: ActivityDamageLink): void;
   listByActivity(activityId: string): ActivityDamageLink[];
   listByDamageItem(damageItemId: string): ActivityDamageLink[];
+  /** 删除仅指向指定事项的维修上门活动关联（不删除活动本身，TBD-24 引用关系）。 */
+  deleteByDamageItemId(damageItemId: string): void;
 }
 
 /**
