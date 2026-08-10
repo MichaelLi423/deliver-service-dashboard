@@ -211,6 +211,50 @@ describe('workbench-todos SQLite 集成（6.5）', () => {
     }
   });
 
+  // 决策：临期窗口无业务上限，仅接受 0..MAX_SAFE_INTEGER 非负安全整数；
+  // 保存以十进制文本精确保留 MAX_SAFE_INTEGER，重开读取不回退、不丢精度。
+  it('窗口配置 MAX_SAFE_INTEGER 以十进制文本精确保留并重开读取', () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      ctx.reminders.setUpcomingWindowDays(Number.MAX_SAFE_INTEGER);
+      expect(ctx.reminders.getUpcomingWindowDays()).toBe(Number.MAX_SAFE_INTEGER);
+      closeDatabase(ctx.db);
+
+      const reopened = openService(dir);
+      expect(reopened.reminders.getUpcomingWindowDays()).toBe(Number.MAX_SAFE_INTEGER);
+      // 超大窗口分类稳定（addBusinessDays 饱和到 9999-12-31）
+      expect(reopened.reminders.classifyAt('9999-12-31')).toBe('upcoming');
+      const row = reopened.db
+        .prepare("SELECT value FROM app_settings WHERE key = 'reminder_upcoming_window_days'")
+        .get() as { value: string };
+      expect(row.value).toBe(String(Number.MAX_SAFE_INTEGER));
+      closeDatabase(reopened.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('app_settings 中超出安全整数范围的历史异常文本回退未配置（默认 7）', () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      ctx.db
+        .prepare(
+          `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        )
+        .run('reminder_upcoming_window_days', String(Number.MAX_SAFE_INTEGER + 1), 't');
+      expect(ctx.reminders.getUpcomingWindowDays()).toBe(7);
+      // 按默认 7 天窗口分类
+      expect(ctx.reminders.classifyAt('2026-08-14')).toBe('upcoming');
+      expect(ctx.reminders.classifyAt('2026-08-15')).toBeNull();
+      closeDatabase(ctx.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
   it('listReminders 供工作台展示：按当前提醒列出项目与到期分类，关闭重开仍可列出', () => {
     const dir = makeTempDir();
     try {

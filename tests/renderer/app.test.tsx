@@ -820,25 +820,83 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(vi.mocked(api.v2ProjectDetail!).mock.calls.filter(([id]) => id === 'p-51')).toHaveLength(2);
   });
 
-  // domain/persistence 已支持 set_window_days(0)（见 domain/sqlite 测试）。
-  // 回归口径：提醒面板配置「临期窗口」数字输入并显式保存，0 合法且随 v2Mutate 提交；
-  // 提醒行按钮小字为「ECC/tempNo · yyyy-mm-dd」，按客户行断言含格式化日期。
-  it('提醒面板提供临期窗口数字输入与显式保存：设为 0 走 set_window_days 且提醒行显示格式化日期', async () => {
-    const api = mockApi();
+  it('临期窗口设为 0 后显式保存、重读 overview，并立即更新持续文案与提醒分类', async () => {
+    let savedWindowDays: number | null = null;
+    const beforeSave: WorkbenchV2OverviewDto = {
+      ...overview,
+      reminderWindowDays: 7,
+      reminderPreview: overview.reminderPreview.map((item, index) =>
+        index === 0 ? { ...item, reminderDueClass: 'upcoming' } : item,
+      ),
+    };
+    const afterSave: WorkbenchV2OverviewDto = {
+      ...beforeSave,
+      businessRevision: 2,
+      reminderWindowDays: 0,
+      reminderPreview: beforeSave.reminderPreview.map((item, index) =>
+        index === 0 ? { ...item, reminderDueClass: null } : item,
+      ),
+    };
+    const api = mockApi({
+      v2Overview: vi.fn().mockImplementation(() =>
+        Promise.resolve(savedWindowDays === 0 ? afterSave : beforeSave),
+      ),
+      v2Mutate: vi.fn().mockImplementation((request) => {
+        if (request.op === 'set_window_days') savedWindowDays = request.windowDays ?? null;
+        return Promise.resolve({ businessRevision: 2, invalidated: ['overview'], changed: null });
+      }),
+    });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     render(<App />);
     const panel = await screen.findByRole('region', { name: /项目提醒快速处理/ });
+    const initialReminderRow = within(panel).getByRole('button', { name: /客户 1/ });
+    expect(within(panel).getByText('未来 7 个自然日标记为临期')).toBeInTheDocument();
+    expect(initialReminderRow).toHaveTextContent('临期');
+    const overviewCallsBeforeSave = vi.mocked(api.v2Overview!).mock.calls.length;
+
     const windowInput = within(panel).getByLabelText(/临期窗口/);
     fireEvent.change(windowInput, { target: { value: '0' } });
+    expect(api.v2Mutate).not.toHaveBeenCalled();
+    expect(within(panel).getByText('未来 7 个自然日标记为临期')).toBeInTheDocument();
+    expect(initialReminderRow).toHaveTextContent('临期');
+
     fireEvent.click(within(panel).getByRole('button', { name: '保存' }));
     await waitFor(() =>
       expect(api.v2Mutate).toHaveBeenCalledWith(
         expect.objectContaining({ op: 'set_window_days', windowDays: 0 }),
       ),
     );
-    // 提醒行按钮小字完整文本为「ECC/tempNo · yyyy-mm-dd」：按客户名定位提醒行，再断言含格式化日期
+    await waitFor(() =>
+      expect(vi.mocked(api.v2Overview!).mock.calls.length).toBeGreaterThan(overviewCallsBeforeSave),
+    );
+    await waitFor(() =>
+      expect(within(panel).getByText('未来 0 个自然日标记为临期')).toBeInTheDocument(),
+    );
+    const updatedReminderRow = within(panel).getByRole('button', { name: /客户 1/ });
+    expect(updatedReminderRow).not.toHaveTextContent('临期');
+    expect(updatedReminderRow).toHaveTextContent('备注');
+    expect(updatedReminderRow).toHaveTextContent('2026-08-08');
+  });
+
+  it('临期窗口拒绝超过安全整数上界的稳定数字输入且不调用 mutation', async () => {
+    const api = mockApi();
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+    render(<App />);
+    const panel = await screen.findByRole('region', { name: /项目提醒快速处理/ });
+    const windowInput = within(panel).getByLabelText(/临期窗口/);
     const reminderRow = within(panel).getByRole('button', { name: /客户 1/ });
-    expect(reminderRow).toHaveTextContent('2026-08-08');
+    expect(within(panel).getByText('未来 7 个自然日标记为临期')).toBeInTheDocument();
+    expect(reminderRow).toHaveTextContent('今日');
+
+    fireEvent.change(windowInput, { target: { value: '9007199254740992' } });
+    fireEvent.click(within(panel).getByRole('button', { name: '保存' }));
+
+    expect(within(panel).getByRole('alert')).toHaveTextContent(
+      '请输入 0 到 9007199254740991 之间的整数天',
+    );
+    expect(api.v2Mutate).not.toHaveBeenCalled();
+    expect(within(panel).getByText('未来 7 个自然日标记为临期')).toBeInTheDocument();
+    expect(reminderRow).toHaveTextContent('今日');
   });
 
   it('新建项目成功后清除隐藏筛选、回到首屏、刷新列表并自动选中新项目', async () => {

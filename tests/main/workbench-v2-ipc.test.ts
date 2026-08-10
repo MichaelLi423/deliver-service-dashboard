@@ -398,9 +398,9 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     expect(overview.reminderWindowDays).toBe(0);
   });
 
-  it('v2Mutate set_window_days 负数/非整数返回 INVALID_WINDOW_DAYS', async () => {
+  it('v2Mutate set_window_days 负数/非整数/超出安全整数范围返回 INVALID_WINDOW_DAYS', async () => {
     const ctx = await loggedIn();
-    for (const windowDays of [-1, 2.5]) {
+    for (const windowDays of [-1, 2.5, Number.MAX_SAFE_INTEGER + 1]) {
       await expect(
         ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
           op: 'set_window_days',

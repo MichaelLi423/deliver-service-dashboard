@@ -583,8 +583,10 @@ export function WorkbenchV2({
     if (reminderWindowSaving) return;
     const value = reminderWindowInput.trim();
     const days = Number(value);
-    if (value === "" || !Number.isInteger(days) || days < 0) {
-      setReminderWindowError("请输入 0 或更大的整数天");
+    if (value === "" || !Number.isSafeInteger(days) || days < 0) {
+      setReminderWindowError(
+        `请输入 0 到 ${Number.MAX_SAFE_INTEGER} 之间的整数天`,
+      );
       return;
     }
     setReminderWindowSaving(true);
@@ -992,6 +994,7 @@ export function WorkbenchV2({
                       id="reminder-window-days"
                       type="number"
                       min={0}
+                      max={Number.MAX_SAFE_INTEGER}
                       step={1}
                       inputMode="numeric"
                       value={reminderWindowInput}

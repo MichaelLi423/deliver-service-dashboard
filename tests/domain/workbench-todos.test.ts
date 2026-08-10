@@ -187,6 +187,31 @@ describe('提醒到期分类（6.2）', () => {
     expect(addBusinessDays('2026-12-31', 1)).toBe('2027-01-01');
     expect(addBusinessDays('2024-02-28', 1)).toBe('2024-02-29'); // 闰年
   });
+
+  it('addBusinessDays 对 4 位年业务日期范围确定性饱和（不产生 NaN-NaN-NaN）', () => {
+    expect(addBusinessDays('2026-08-07', Number.MAX_SAFE_INTEGER)).toBe('9999-12-31');
+    expect(addBusinessDays('2026-08-07', -Number.MAX_SAFE_INTEGER)).toBe('0000-01-01');
+    expect(addBusinessDays('9999-12-31', 1)).toBe('9999-12-31');
+    expect(addBusinessDays('0000-01-01', -1)).toBe('0000-01-01');
+  });
+
+  it('addBusinessDays 拒绝非法天数（NaN/Infinity/非整数/不安全整数，负安全整数仍允许）', () => {
+    expect(() => addBusinessDays('2026-08-07', NaN)).toThrow(/安全整数/);
+    expect(() => addBusinessDays('2026-08-07', Infinity)).toThrow(/安全整数/);
+    expect(() => addBusinessDays('2026-08-07', -Infinity)).toThrow(/安全整数/);
+    expect(() => addBusinessDays('2026-08-07', 2.5)).toThrow(/安全整数/);
+    expect(() => addBusinessDays('2026-08-07', Number.MAX_SAFE_INTEGER + 1)).toThrow(/安全整数/);
+    // 负安全整数仍合法（负向饱和兜底）
+    expect(addBusinessDays('2026-08-07', -7)).toBe('2026-07-31');
+  });
+
+  it('classifyReminder 直接以非法 windowDays 调用时明确拒绝，不生成 NaN 日期', () => {
+    expect(() => classifyReminder('2026-08-08', '2026-08-07', NaN)).toThrow(/安全整数/);
+    expect(() => classifyReminder('2026-08-08', '2026-08-07', 2.5)).toThrow(/安全整数/);
+    expect(() =>
+      classifyReminder('2026-08-08', '2026-08-07', Number.MAX_SAFE_INTEGER + 1),
+    ).toThrow(/安全整数/);
+  });
 });
 
 describe('临期窗口可配置、默认 7 个自然日（6.3）', () => {
@@ -214,13 +239,14 @@ describe('临期窗口可配置、默认 7 个自然日（6.3）', () => {
     expect(ctx.service.classifyAt('2026-08-09')).toBeNull();
   });
 
-  it('配置非法值（负数/非整数）被拒绝', () => {
+  it('配置非法值（负数/非整数/超出安全整数范围）被拒绝', () => {
     const ctx = setup();
-    expect(() => ctx.service.setUpcomingWindowDays(-1)).toThrow(/不小于 0 的整数/);
-    expect(() => ctx.service.setUpcomingWindowDays(2.5)).toThrow(/不小于 0 的整数/);
+    expect(() => ctx.service.setUpcomingWindowDays(-1)).toThrow(/安全整数/);
+    expect(() => ctx.service.setUpcomingWindowDays(2.5)).toThrow(/安全整数/);
+    expect(() => ctx.service.setUpcomingWindowDays(Number.MAX_SAFE_INTEGER + 1)).toThrow(/安全整数/);
   });
 
-  // domain 已支持 0 为合法窗口（validate 仅拒绝负数/非整数）；
+  // domain 已支持 0 为合法窗口（validate 仅拒绝负数/非整数/超安全整数）；
   // 0 不能当 falsy 处理——0 表示「仅当天 today」，昨天的提醒仍 overdue，明天不分类。
   it('窗口为 0 合法：今天 today、昨天 overdue、明天不进入任何分类', () => {
     const ctx = setup();
@@ -232,13 +258,15 @@ describe('临期窗口可配置、默认 7 个自然日（6.3）', () => {
     expect(ctx.service.classifyAt('2026-08-08')).toBeNull();
   });
 
-  it('窗口无上限：大整数如 100000 合法并立即生效', () => {
+  // 决策：临期窗口无业务上限，但仅接受 0..Number.MAX_SAFE_INTEGER 非负安全整数。
+  // 超大窗口下任何 4 位年提醒日期都落入临期（addBusinessDays 饱和到 9999-12-31，分类稳定不 NaN）。
+  it('窗口无业务上限：MAX_SAFE_INTEGER 合法且超大窗口分类稳定', () => {
     const ctx = setup();
     addProject(ctx);
-    ctx.service.setUpcomingWindowDays(100000);
-    expect(ctx.service.getUpcomingWindowDays()).toBe(100000);
+    ctx.service.setUpcomingWindowDays(Number.MAX_SAFE_INTEGER);
+    expect(ctx.service.getUpcomingWindowDays()).toBe(Number.MAX_SAFE_INTEGER);
     expect(ctx.service.classifyAt('2026-08-08')).toBe('upcoming');
-    expect(ctx.service.classifyAt('2026-08-09')).toBe('upcoming');
+    expect(ctx.service.classifyAt('9999-12-31')).toBe('upcoming');
   });
 });
 

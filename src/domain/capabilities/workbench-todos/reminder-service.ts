@@ -93,10 +93,12 @@ export class ReminderService {
     return this.settings.getUpcomingWindowDays() ?? DEFAULT_UPCOMING_WINDOW_DAYS;
   }
 
-  /** 配置临期窗口：立即生效于后续到期分类（spec 6.3）。 */
+  /** 配置临期窗口：立即生效于后续到期分类（spec 6.3）。
+   *  决策：临期窗口无业务上限，但仅接受 0..Number.MAX_SAFE_INTEGER 的非负安全整数；
+   *  超出安全整数范围必须明确拒绝，绝不静默改值。 */
   setUpcomingWindowDays(days: number): void {
-    if (!Number.isInteger(days) || days < 0) {
-      throw new ValidationError('INVALID_WINDOW_DAYS', '临期窗口必须为不小于 0 的整数天');
+    if (!Number.isSafeInteger(days) || days < 0) {
+      throw new ValidationError('INVALID_WINDOW_DAYS', '临期窗口必须为不小于 0 的安全整数天');
     }
     this.settings.setUpcomingWindowDays(days);
   }

@@ -20,7 +20,8 @@ export class SqliteReminderSettingsRepository implements ReminderSettingsReposit
       .get(WINDOW_KEY) as { value: string } | undefined;
     if (!row) return null;
     const days = Number(row.value);
-    return Number.isInteger(days) && days >= 0 ? days : null;
+    // 仅接受非负安全整数；无效/历史异常值（负数、非整数、超出安全整数范围）回退未配置（默认 7）。
+    return Number.isSafeInteger(days) && days >= 0 ? days : null;
   }
 
   setUpcomingWindowDays(days: number): void {

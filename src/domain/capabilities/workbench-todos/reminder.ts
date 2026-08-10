@@ -42,16 +42,33 @@ export interface ReminderInput {
   note?: string | null;
 }
 
-/** 业务日期增加自然天数（yyyy-mm-dd，纯函数，本机日期口径）。 */
+/** 业务日期增加自然天数（yyyy-mm-dd，纯函数，本机日期口径）。
+ *  对 4 位年 yyyy-mm-dd 范围做确定性饱和：正向超出返回 9999-12-31，
+ *  负向超出返回 0000-01-01（避免 Date 溢出产生 NaN-NaN-NaN）。
+ *  classifyReminder 与 workbench-read-repository 的 upcoming SQL 边界共用本函数。 */
+const DAY_MS = 86_400_000;
+const MAX_BUSINESS_DATE_MS = new Date('9999-12-31T00:00:00Z').getTime();
+const MIN_BUSINESS_DATE_MS = new Date('0000-01-01T00:00:00Z').getTime();
 export function addBusinessDays(date: BusinessDate, days: number): BusinessDate {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   if (!match) {
     throw new ValidationError('INVALID_DATE', `非法业务日期: ${date}`);
   }
-  const base = new Date(`${date}T00:00:00Z`);
-  base.setUTCDate(base.getUTCDate() + days);
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${base.getUTCFullYear()}-${pad(base.getUTCMonth() + 1)}-${pad(base.getUTCDate())}`;
+  // 入口守卫：days 必须是安全整数（负安全整数仍允许）；NaN/Infinity/非整数/不安全整数
+  // 明确拒绝，保证 classifyReminder 直接以非法 windowDays 调用时也不会生成 NaN 日期。
+  if (!Number.isSafeInteger(days)) {
+    throw new ValidationError('INVALID_WINDOW_DAYS', `天数必须为安全整数: ${String(days)}`);
+  }
+  const baseMs = new Date(`${date}T00:00:00Z`).getTime();
+  if (!Number.isFinite(baseMs)) {
+    throw new ValidationError('INVALID_DATE', `非法业务日期: ${date}`);
+  }
+  const targetMs = baseMs + days * DAY_MS;
+  if (targetMs > MAX_BUSINESS_DATE_MS) return '9999-12-31';
+  if (targetMs < MIN_BUSINESS_DATE_MS) return '0000-01-01';
+  const target = new Date(targetMs);
+  const pad = (n: number, width = 2): string => String(n).padStart(width, '0');
+  return `${pad(target.getUTCFullYear(), 4)}-${pad(target.getUTCMonth() + 1)}-${pad(target.getUTCDate())}`;
 }
 
 /**
