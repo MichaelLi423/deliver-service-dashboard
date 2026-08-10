@@ -15,7 +15,7 @@ import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
  * 不携带任何 snapshot）：
  * 1. 未进单先执行全链路：批复 → 优先上门（批次开始运输/工作事实）→ 补齐资料正式进单
  *    → 负责人人工确定主状态（自动触发除外）
- * 2. 实际装机完成时间自动触发待验收；计划上门/运输时间与场地确认不触发
+ * 2. 计划上门到期自动触发执行中；实际装机完成时间自动触发待验收；运输时间与场地确认不触发
  * 3. 项目主状态人工调整与校验（非法调整被拒并返回原因）
  * 4. 取消：无掉票历史可取消、任何掉票历史（含已撤销）禁止、取消后指标排除且真实成本保留
  * 5. 掉票金额闭环重算（超额保护、撤销终态、无 0 金额闭环）
@@ -61,7 +61,7 @@ function projectIdOf(result: WorkbenchV2MutationResult): string {
 const wizard = (overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPayload => ({
   intent: 'formal',
   customerName: '客户',
-  region: '华东',
+  region: 'East',
   contractStartDate: '2026-08-01',
   contractEndDate: '2027-07-31',
   oldSiteAddress: '旧址',
@@ -88,7 +88,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
       payload: wizard({
         intent: 'pre_entry_execution',
         customerName: '未进单先执行客户',
-        region: '华南',
+        region: 'South',
         approvalReason: '客户进度紧急，经理已批复优先执行',
       }),
     });
@@ -135,12 +135,12 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     expect(detail.status).toBe('executing');
   });
 
-  it('2. 实际装机完成时间自动触发待验收；计划时间与场地确认不触发', async () => {
+  it('2. 计划上门到期自动触发执行中；实际装机完成时间自动触发待验收；运输时间与场地确认不触发', async () => {
     const ctx = makeContext();
     dirs.push(ctx.dir);
     const facade = await ctx.init();
 
-    // 计划上门/运输时间与场地确认已设置，但未录入实际装机完成时间 → 不触发
+    // 计划上门已到期 → 自动进入执行中；运输时间与场地确认本身不触发后续状态
     const a = facade.v2Mutate({
       op: 'create_project',
       payload: wizard({
@@ -153,8 +153,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
         siteConfirmed: true,
       }),
     });
-    // 创建即正式进单：主状态直接推进为待执行；计划/场地确认不触发流转
-    expect(facade.v2ProjectDetail(projectIdOf(a)).project!.status).toBe('pending_execution');
+    expect(facade.v2ProjectDetail(projectIdOf(a)).project!.status).toBe('executing');
 
     // 录入实际装机完成时间 → 自动进入待验收（自动触发优先于人工值）
     const b = facade.v2Mutate({
@@ -179,7 +178,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     // 无 ECC 的未进单先执行项目：标签钉住主状态，离开待进单被拒
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '状态校验客户', region: '华北' }),
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '状态校验客户', region: 'North' }),
     });
     const projectId = projectIdOf(created);
     expect(() => facade.v2Mutate({ op: 'adjust_status', projectId, status: 'completed' })).toThrow(/未进单先执行/);
@@ -187,7 +186,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     // 正式进单项目：创建结果主状态为待执行；待执行 → 执行中 经 lifecycle 校验通过
     const formal = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '状态校验正式客户', ecc: 'ECC-ADJ-001', region: '华北', contractAmount: '100000' }),
+      payload: wizard({ customerName: '状态校验正式客户', ecc: 'ECC-ADJ-001', region: 'North', contractAmount: '100000' }),
     });
     const formalId = projectIdOf(formal);
     expect(facade.v2ProjectDetail(formalId).project!.status).toBe('pending_execution');
@@ -205,7 +204,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     // 项目 A：无任何掉票历史 → 可取消
     const a = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '可取消客户', ecc: 'ECC-CANCEL-01', region: '西南', contractAmount: '50000', instrumentCount: 1 }),
+      payload: wizard({ customerName: '可取消客户', ecc: 'ECC-CANCEL-01', region: 'West', contractAmount: '50000', instrumentCount: 1 }),
     });
     const projectIdA = projectIdOf(a);
     facade.v2Mutate({ op: 'cancel_project', projectId: projectIdA, time: '2026-08-12', reason: '客户业务调整取消' });
@@ -218,7 +217,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     // 项目 B：登记掉票后 → 存在掉票历史 → 禁止取消
     const b = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '有掉票历史客户', ecc: 'ECC-CANCEL-02', region: '西南', contractAmount: '50000', instrumentCount: 1 }),
+      payload: wizard({ customerName: '有掉票历史客户', ecc: 'ECC-CANCEL-02', region: 'West', contractAmount: '50000', instrumentCount: 1 }),
     });
     const projectIdB = projectIdOf(b);
     facade.v2Mutate({ op: 'submit_action', projectId: projectIdB, action: { type: 'invoice', projectId: projectIdB, values: { invoicedAt: '2026-08-11', amount: '10000' } } });
@@ -397,7 +396,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     const facade = await ctx.init();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ customerName: '序列号地址客户', ecc: 'ECC-SERIAL-001', region: '华北', contractAmount: '30000', instrumentCount: 1 }),
+      payload: wizard({ customerName: '序列号地址客户', ecc: 'ECC-SERIAL-001', region: 'North', contractAmount: '30000', instrumentCount: 1 }),
     });
     const projectId = projectIdOf(created);
     // 登记带序列号的搬迁仪器（向导创建的仪器无序列号，需先补登序列号仪器）
@@ -450,7 +449,7 @@ describe('关键路径跨模块演练（tasks 10.2）', () => {
     const facade = await ctx.init();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '提醒客户', region: '东北' }),
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '提醒客户', region: 'North' }),
     });
     const projectId = projectIdOf(created);
 

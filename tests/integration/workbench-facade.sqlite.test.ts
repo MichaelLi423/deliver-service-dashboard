@@ -47,7 +47,7 @@ function wizard(overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPay
   return {
     intent: 'formal',
     customerName: '客户',
-    region: '华东',
+    region: 'East',
     contractStartDate: '2026-08-01',
     contractEndDate: '2027-07-31',
     oldSiteAddress: '旧址',
@@ -128,7 +128,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '待进单客户', region: '华北' }),
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '待进单客户', region: 'North' }),
     });
     const projectId = projectIdOf(created);
     expect(() => facade.v2Mutate({ op: 'adjust_status', projectId, status: 'completed' })).toThrow();
@@ -319,7 +319,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
         intent: 'pre_entry_execution',
         approvalReason: '测试批复：经理批准未进单先执行',
         customerName: '资料更新客户',
-        region: '华东',
+        region: 'East',
         oldSiteContact: '旧址王工',
         newSiteContact: '新址李工',
         oldSiteAddress: '旧址甲',
@@ -337,7 +337,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       op: 'update_project',
       payload: {
         projectId,
-        region: '华南',
+        region: 'South',
         oldSiteContact: '新旧址张工',
         newSiteContact: '新新址刘工',
         oldSiteAddress: '旧址丙',
@@ -355,7 +355,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       expect.arrayContaining(['overview', 'projects', `project:${projectId}`, `sections:${projectId}`]),
     );
     const detail = facade.v2ProjectDetail(projectId);
-    expect(detail.project!.region).toBe('华南');
+    expect(detail.project!.region).toBe('South');
     expect(detail.detail).toMatchObject({
       oldSiteContact: '新旧址张工',
       newSiteContact: '新新址刘工',
@@ -373,7 +373,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '原客户', region: '华东', oldSiteContact: '旧址王工' }),
+      payload: wizard({ intent: 'pre_entry_execution', approvalReason: '测试批复：经理批准未进单先执行', customerName: '原客户', region: 'East', oldSiteContact: '旧址王工' }),
     });
     const projectId = projectIdOf(created);
 
@@ -440,8 +440,8 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       facade.v2Mutate({ op: 'update_project', payload: { projectId, ecc: 'ECC-X' } }),
     ).toThrow(/仅允许已正式进单项目/);
     // 普通资料仍可更新
-    facade.v2Mutate({ op: 'update_project', payload: { projectId, region: '华北' } });
-    expect(facade.v2ProjectDetail(projectId).project!.region).toBe('华北');
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, region: 'North' } });
+    expect(facade.v2ProjectDetail(projectId).project!.region).toBe('North');
   });
 
   it('update_project 不变量错误不部分落库：区域修改已写入后金额不合法，整体回滚', async () => {
@@ -463,11 +463,11 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(() =>
       facade.v2Mutate({
         op: 'update_project',
-        payload: { projectId, region: '西北', finalConfirmableAmount: '500' },
+        payload: { projectId, region: 'West', finalConfirmableAmount: '500' },
       }),
     ).toThrow(/不得低于累计有效掉票/);
     const after = facade.v2ProjectDetail(projectId);
-    expect(after.project!.region).toBe('华东');
+    expect(after.project!.region).toBe('East');
     expect(after.project!.finalAmount).toBe('2000.00');
   });
 
@@ -490,9 +490,9 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     // 已取消项目：终态禁止任何资料更新
     facade.v2Mutate({ op: 'cancel_project', projectId: projectIdOf(first), time: '2026-08-15', reason: '客户取消' });
     expect(() =>
-      facade.v2Mutate({ op: 'update_project', payload: { projectId: projectIdOf(first), region: '华北' } }),
+      facade.v2Mutate({ op: 'update_project', payload: { projectId: projectIdOf(first), region: 'North' } }),
     ).toThrow(/已取消项目禁止修改项目资料/);
-    expect(facade.v2ProjectDetail(projectIdOf(first)).project!.region).toBe('华东');
+    expect(facade.v2ProjectDetail(projectIdOf(first)).project!.region).toBe('East');
   });
 
   // ---- 快速记录搬迁批次：批次 + 物流费用同一事务原子创建 ----

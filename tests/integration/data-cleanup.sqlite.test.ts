@@ -34,7 +34,7 @@ async function seedDb(dir: string): Promise<{ db: DatabaseSync; accountId: strin
 function seedBusinessData(db: DatabaseSync, facade: WorkbenchFacade): { projectId: string } {
   const created = facade.v2Mutate({
     op: 'create_project',
-    payload: { intent: 'formal', customerName: '清理测试客户', ecc: 'ECC-CLEAN-001', region: '华东', instrumentCount: 1, contractAmount: '10000' },
+    payload: { intent: 'formal', customerName: '清理测试客户', ecc: 'ECC-CLEAN-001', region: 'East', instrumentCount: 1, contractAmount: '10000' },
   });
   const projectId = created.changed!.projectId!;
   facade.v2Mutate({ op: 'submit_action', action: { type: 'qr_request', values: { applicant: '申请人', requestedAt: '2026-08-10', types: ['A'] } } });

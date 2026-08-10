@@ -222,8 +222,8 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const pEast = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
-      const pSouth = seedEnteredProject(ctx, { region: '华南', entryAt: '2026-07-02', snapshot: '20000' });
+      const pEast = seedEnteredProject(ctx, { region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
+      const pSouth = seedEnteredProject(ctx, { region: 'South', entryAt: '2026-07-02', snapshot: '20000' });
 
       ctx.financial.recordInvoice(pEast, { amountCents: 300000n, invoicedAt: '2026-07-15' }, ACTOR);
       ctx.financial.recordInvoice(pSouth, { amountCents: 500000n, invoicedAt: '2026-06-20' }, ACTOR);
@@ -271,8 +271,8 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
 
       // 进单金额快照按区域与月份汇总
       expect(report.entryAmountByRegion).toEqual([
-        { month: '2026-07', region: '华东', amountCents: 1000000n, projectCount: 1 },
-        { month: '2026-07', region: '华南', amountCents: 2000000n, projectCount: 1 },
+        { month: '2026-07', region: 'East', amountCents: 1000000n, projectCount: 1 },
+        { month: '2026-07', region: 'South', amountCents: 2000000n, projectCount: 1 },
       ]);
       // 掉票跨月分次归属
       expect(report.monthlyInvoices).toEqual([
@@ -310,7 +310,7 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const p1 = seedEnteredProject(ctx, { region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
       const invoice = ctx.financial.recordInvoice(p1, { amountCents: 500000n, invoicedAt: '2026-07-15' }, ACTOR);
 
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
@@ -339,7 +339,7 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const p1 = seedEnteredProject(ctx, { region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
       const instrumentId = seedInstrument(ctx, p1, 'SN-200');
       const item = ctx.damageService.registerItem(
         instrumentId,
@@ -349,9 +349,9 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
 
       // 区域修改 → 实时重算
-      expect(ctx.reporting.buildReport(month).entryAmountByRegion[0].region).toBe('华东');
-      ctx.projectService.setRegion(p1, '华南');
-      expect(ctx.reporting.buildReport(month).entryAmountByRegion[0].region).toBe('华南');
+      expect(ctx.reporting.buildReport(month).entryAmountByRegion[0].region).toBe('East');
+      ctx.projectService.setRegion(p1, 'South');
+      expect(ctx.reporting.buildReport(month).entryAmountByRegion[0].region).toBe('South');
 
       // 账号改名（直接改 accounts 表，模拟历史用户名变化）：
       // 报表责任人仍取动作记录中持久化的用户名快照「负责人甲」
@@ -372,8 +372,8 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
-      seedEnteredProject(ctx, { region: '华南', entryAt: '2026-07-02', snapshot: '20000' });
+      const p1 = seedEnteredProject(ctx, { region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
+      seedEnteredProject(ctx, { region: 'South', entryAt: '2026-07-02', snapshot: '20000' });
 
       const instrumentId = seedInstrument(ctx, p1, 'SN-300');
       ctx.damageService.registerItem(
@@ -395,7 +395,7 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
       const report = ctx.reporting.buildReport(month);
       // 进单金额排除已取消项目
-      expect(report.entryAmountByRegion.map((r) => r.region)).toEqual(['华南']);
+      expect(report.entryAmountByRegion.map((r) => r.region)).toEqual(['South']);
       // 项目管道排除已取消
       expect(report.pipeline.some((r) => r.status === 'cancelled')).toBe(false);
       // 物流与损坏真实成本保留并标记取消
@@ -413,9 +413,9 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const p1 = seedEnteredProject(ctx, { region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
       ctx.financial.recordInvoice(p1, { amountCents: 500000n, invoicedAt: '2026-07-15' }, ACTOR);
-      const month = { monthFrom: '2026-07', monthTo: '2026-07', region: '华东' };
+      const month = { monthFrom: '2026-07', monthTo: '2026-07', region: 'East' };
       const report = ctx.reporting.buildReport(month);
 
       // Excel：ZIP magic header + 内容与模型一致
@@ -463,7 +463,7 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
       expect(pngText).toBeDefined();
       const meta = JSON.parse(pngText);
       expect(meta.range).toEqual({ from: '2026-07', to: '2026-07' });
-      expect(meta.filters).toEqual({ region: '华东', orderType: null, transportCompany: null, engineer: null, operator: null });
+      expect(meta.filters).toEqual({ region: 'East', orderType: null, transportCompany: null, engineer: null, operator: null });
       const invoiceSection = meta.sections.find((s: { key: string }) => s.key === 'monthly_invoice');
       expect(invoiceSection.rows).toContainEqual(['2026-07', '5000.00', '1']);
 
@@ -477,7 +477,7 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openService(dir);
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const p1 = seedEnteredProject(ctx, { region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
       const batch = ctx.execution.createBatch(p1, ACTOR);
       ctx.execution.updateBatchQuote(batch.id, { transportCompany: '物流公司甲' }, ACTOR);
       ctx.execution.recordLogisticsFee(
@@ -529,7 +529,7 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
         .run('account-2', '负责人乙', 'hash', 'salt', 't', 't');
       const ACTOR_B = makeAccount('account-2', '负责人乙');
 
-      const p1 = seedEnteredProject(ctx, { region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const p1 = seedEnteredProject(ctx, { region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
       const instrumentId = seedInstrument(ctx, p1, 'SN-400');
 
       // 损坏：两位责任人各一条已使用备件

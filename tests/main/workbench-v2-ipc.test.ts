@@ -164,7 +164,7 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
         intent: 'formal',
         customerName: 'IPC v2 客户',
         ecc: 'ECC-IPC-V2',
-        region: '华东',
+        region: 'East',
         contractStartDate: '2026-08-01',
         contractEndDate: '2027-07-31',
         oldSiteAddress: '旧址',
@@ -208,7 +208,7 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
         intent: 'formal',
         customerName: '递增客户',
         ecc: 'ECC-REV-1',
-        region: '华东',
+        region: 'East',
         contractStartDate: '2026-08-01',
         contractEndDate: '2027-07-31',
         oldSiteAddress: '旧址',
@@ -242,7 +242,7 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
         intent: 'formal',
         customerName: 'IPC 更新客户',
         ecc: 'ECC-UPD-IPC',
-        region: '华东',
+        region: 'East',
         contractStartDate: '2026-08-01',
         contractEndDate: '2027-07-31',
         oldSiteAddress: '旧址',
@@ -257,7 +257,7 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
 
     const result = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'update_project',
-      payload: { projectId, region: '华南', oldSiteContact: '旧址王工', siteConfirmed: false },
+      payload: { projectId, region: 'West', oldSiteContact: '旧址王工', siteConfirmed: false },
     } as WorkbenchV2MutationRequest)) as { businessRevision: number; invalidated: string[]; changed: { projectId: string } };
     expect(Object.keys(result).sort()).toEqual(['businessRevision', 'changed', 'invalidated']);
     expect(result.businessRevision).toBeGreaterThan(before);
@@ -271,7 +271,7 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
       100,
       projectId,
     )) as { project: { region: string | null }; detail: { oldSiteContact: string | null; siteConfirmed: boolean } | null };
-    expect(detail.project.region).toBe('华南');
+    expect(detail.project.region).toBe('West');
     expect(detail.detail?.oldSiteContact).toBe('旧址王工');
     expect(detail.detail?.siteConfirmed).toBe(false);
   });
@@ -284,7 +284,7 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
         intent: 'formal',
         customerName: 'IPC 批次客户',
         ecc: 'ECC-BATCH-IPC',
-        region: '华东',
+        region: 'East',
         contractStartDate: '2026-08-01',
         contractEndDate: '2027-07-31',
         oldSiteAddress: '旧址',
@@ -442,7 +442,7 @@ describe('IPC：受保护删除（v2Delete）与清理全部业务数据（clean
         intent: 'formal',
         customerName: '清理 IPC 客户',
         ecc: 'ECC-CLEAN-IPC',
-        region: '华东',
+        region: 'East',
         instrumentCount: 1,
         contractAmount: '1000',
       },

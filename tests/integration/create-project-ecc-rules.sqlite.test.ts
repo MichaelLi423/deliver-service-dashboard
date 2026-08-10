@@ -42,7 +42,7 @@ function wizard(overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPay
   return {
     intent: 'formal',
     customerName: '客户',
-    region: '华东',
+    region: 'East',
     contractStartDate: '2026-08-01',
     contractEndDate: '2027-07-31',
     oldSiteAddress: '旧址',
@@ -140,7 +140,7 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
     expect(() =>
       facade.v2Mutate({
         op: 'create_project',
-        payload: wizard({ customerName: '缺 ECC 客户', region: '华东', ecc: undefined }),
+        payload: wizard({ customerName: '缺 ECC 客户', region: 'East', ecc: undefined }),
       }),
     ).toThrow(/缺少 ECC/);
     expect(facade.v2Overview().metrics.totalProjects).toBe(0);
@@ -201,9 +201,22 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
     expect(() =>
       facade.v2Mutate({
         op: 'create_project',
-        payload: wizard({ intent: 'pre_entry_execution', customerName: '缺批复客户', region: '华北' }),
+        payload: wizard({ intent: 'pre_entry_execution', customerName: '缺批复客户', region: 'North' }),
       }),
     ).toThrow(/经理批复原因/);
+    expect(facade.v2Overview().metrics.totalProjects).toBe(0);
+  });
+
+  it('非枚举区域值创建项目被拒（INVALID_PROJECT_REGION，legacy 文本不得再写入）', async () => {
+    const { facade } = await makeFacade();
+    expectRejected(
+      () => facade.v2Mutate({ op: 'create_project', payload: wizard({ customerName: '非法区域客户', region: '华东' }) }),
+      'INVALID_PROJECT_REGION',
+    );
+    expectRejected(
+      () => facade.v2Mutate({ op: 'create_project', payload: wizard({ customerName: '非法区域客户2', region: 'Northeast' }) }),
+      'INVALID_PROJECT_REGION',
+    );
     expect(facade.v2Overview().metrics.totalProjects).toBe(0);
   });
 
@@ -214,7 +227,7 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
       payload: wizard({
         intent: 'pre_entry_execution',
         customerName: '未进单先执行客户',
-        region: '华南',
+        region: 'South',
         approvalReason: '客户进度紧急，经理已批复优先执行',
       }),
     });

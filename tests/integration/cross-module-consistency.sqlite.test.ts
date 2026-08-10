@@ -92,7 +92,7 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openContext(dir);
-      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const p1 = ctx.seedEnteredProject({ region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
       // 推进到待掉票：实际装机完成 → 待验收；验收报告 → 待掉票
       ctx.projectService.recordActualInstallDone(p1, '2026-07-10');
       ctx.projectService.markAcceptance(p1, '2026-07-12');
@@ -130,13 +130,13 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openContext(dir);
-      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const p1 = ctx.seedEnteredProject({ region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
       const month = { monthFrom: '2026-07', monthTo: '2026-07' };
-      expect(ctx.reporting.buildReport(month).entryAmountByRegion[0].region).toBe('华东');
+      expect(ctx.reporting.buildReport(month).entryAmountByRegion[0].region).toBe('East');
       // 区域为项目事实，修改后按去除首尾空白后的精确值实时重算，不保存快照
-      ctx.projectService.setRegion(p1, '  华南  ');
+      ctx.projectService.setRegion(p1, '  South  ');
       const after = ctx.reporting.buildReport(month).entryAmountByRegion;
-      expect(after[0].region).toBe('华南');
+      expect(after[0].region).toBe('South');
       closeDatabase(ctx.db);
     } finally {
       cleanupTempDir(dir);
@@ -147,7 +147,7 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openContext(dir);
-      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const p1 = ctx.seedEnteredProject({ region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
       // 已录入实际装机完成时间：自动触发待验收
       ctx.projectService.recordActualInstallDone(p1, '2026-07-10');
       expect(ctx.projects.findById(p1)!.status).toBe('pending_acceptance');
@@ -176,7 +176,7 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openContext(dir);
-      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const p1 = ctx.seedEnteredProject({ region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
       ctx.financial.recordInvoice(p1, { amountCents: 500000n, invoicedAt: '2026-07-15' }, ACTOR);
       ctx.reminder.setReminder(p1, { at: '2026-08-01', note: '提醒A' }, ACTOR);
 
@@ -198,7 +198,7 @@ describe('跨模块所有权与实时一致性（tasks 10.3）', () => {
     const dir = makeTempDir();
     try {
       const ctx = openContext(dir);
-      const p1 = ctx.seedEnteredProject({ region: '华东', entryAt: '2026-07-01', snapshot: '10000' });
+      const p1 = ctx.seedEnteredProject({ region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
       const before = ctx.projects.findById(p1)!.status;
       const beforeUpdatedAt = ctx.projects.findById(p1)!.updatedAt;
 

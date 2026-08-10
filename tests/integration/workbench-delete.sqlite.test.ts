@@ -14,13 +14,17 @@ import {
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 
 /**
- * 受保护登记记录删除（v2Delete，ora-1 严格守卫）：
- * - BEGIN IMMEDIATE 事务内核验 expectedRevision（防 TOCTOU）；
+ * 受保护登记记录删除（v2Delete，design D3 类型分发 + 阶段 A 审计）：
+ * - BEGIN IMMEDIATE 事务内核验 expectedRevision（防 TOCTOU），随后按 kind 分发到
+ *   显式 type-specific policy（WorkbenchDeletePolicies），不再有「任意表」通用删除；
+ * - 成功删除与最小 tombstone（record_deletion_audit）同事务原子写入；
+ *   import_record_audit 保留并标记指向已删除目标（target_deleted_at /
+ *   target_delete_operation_id），绝不物理擦除来源审计；拒绝路径全零写；
  * - batch 仅未开始运输/无当前仪器/无改批历史；activity 存在工作事实或维修关联拒绝
  *   （不级联清事实）；damage 仅未处理、备件未使用、无活动关联；completed ship-to 禁止；
  *   instrument 所属批次已开始运输也禁止、且保留其他依赖检查；
  * - acceptance 真正实现：有 invoice 历史拒绝，否则清空验收事实并按事实确定性回退状态；
- * - invoice 映射为撤销（不可物理删除）；全部删除联动导入审计。
+ * - invoice 映射为撤销（不可物理删除、不写 tombstone）；project 无删除入口。
  */
 
 const dirs: string[] = [];
@@ -36,7 +40,7 @@ function wizard(overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPay
   return {
     intent: 'formal',
     customerName: '删除测试客户',
-    region: '华东',
+    region: 'East',
     oldSiteAddress: '旧址',
     newSiteAddress: '新址',
     instrumentCount: 1,
@@ -99,7 +103,7 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
     expect(readBusinessRevision(ctx.db)).toBe(after);
   });
 
-  it('service_order 删除成功：行删除 + 导入审计联动 + invalidate 标签', async () => {
+  it('service_order 删除成功：行删除 + 来源审计保留并标记 + tombstone 原子写入 + invalidate 标签', async () => {
     const ctx = await makeCtx();
     const { facade, db, projectId } = ctx;
     facade.v2Mutate({
@@ -117,7 +121,30 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
     expect(result.changed).toMatchObject({ kind: 'service_order', id: orderId, projectId });
     expect(result.invalidated).toContain(`project:${projectId}`);
     expect(facade.v2SectionPage({ projectId, kind: 'orders' }).total).toBe(0);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE target_table = ?').get('service_orders')!.n).toBe(0);
+    // 来源审计保留（不物理删除）且标记指向已删除目标
+    const audit = db.prepare('SELECT * FROM import_record_audit WHERE id = ?').get('audit-so') as {
+      target_table: string;
+      target_id: string;
+      target_deleted_at: string | null;
+      target_delete_operation_id: string | null;
+    };
+    expect(audit).toBeDefined();
+    expect(audit.target_table).toBe('service_orders');
+    expect(audit.target_id).toBe(orderId);
+    expect(audit.target_deleted_at).not.toBeNull();
+    expect(audit.target_delete_operation_id).not.toBeNull();
+    // 最小 tombstone 同事务原子写入：record_type/record_id/owned_child_count/操作者/operation_id 关联
+    const tomb = db.prepare('SELECT * FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('service_order', orderId) as {
+      operation_id: string;
+      owned_child_count: number;
+      actor_username_snapshot: string | null;
+      deleted_at: string | null;
+    };
+    expect(tomb).toBeDefined();
+    expect(tomb.owned_child_count).toBe(0);
+    expect(tomb.actor_username_snapshot).toBe('负责人');
+    expect(tomb.deleted_at).not.toBeNull();
+    expect(tomb.operation_id).toBe(audit.target_delete_operation_id);
   });
 
   it('activity：存在工作事实 → 拒绝（不级联清事实）；空活动（无事实/无维修关联）→ 删除成功', async () => {
@@ -458,11 +485,11 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
     expect(stResult.invalidated).toEqual(['overview', 'projects', 'lookup:ship_to_requests']);
   });
 
-  it('原子审计联动：成功删除随行清除目标表审计（批次+唯一物流费用），拒绝路径保留审计', async () => {
+  it('原子审计联动：成功删除保留来源审计并标记（批次+唯一物流费用），tombstone 同事务原子写入；拒绝路径全零写', async () => {
     const ctx = await makeCtx();
     const { facade, db, projectId } = ctx;
 
-    // 批次 + 唯一物流费用均挂 import_record_audit → 删除时审计随行原子清除
+    // 批次 + 唯一物流费用均挂 import_record_audit → 删除时来源审计保留并标记（不物理擦除）
     facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '运输公司', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '11000' } } });
     const batchId = String(db.prepare('SELECT id FROM batches WHERE project_id = ?').get(projectId)!.id);
     const feeId = String(db.prepare('SELECT id FROM logistics_fees WHERE batch_id = ?').get(batchId)!.id);
@@ -474,10 +501,28 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
     ).run(feeId);
     const result = facade.v2Delete({ kind: 'batch', id: batchId, expectedRevision: readBusinessRevision(db) });
     expect(result.changed?.kind).toBe('batch');
-    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE target_table = ? AND target_id = ?').get('batches', batchId)!.n).toBe(0);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE target_table = ? AND target_id = ?').get('logistics_fees', feeId)!.n).toBe(0);
+    // 来源审计行保留（未物理删除）且两个目标均标记指向已删除目标
+    const batchAudit = db.prepare('SELECT * FROM import_record_audit WHERE id = ?').get('audit-batch') as {
+      target_deleted_at: string | null;
+      target_delete_operation_id: string | null;
+    };
+    const feeAudit = db.prepare('SELECT * FROM import_record_audit WHERE id = ?').get('audit-fee') as {
+      target_deleted_at: string | null;
+      target_delete_operation_id: string | null;
+    };
+    expect(batchAudit.target_deleted_at).not.toBeNull();
+    expect(feeAudit.target_deleted_at).not.toBeNull();
+    // tombstone：批次 owned_child_count=1（唯一物流费用原子清理）；operation_id 与全部 import marker 一致
+    const tomb = db.prepare('SELECT * FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('batch', batchId) as {
+      operation_id: string;
+      owned_child_count: number;
+    };
+    expect(tomb).toBeDefined();
+    expect(tomb.owned_child_count).toBe(1);
+    expect(tomb.operation_id).toBe(batchAudit.target_delete_operation_id);
+    expect(tomb.operation_id).toBe(feeAudit.target_delete_operation_id);
 
-    // 拒绝路径：依赖拒绝时目标表审计保留（不误删、不级联清审计）
+    // 拒绝路径：业务行、tombstone、import marker 全零写（来源审计原样保留、无标记）
     const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
     facade.v2Mutate({
       op: 'submit_action',
@@ -493,7 +538,89 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
       () => facade.v2Delete({ kind: 'damage_repair_item', id: damageId, expectedRevision: revisionAtReject }),
       DELETE_REJECTION_CODES.DEPENDENCIES,
     );
-    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE target_table = ? AND target_id = ?').get('damage_repair_items', damageId)!.n).toBe(1);
+    // 业务行仍在（未被级联删除）
+    expect(db.prepare('SELECT COUNT(*) AS n FROM damage_repair_items WHERE id = ?').get(damageId)!.n).toBe(1);
+    // import marker 未被写入（target_deleted_at 仍为 NULL，审计原样保留）
+    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE id = ? AND target_deleted_at IS NULL').get('audit-damage')!.n).toBe(1);
+    // 拒绝路径不写任何 tombstone
+    expect(db.prepare('SELECT COUNT(*) AS n FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('damage_repair_item', damageId)!.n).toBe(0);
     expect(readBusinessRevision(db)).toBe(revisionAtReject);
+  });
+
+  it('类型分发：各 kind 成功删除写入对应 record_type 的 tombstone（owned_child_count 记录原子清理子记录数）', async () => {
+    const ctx = await makeCtx();
+    const { facade, db, projectId } = ctx;
+
+    // qr_request：多选类型（2 条）随申请原子清理 → owned_child_count=2
+    facade.v2Mutate({ op: 'submit_action', action: { type: 'qr_request', values: { applicant: '申请人', requestedAt: '2026-08-10', types: ['A', 'logistics_management'] } } });
+    const qrId = String(db.prepare('SELECT id FROM qr_requests LIMIT 1').get()!.id);
+    facade.v2Delete({ kind: 'qr_request', id: qrId, expectedRevision: readBusinessRevision(db) });
+    const qrTomb = db.prepare('SELECT * FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('qr_request', qrId) as {
+      operation_id: string;
+      owned_child_count: number;
+    };
+    expect(qrTomb).toBeDefined();
+    expect(qrTomb.owned_child_count).toBe(2);
+
+    // activity：参与工程师（2 名）随活动原子清理 → owned_child_count=2
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'visit', projectId, values: { visitAt: '2026-08-13', engineers: '工程师甲、工程师乙' } } });
+    const activityId = String(db.prepare('SELECT id FROM activities WHERE project_id = ?').get(projectId)!.id);
+    facade.v2Delete({ kind: 'activity', id: activityId, expectedRevision: readBusinessRevision(db) });
+    const activityTomb = db.prepare('SELECT * FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('activity', activityId) as {
+      operation_id: string;
+      owned_child_count: number;
+    };
+    expect(activityTomb).toBeDefined();
+    expect(activityTomb.owned_child_count).toBe(2);
+
+    // 独立 serial_address：无子记录 → owned_child_count=0，且为独立 kind 的 tombstone
+    db.prepare(
+      `INSERT INTO serial_address_updates (id, instrument_id, customer_name, new_site_address, serial_no, account_id, updated_at, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+    ).run('sa-dispatch', null, '独立客户', '新址', 'SN-D', 'ACC-D', '2026-08-10', 't');
+    facade.v2Delete({ kind: 'serial_address', id: 'sa-dispatch', expectedRevision: readBusinessRevision(db) });
+    const saTomb = db.prepare('SELECT * FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('serial_address', 'sa-dispatch') as {
+      operation_id: string;
+      owned_child_count: number;
+    };
+    expect(saTomb).toBeDefined();
+    expect(saTomb.owned_child_count).toBe(0);
+
+    // 每次 v2Delete 调用共享独立 operation_id（tombstone 一一对应，互不串用）
+    const opIds = [qrTomb.operation_id, activityTomb.operation_id, saTomb.operation_id];
+    expect(new Set(opIds).size).toBe(3);
+    // 记录已从读取模型消失（分发正确）
+    expect(facade.v2IndependentPage({ kind: 'qr_request' }).total).toBe(0);
+    expect(facade.v2IndependentPage({ kind: 'serial_address' }).total).toBe(0);
+    expect(facade.v2SectionPage({ projectId, kind: 'activities' }).total).toBe(0);
+  });
+
+  it('拒绝路径全零写：NOT_FOUND/未知 kind 不写业务行、tombstone 与 import marker', async () => {
+    const ctx = await makeCtx();
+    const { facade, db } = ctx;
+    db.prepare(
+      "INSERT INTO import_record_audit (id, source_key, target_table, target_id, import_source_hash, target_snapshot_hash, imported_at) VALUES ('audit-missing', 'm-1', 'service_orders', 'so-missing', 'h', 'h', '2026-08-11T00:00:00+08:00')",
+    ).run();
+    const revision = readBusinessRevision(db);
+
+    // NOT_FOUND：拒绝且 import marker 不写入（target_deleted_at 保持 NULL）
+    expectRejected(
+      () => facade.v2Delete({ kind: 'service_order', id: 'so-missing', expectedRevision: revision }),
+      DELETE_REJECTION_CODES.NOT_FOUND,
+    );
+    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE id = ? AND target_deleted_at IS NULL').get('audit-missing')!.n).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM record_deletion_audit').get()!.n).toBe(0);
+
+    // 未知 kind：稳定拒绝，同样零写
+    expectRejected(
+      () =>
+        facade.v2Delete({
+          kind: 'unknown_kind',
+          id: 'whatever',
+          expectedRevision: revision,
+        } as unknown as WorkbenchV2DeleteRequest),
+      'DELETE_UNKNOWN_KIND',
+    );
+    expect(db.prepare('SELECT COUNT(*) AS n FROM record_deletion_audit').get()!.n).toBe(0);
+    expect(readBusinessRevision(db)).toBe(revision);
   });
 });

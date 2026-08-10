@@ -24,7 +24,7 @@ afterEach(() => {
 const wizard = (overrides: Partial<ProjectWizardPayload> = {}): ProjectWizardPayload => ({
   intent: 'formal',
   customerName: '客户',
-  region: '华东',
+  region: 'East',
   contractStartDate: '2026-08-01',
   contractEndDate: '2027-07-31',
   oldSiteAddress: '旧址',
@@ -157,7 +157,7 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
       payload: wizard({
         intent: 'pre_entry_execution',
         customerName: '补齐资料客户',
-        region: '华南',
+        region: 'South',
         approvalReason: '客户进度紧急，经理已批复优先执行',
       }),
     });
@@ -264,7 +264,7 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     const facade = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }));
     const created = facade.v2Mutate({
       op: 'create_project',
-      payload: wizard({ intent: 'pre_entry_execution', customerName: '补数量客户', region: '华北', approvalReason: '先执行，搬迁范围后补' }),
+      payload: wizard({ intent: 'pre_entry_execution', customerName: '补数量客户', region: 'North', approvalReason: '先执行，搬迁范围后补' }),
     });
     const projectId = created.changed!.projectId!;
     // 模拟"搬迁范围未明确"的存量/导入项目：范围未确认、暂定数量为空。
@@ -333,13 +333,13 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
       expect(() =>
         facade.v2Mutate({
           op: 'supplement_project',
-          payload: { projectId, instrumentCount: instrumentCount as never, region: '西南', contractAmount: '10000', finalAmount: '10000', ecc: 'ECC-SUPP-BAD' },
+          payload: { projectId, instrumentCount: instrumentCount as never, region: 'West', contractAmount: '10000', finalAmount: '10000', ecc: 'ECC-SUPP-BAD' },
         }),
       ).toThrow(/仪器数量必须为大于 0 的整数/);
       // 整批回滚：数量/区域/进单均未落库
       const detail = facade.v2ProjectDetail(projectId);
       expect(detail.detail!.temporaryInstrumentCount).toBe(1); // 保持创建时的数量
-      expect(detail.project!.region).toBe('华南'); // 区域未部分写入
+      expect(detail.project!.region).toBe('South'); // 区域未部分写入
       expect(detail.project!.formallyEntered).toBe(false); // 正式进单未生效
       expect(detail.project!.ecc).toBeNull();
     }
@@ -589,7 +589,7 @@ describe('服务单快速动作 customerName 从项目客户读取 + 物流成�
       password: 'password1',
     });
     const facade2 = new WorkbenchFacade(db2, () => ({ accountId: account.id, username: account.username }));
-    const created = facade2.v2Mutate({ op: 'create_project', payload: wizard({ intent: 'pre_entry_execution', customerName: '无客户关联', region: '华北', approvalReason: '测试' }) });
+    const created = facade2.v2Mutate({ op: 'create_project', payload: wizard({ intent: 'pre_entry_execution', customerName: '无客户关联', region: 'North', approvalReason: '测试' }) });
     const pid2 = created.changed!.projectId!;
     db2.prepare('UPDATE projects SET customer_id = NULL WHERE id = ?').run(pid2);
     expect(() =>

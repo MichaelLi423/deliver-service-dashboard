@@ -51,7 +51,7 @@ function makeFacade(): Ctx {
       intent: 'formal',
       customerName: '集成客户甲',
       ecc: 'ECC-V2-001',
-      region: '华东',
+      region: 'East',
       contractStartDate: '2026-08-01',
       contractEndDate: '2027-07-31',
       oldSiteAddress: '旧址',
@@ -88,7 +88,7 @@ function seedProjects(db: DatabaseSync, count: number, baseUpdatedAt = '2026-08-
       `seed-p-${i}`,
       `TP-SEED-${String(i).padStart(4, '0')}`,
       i % 3 === 0 ? 'pending_execution' : i % 3 === 1 ? 'executing' : 'pending_acceptance',
-      i % 2 === 0 ? '华东' : '华北',
+      i % 2 === 0 ? 'East' : 'North',
       null,
       baseUpdatedAt,
       `2026-08-${String((i % 28) + 1).padStart(2, '0')}T${hour}:${minute}:00+08:00`,
@@ -171,7 +171,7 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
         intent: 'formal',
         customerName: '待掉票客户乙',
         ecc: 'ECC-PEND-002',
-        region: '华东',
+        region: 'East',
         instrumentCount: 1,
         contractAmount: '50000',
       },
@@ -398,7 +398,7 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
     const repo = reader(ctx);
 
     expect(repo.projectPage({ status: 'pending_acceptance' }).projects.length).toBe(11); // 10 seed(3%3==2) + 1 filter-r
-    expect(repo.projectPage({ region: '华北' }).projects.every((p) => p.region === '华北')).toBe(true);
+    expect(repo.projectPage({ region: 'North' }).projects.every((p) => p.region === 'North')).toBe(true);
     // query 命中客户名称（makeFacade 的集成客户甲）
     const byCustomer = repo.projectPage({ query: '集成客户' });
     expect(byCustomer.projects.length).toBe(1);
@@ -422,11 +422,11 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
     expect(all.projects.length).toBe(50);
     expect(all.nextCursor).toBeTruthy();
 
-    // region 过滤（华北 = i 为奇数 → 27 条）：total 重算为过滤集合，而不是全量
-    const east = repo.projectPage({ region: '华东' });
+    // region 过滤（North = i 为奇数 → 27 条）：total 重算为过滤集合，而不是全量
+    const east = repo.projectPage({ region: 'East' });
     const eastCount = east.total;
     expect(eastCount).toBe(29); // i 为偶数 28 条 + makeFacade 1 条
-    expect(east.projects.every((p) => p.region === '华东')).toBe(true);
+    expect(east.projects.every((p) => p.region === 'East')).toBe(true);
     // 过滤集合不足默认页 50 → 首页即返回全部过滤集合且无 nextCursor
     expect(east.projects.length).toBe(29);
     expect(east.nextCursor).toBeNull();
@@ -436,11 +436,11 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
     expect(repo.projectPage({ query: '集成客户' }).nextCursor).toBeNull();
     expect(repo.projectPage({ query: '绝无此名' }).total).toBe(0);
 
-    // query + region 组合：同时满足才计入（region=华北 且 客户名=集成客户 → 0）
-    expect(repo.projectPage({ query: '集成客户', region: '华北' }).total).toBe(0);
+    // query + region 组合：同时满足才计入（region=North 且 客户名=集成客户 → 0）
+    expect(repo.projectPage({ query: '集成客户', region: 'North' }).total).toBe(0);
 
     // 过滤集合超过默认页（50）时：cursor 翻页只覆盖过滤集合、无重复无遗漏
-    const many = repo.projectPage({ region: '华东', limit: 20 });
+    const many = repo.projectPage({ region: 'East', limit: 20 });
     expect(many.projects.length).toBe(20);
     const seen = new Set<string>(many.projects.map((p) => p.id));
     let cursor: string | null = many.nextCursor;
@@ -448,7 +448,7 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
     while (cursor) {
       guard += 1;
       expect(guard).toBeLessThanOrEqual(3);
-      const page = repo.projectPage({ region: '华东', limit: 20, cursor });
+      const page = repo.projectPage({ region: 'East', limit: 20, cursor });
       for (const p of page.projects) {
         expect(seen.has(p.id), `过滤翻页不应重复: ${p.id}`).toBe(false);
         seen.add(p.id);
@@ -681,7 +681,7 @@ describe('工作台 v2 独立模块 + lookup 分页（Oracle #10）', () => {
         intent: 'formal',
         customerName: '第二个客户',
         ecc: 'ECC-LK-2',
-        region: '华北',
+        region: 'North',
         contractStartDate: '2026-08-01',
         contractEndDate: '2027-07-31',
         oldSiteAddress: '旧址',
@@ -1064,7 +1064,7 @@ describe('工作台 v2 mutation（Oracle #10：复用写逻辑，无 snapshot）
         intent: 'formal',
         customerName: 'Mutation客户',
         ecc: 'ECC-MUT-001',
-        region: '华东',
+        region: 'East',
         contractStartDate: '2026-08-01',
         contractEndDate: '2027-07-31',
         oldSiteAddress: '旧址',
@@ -1179,7 +1179,7 @@ describe('工作台 v2 BigInt 金额（Oracle #10 精度）', () => {
           intent: 'formal',
           customerName: '超精度客户',
           ecc: 'ECC-BIG-V2',
-          region: '华东',
+          region: 'East',
           contractStartDate: '2026-08-01',
           contractEndDate: '2027-07-31',
           oldSiteAddress: '旧址',

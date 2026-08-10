@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, powerMonitor } from 'electron';
 import path from 'node:path';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import type { DatabaseSync } from 'node:sqlite';
@@ -10,9 +10,13 @@ import {
 } from '../domain/capabilities/local-data-persistence/backup';
 import { restoreFromBackup } from '../domain/capabilities/local-data-persistence/restore';
 import { rotateContentGeneration } from '../domain/capabilities/local-data-persistence/identity';
+import {
+  SqliteDuePlanVisitAdvancer,
+  type DuePlanVisitAdvanceResult,
+} from '../domain/capabilities/local-data-persistence';
 import { SqliteAccountRepository } from '../domain/capabilities/local-data-persistence/repositories';
 import { LocalAccountService } from '../domain/capabilities/workbench-access';
-import { SystemClock } from '../domain/core/time';
+import { SystemClock, type BusinessDate } from '../domain/core/time';
 import type { AccountSessionInfo } from '../shared/ipc';
 import { IMPORT_WIZARD_CHANNELS } from '../shared/ipc';
 import { bootstrapWorkspaceDatabase, closeWorkspaceDatabase } from '../domain/capabilities/historical-data-import/workspace';
@@ -22,6 +26,10 @@ import {
   type IpcHandlerDeps,
 } from './ipc-handlers';
 import { ImportWizardFacade, type ImportWizardFacadeDeps } from './import-wizard-facade';
+import {
+  DuePlanVisitRuntime,
+  type DuePlanVisitRuntimeDeps,
+} from './due-plan-visit-runtime';
 
 /**
  * 主进程入口（tasks 1.1 工程骨架）。
@@ -63,6 +71,9 @@ let currentSession: AccountSessionInfo | null = null;
 
 /** 启动时每日自动备份失败信息（失败不阻止窗口打开，传给访问门/工作台展示）。 */
 let autoBackupError: string | null = null;
+
+/** 计划上门日期到期自动推进触发接线（Tasks 3.3；桌面关闭期间不承诺运行）。 */
+let duePlanVisitRuntime: DuePlanVisitRuntime | null = null;
 
 function accountService(): LocalAccountService {
   return new LocalAccountService(new SqliteAccountRepository(requireDb()));
@@ -190,6 +201,38 @@ function createWindow(): void {
   }
 }
 
+/**
+ * 计划上门日期到期自动推进触发接线（Tasks 3.3）：
+ * - 启动补跑（迁移后、首个工作台读取前）由 whenReady 显式调用 runtime.runCatchUp()；
+ * - app activate / powerMonitor resume / 跨本地业务日期边界由 runtime 订阅与定时器触发；
+ * - 桌面关闭期间不承诺运行，下次 catch-up 用 <= 漏跑回溯；dispose 移除监听与定时器。
+ */
+function createDuePlanVisitRuntime(): DuePlanVisitRuntime {
+  const advance: (today: BusinessDate) => DuePlanVisitAdvanceResult = (today) =>
+    new SqliteDuePlanVisitAdvancer(requireDb()).advanceDuePlanVisits(today);
+  const deps: DuePlanVisitRuntimeDeps = {
+    clock: new SystemClock(),
+    advance,
+    events: {
+      onActivate: (fn) => {
+        app.on('activate', fn);
+        return () => {
+          app.removeListener('activate', fn);
+        };
+      },
+      onResume: (fn) => {
+        powerMonitor.on('resume', fn);
+        return () => {
+          powerMonitor.removeListener('resume', fn);
+        };
+      },
+    },
+  };
+  const runtime = new DuePlanVisitRuntime(deps);
+  runtime.start();
+  return runtime;
+}
+
 function registerIpcHandlersWithDeps(): void {
   const deps: IpcHandlerDeps = {
     db: requireDb,
@@ -279,6 +322,12 @@ app.whenReady().then(async () => {
   }
 
   registerIpcHandlersWithDeps();
+
+  // 计划上门日期到期自动推进（Tasks 3.3）：迁移后、首个工作台读取前补跑；
+  // 此后 activate/resume/跨本地业务日期边界由 runtime 触发（不承诺桌面关闭期间运行）。
+  duePlanVisitRuntime = createDuePlanVisitRuntime();
+  duePlanVisitRuntime.runCatchUp();
+
   createWindow();
 
   app.on('activate', () => {
@@ -293,6 +342,10 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+  if (duePlanVisitRuntime) {
+    duePlanVisitRuntime.dispose();
+    duePlanVisitRuntime = null;
+  }
   if (db) {
     try {
       closeDatabase(db);

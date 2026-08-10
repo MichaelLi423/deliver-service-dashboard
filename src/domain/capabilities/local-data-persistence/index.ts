@@ -35,4 +35,6 @@ export * from './reporting-fact-reader';
 export * from './workbench-read-repository';
 export * from './financial-repositories';
 export * from './data-cleanup';
+export * from './due-plan-visit-advancer';
+export * from './financial-integrity';
 export * from './fs-utils';

@@ -20,9 +20,54 @@ export function normalizeCustomerName(raw: string): string {
   return raw.trim();
 }
 
-/** 项目区域为手工文本：去除首尾空白后精确分组（TBD-12）。 */
+/**
+ * 项目区域固定枚举（tasks 2.4 / TBD-12）：新建/编辑仅允许这五个取值。
+ * 写入边界为 trim 后严格校验（parseProjectRegion）；读取/报表对存量
+ * 非枚举非空文本归入 REGION_PENDING_ADJUSTMENT 独立分组，不猜测、不置空、不丢弃。
+ */
+export const PROJECT_REGIONS = ['East', 'South', 'West', 'Central', 'North'] as const;
+
+/** 项目区域类型：五个固定取值之一（写入侧规范化值）。 */
+export type ProjectRegion = (typeof PROJECT_REGIONS)[number];
+
+const PROJECT_REGION_SET = new Set<string>(PROJECT_REGIONS);
+
+/** 读取/报表的「待调整」独立分组标记：存量非枚举非空区域归入该组。 */
+export const REGION_PENDING_ADJUSTMENT = '待调整';
+
+/**
+ * 项目区域 trim（既有兼容入口，TBD-12）：仅去除首尾空白，不做枚举校验。
+ * 保留给读取/筛选等只读口径使用；项目写边界必须走 parseProjectRegion，
+ * 不得漏校验（tasks 2.4）。
+ */
 export function normalizeRegion(raw: string): string {
   return raw.trim();
+}
+
+/**
+ * 项目区域写边界校验（tasks 2.4）：去除首尾空白后，非空值必须为五个枚举之一，
+ * 否则拒绝并给出用户可识别错误；空串/纯空白表示未填写（返回 ''，由调用方决定置空）。
+ * 存量 legacy 文本在读取/报表层归入 REGION_PENDING_ADJUSTMENT 分组，此处不做猜测映射。
+ */
+export function parseProjectRegion(raw: string, fieldName = '区域'): string {
+  const trimmed = normalizeRegion(raw);
+  if (trimmed !== '' && !PROJECT_REGION_SET.has(trimmed)) {
+    throw new ValidationError(
+      'INVALID_PROJECT_REGION',
+      `${fieldName}仅允许 East、South、West、Central、North 五个固定选项`,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * 区域分组键（读取/报表消费口径）：空 → ''（无区域分组）；
+ * 五个枚举 → 规范化原值；存量非空非枚举文本 → REGION_PENDING_ADJUSTMENT。
+ */
+export function regionGroupKey(raw: string | null | undefined): string {
+  const trimmed = normalizeRegion(raw ?? '');
+  if (trimmed === '') return '';
+  return PROJECT_REGION_SET.has(trimmed) ? trimmed : REGION_PENDING_ADJUSTMENT;
 }
 
 /** 非空业务 ID（ECC、服务单号、Account ID 等）去除首尾空白。 */

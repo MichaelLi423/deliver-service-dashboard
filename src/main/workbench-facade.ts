@@ -23,9 +23,11 @@ import {
   SqliteServiceOrderRepository, SqliteShipToAddressReader, SqliteShipToRepository,
   SqliteShipToRequestRepository, SqliteWorkFactRepository,
   DataCleanupService, type DataCleanupOptions,
+  SqliteDuePlanVisitAdvancer, type DuePlanVisitAdvanceResult,
   WorkbenchReadRepository,
 } from '../domain/capabilities/local-data-persistence';
 import { readBusinessRevision } from '../domain/capabilities/local-data-persistence/identity';
+import { WorkbenchDeletePolicies } from './workbench-delete';
 import { DELETE_REJECTION_CODES, WIZARD_REJECTION_CODES } from '../shared/ipc';
 import type {
   AccountSessionInfo, BatchEditPayload, DataCleanConfirmRequestDto, DataCleanConfirmResultDto,
@@ -325,14 +327,17 @@ export class WorkbenchFacade {
 
   // ---------------------------------------------------------------------------
   // 受保护登记记录删除（判别联合 + 预期业务修订防并发）。
-  // - BEGIN IMMEDIATE 事务内原子完成（含导入审计联动）；expectedRevision 在事务内
-  //   重新核验（防 TOCTOU：BEGIN IMMEDIATE 之前发生的写入也会被拒绝）；
-  // - 严格守卫（ora-1）：batch 仅未开始运输/无当前仪器/无改批历史；activity 存在
-  //   工作事实或维修关联拒绝（不级联清事实）；damage 仅未处理、备件未使用、无活动
-  //   关联；completed ship_to_request 禁止；instrument 所属批次已开始运输也禁止；
-  // - 不再假称反向重算：允许删除的均为不会触发状态变化的空记录，无需状态回退；
-  // - acceptance 真正实现：有 invoice 历史拒绝，否则清空验收事实并按事实确定性回退状态；
-  // - invoice 映射到现有 revoke（必填撤销日期/原因），绝不物理删除。
+  // - BEGIN IMMEDIATE 事务内核验 expectedRevision（防 TOCTOU：BEGIN IMMEDIATE 之前
+  //   发生的写入也会被拒绝），随后按 kind 分发到显式 type-specific policy
+  //   （WorkbenchDeletePolicies，design D3）；
+  // - 成功删除与最小 tombstone（record_deletion_audit）同事务原子写入；
+  //   import_record_audit 保留并标记指向已删除目标（target_deleted_at /
+  //   target_delete_operation_id），绝不物理擦除来源审计；拒绝路径零写；
+  // - 现有各类型行为保持不变：batch 仅未开始运输/无当前仪器/无改批历史；
+  //   activity 存在工作事实或维修关联拒绝（不级联清事实）；damage 仅未处理、
+  //   备件未使用、无活动关联；completed ship_to_request 禁止；instrument 所属批次
+  //   已开始运输也禁止；acceptance 有 invoice 历史拒绝，否则清空验收事实并按事实
+  //   确定性回退状态；invoice 映射到现有 revoke（必填撤销日期/原因），绝不物理删除。
   // ---------------------------------------------------------------------------
 
   v2Delete(request: WorkbenchV2DeleteRequest): WorkbenchV2DeleteResult {
@@ -349,206 +354,9 @@ export class WorkbenchFacade {
           `业务修订已变化（预期 ${request.expectedRevision}，当前 ${currentRevision}），请刷新后重试`,
         );
       }
-      switch (request.kind) {
-        case 'service_order': {
-          const order = this.orders.findById(request.id);
-          if (!order) {
-            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `开单记录不存在: ${request.id}`);
-          }
-          this.deleteBusinessRow('service_orders', request.id);
-          state.changed = { kind: 'service_order', id: request.id, projectId: order.projectId ?? undefined };
-          break;
-        }
-        case 'activity': {
-          const activity = this.activities.findById(request.id);
-          if (!activity) {
-            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `上门活动不存在: ${request.id}`);
-          }
-          // 严格守卫：存在工作事实或维修关联 → 拒绝（不级联清事实）。
-          if (this.existsWhere('work_facts', 'activity_id', request.id)) {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.DEPENDENCIES,
-              '该上门活动已产生工作事实，无法删除；请先处理工作事实',
-            );
-          }
-          if (this.existsWhere('activity_damage_links', 'activity_id', request.id)) {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.DEPENDENCIES,
-              '该上门活动已关联损坏/维修事项，无法删除；请先解除维修关联',
-            );
-          }
-          // 活动自身的参与工程师属活动记录一部分（非独立事实），随活动删除。
-          this.db.prepare('DELETE FROM activity_engineers WHERE activity_id = ?').run(request.id);
-          this.deleteBusinessRow('activities', request.id);
-          state.changed = { kind: 'activity', id: request.id, projectId: activity.projectId };
-          break;
-        }
-        case 'acceptance': {
-          const project = this.projects.findById(request.projectId);
-          if (!project) {
-            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `项目不存在: ${request.projectId}`);
-          }
-          // 有 invoice 历史（含已撤销）→ 拒绝（掉票闭环事实不可逆回退）；否则清空验收事实
-          // 并按事实确定性回退主状态（clearAcceptance 内部同样防御校验）。
-          const hasAnyInvoiceHistory = this.projectInvoiceHistoryExists(request.projectId);
-          if (hasAnyInvoiceHistory) {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.DEPENDENCIES,
-              '该项目存在掉票历史（含已撤销），验收报告不可删除；掉票闭环事实不可逆回退',
-            );
-          }
-          const executionStarted = this.projectExecutionStarted(request.projectId);
-          this.projectService().clearAcceptance(request.projectId, { hasAnyInvoiceHistory: false, executionStarted });
-          state.changed = { kind: 'acceptance', id: request.projectId, projectId: request.projectId };
-          break;
-        }
-        case 'damage_repair_item': {
-          const item = this.damageItems.findById(request.id);
-          if (!item) {
-            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `损坏/维修事项不存在: ${request.id}`);
-          }
-          // 严格守卫：仅未处理、备件未使用、无维修活动关联可删除。
-          if (item.issueStatus !== 'untreated') {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.DEPENDENCIES,
-              `该损坏/维修事项已处理（${item.issueStatus}），无法删除；仅未处理事项可删除`,
-            );
-          }
-          if (item.partStatus === 'used') {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.DEPENDENCIES,
-              '该损坏/维修事项备件已使用（计入维修费用），无法删除',
-            );
-          }
-          if (this.existsWhere('activity_damage_links', 'damage_item_id', request.id)) {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.DEPENDENCIES,
-              '该损坏/维修事项已关联上门活动，无法删除；请先解除维修关联',
-            );
-          }
-          this.deleteBusinessRow('damage_repair_items', request.id);
-          state.changed = { kind: 'damage_repair_item', id: request.id, projectId: item.projectId };
-          break;
-        }
-        case 'serial_address': {
-          const update = this.serialUpdates.findById(request.id);
-          if (!update) {
-            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `序列号地址更新记录不存在: ${request.id}`);
-          }
-          const projectId = update.instrumentId
-            ? this.projectOfInstrument(update.instrumentId)
-            : undefined;
-          this.deleteBusinessRow('serial_address_updates', request.id);
-          state.changed = { kind: 'serial_address', id: request.id, projectId };
-          state.extraTags.push('independent:serial_address');
-          break;
-        }
-        case 'qr_request': {
-          const requestRow = this.qrRequests.findById(request.id);
-          if (!requestRow) {
-            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `二维码申请记录不存在: ${request.id}`);
-          }
-          this.db.prepare('DELETE FROM qr_request_types WHERE qr_request_id = ?').run(request.id);
-          this.deleteBusinessRow('qr_requests', request.id);
-          state.changed = { kind: 'qr_request', id: request.id };
-          state.extraTags.push('independent:qr_request');
-          break;
-        }
-        case 'batch': {
-          const batch = this.batches.findById(request.id);
-          if (!batch) {
-            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `搬迁批次不存在: ${request.id}`);
-          }
-          // 严格守卫：仅未开始运输、无当前仪器、无改批历史可删除。
-          if (batch.startedAt !== null) {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.DEPENDENCIES,
-              '该搬迁批次已开始运输，无法删除',
-            );
-          }
-          if (this.existsWhere('instruments', 'batch_id', request.id)) {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.DEPENDENCIES,
-              '该搬迁批次仍存在当前仪器，无法删除；请先解绑仪器',
-            );
-          }
-          if (
-            this.existsWhere('batch_change_history', 'from_batch_id', request.id) ||
-            this.existsWhere('batch_change_history', 'to_batch_id', request.id)
-          ) {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.DEPENDENCIES,
-              '该搬迁批次存在改批历史，无法删除',
-            );
-          }
-          // 批次与物流费用合并为一次记录：批次自身唯一物流费用随批次删除。
-          const fee = this.fees.findByBatchId(request.id);
-          if (fee) this.deleteBusinessRow('logistics_fees', fee.id);
-          this.deleteBusinessRow('batches', request.id);
-          state.changed = { kind: 'batch', id: request.id, projectId: batch.projectId };
-          break;
-        }
-        case 'instrument': {
-          const instrument = this.instruments.findById(request.id);
-          if (!instrument) {
-            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `搬迁仪器不存在: ${request.id}`);
-          }
-          // 所属批次已开始运输 → 禁止删除。
-          if (instrument.batchId) {
-            const batch = this.batches.findById(instrument.batchId);
-            if (batch && batch.startedAt !== null) {
-              throw new ValidationError(
-                DELETE_REJECTION_CODES.DEPENDENCIES,
-                '该搬迁仪器所属批次已开始运输，无法删除',
-              );
-            }
-          }
-          // 保留其他依赖检查（损坏事项/工作事实/改批历史/序列号更新）。
-          this.assertInstrumentDeletable(request.id);
-          this.deleteBusinessRow('instruments', request.id);
-          state.changed = { kind: 'instrument', id: request.id, projectId: instrument.projectId };
-          break;
-        }
-        case 'ship_to_request': {
-          const shipRequest = this.shipRequests.findById(request.id);
-          if (!shipRequest) {
-            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `Ship-to 申请记录不存在: ${request.id}`);
-          }
-          if (shipRequest.status === 'completed') {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.DEPENDENCIES,
-              '已完成的 Ship-to 申请不可删除',
-            );
-          }
-          this.deleteBusinessRow('ship_to_requests', request.id);
-          state.changed = { kind: 'ship_to_request', id: request.id };
-          state.extraTags.push('lookup:ship_to_requests');
-          break;
-        }
-        case 'invoice': {
-          const invoice = this.invoices.findById(request.id);
-          if (!invoice) {
-            throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `掉票记录不存在: ${request.id}`);
-          }
-          if (request.revokedAt === undefined || request.revokedAt === '' || request.revokeReason === undefined || request.revokeReason.trim() === '') {
-            throw new ValidationError(
-              DELETE_REJECTION_CODES.INVOICE_REQUIRES_REVOKE,
-              '掉票记录不可物理删除：删除必须携带撤销日期与撤销原因（映射为撤销）',
-            );
-          }
-          const revoked = this.financialService().revokeInvoice(
-            request.id,
-            { revokedAt: businessDate(request.revokedAt, '撤销日期') ?? '', revokeReason: request.revokeReason },
-            this.actor(),
-          );
-          state.changed = { kind: 'invoice', id: request.id, projectId: revoked.projectId };
-          break;
-        }
-        default: {
-          const kind = String((request as { kind?: unknown }).kind);
-          throw new ValidationError('DELETE_UNKNOWN_KIND', `未知的删除记录类型: ${kind}`);
-        }
-      }
+      const outcome = this.deletePolicies().execute(request);
+      state.changed = outcome.changed;
+      state.extraTags = outcome.extraTags;
     });
     const tags: WorkbenchV2InvalidateTag[] = ['overview', 'projects'];
     if (state.changed?.projectId) {
@@ -560,6 +368,21 @@ export class WorkbenchFacade {
       invalidated: [...new Set(tags)],
       changed: state.changed,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // 计划上门日期到期自动推进（Tasks 3.2/3.3 应用操作）：
+  // 幂等、审计、事务内重查 + CAS，复用 lifecycle 唯一入口（见 due-plan-visit-advancer）。
+  // 由主进程接线层在迁移后/首个工作台读取前、app activate、powerMonitor resume 与
+  // 跨本地业务日期边界时触发；桌面关闭期间不承诺运行，下次 catch-up 用 <= 补跑。
+  // ---------------------------------------------------------------------------
+
+  advanceDuePlanVisits(today: string): DuePlanVisitAdvanceResult {
+    const d = businessDate(today, '当前业务日期');
+    if (d === undefined) {
+      throw new ValidationError('REQUIRED_FIELD', '当前业务日期必填');
+    }
+    return new SqliteDuePlanVisitAdvancer(this.db).advanceDuePlanVisits(d);
   }
 
   // ---------------------------------------------------------------------------
@@ -1190,71 +1013,6 @@ export class WorkbenchFacade {
     return { invoiceId, projectId };
   }
 
-  // ---- 受保护删除内部实现（v2Delete 专用；全部在调用方事务内执行） ----
-
-  /** 删除业务行 + 联动导入审计（表名来自固定白名单，无注入面）。 */
-  private deleteBusinessRow(table: string, id: string): void {
-    this.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
-    this.db.prepare('DELETE FROM import_record_audit WHERE target_table = ? AND target_id = ?').run(table, id);
-  }
-
-  /** 是否存在匹配行（表名/列名来自固定白名单，无注入面）。 */
-  private existsWhere(table: string, column: string, value: string): boolean {
-    const row = this.db.prepare(`SELECT 1 AS x FROM ${table} WHERE ${column} = ? LIMIT 1`).get(value) as
-      | { x: number }
-      | undefined;
-    return row !== undefined;
-  }
-
-  /** 项目是否存在任何掉票历史（含已撤销）：有则验收报告删除被拒绝。 */
-  private projectInvoiceHistoryExists(projectId: string): boolean {
-    const row = this.db.prepare('SELECT COUNT(*) AS n FROM invoices WHERE project_id = ?').get(projectId) as {
-      n: number;
-    };
-    return row.n > 0;
-  }
-
-  /** 项目是否已开始执行：任一批次开始运输 或 任一工作事实已开始。 */
-  private projectExecutionStarted(projectId: string): boolean {
-    const batchStarted = this.db
-      .prepare('SELECT 1 AS x FROM batches WHERE project_id = ? AND started_at IS NOT NULL LIMIT 1')
-      .get(projectId);
-    if (batchStarted) return true;
-    const workFact = this.db
-      .prepare(
-        `SELECT 1 AS x FROM work_facts wf
-         JOIN activities a ON a.id = wf.activity_id
-         WHERE a.project_id = ? LIMIT 1`,
-      )
-      .get(projectId);
-    return workFact !== undefined;
-  }
-
-  /** 仪器存在依赖记录时拒绝删除（保护依赖，避免静默级联丢失业务数据）。 */
-  private assertInstrumentDeletable(instrumentId: string): void {
-    const dependents = [
-      ['damage_repair_items', 'instrument_id'],
-      ['work_facts', 'instrument_id'],
-      ['batch_change_history', 'instrument_id'],
-      ['serial_address_updates', 'instrument_id'],
-    ] as const;
-    for (const [table, column] of dependents) {
-      if (this.existsWhere(table, column, instrumentId)) {
-        throw new ValidationError(
-          DELETE_REJECTION_CODES.DEPENDENCIES,
-          `该搬迁仪器存在依赖记录（${table}），无法安全删除；请先处理依赖记录`,
-        );
-      }
-    }
-  }
-
-  private projectOfInstrument(instrumentId: string): string | undefined {
-    const row = this.db.prepare('SELECT project_id FROM instruments WHERE id = ?').get(instrumentId) as
-      | { project_id: string }
-      | undefined;
-    return row ? row.project_id : undefined;
-  }
-
   report(filter:ReportFilterDto):ReportModel { return new ReportingService(new SqliteReportingFactReader(this.db)).buildReport(filter); }
   reportDto(filter:ReportFilterDto):ReportDto { return serializeReport(this.report(filter)); }
   drillDown(metric:string,filter:ReportFilterDto):Array<Record<string,string|number|boolean|null>> { return serializeRows(new ReportingService(new SqliteReportingFactReader(this.db)).getMetricDetails(metric as ReportMetricKey,filter)); }
@@ -1266,6 +1024,29 @@ export class WorkbenchFacade {
   private financialService(){return new FinancialClosureService(this.projects,this.contracts,this.invoices,{reevaluateStatus:(id)=>{this.projectService().adjustStatus(id,this.projects.findById(id)?.status??'pending_entry');}});}
   private shipToService(){return this.injected?.shipToService ?? new ShipToService(new SqliteShipToRepository(this.db),this.shipRequests,new SqliteShipToAddressReader(this.db));}
   private damageService(){return new DamageRepairService(this.damageItems,new SqliteActivityDamageLinkRepository(this.db),new SqliteDamageInstrumentReader(this.db),new SqliteRepairActivityReader(this.db),new SqliteContractAmountReader(this.db));}
+  /** 受保护删除策略分发器（design D3）：类型分发 + tombstone/import marker 原子审计。 */
+  private deletePolicies(): WorkbenchDeletePolicies {
+    return new WorkbenchDeletePolicies({
+      db: this.db,
+      actor: () => this.actor(),
+      parseBusinessDate: businessDate,
+      repositories: {
+        orders: this.orders,
+        activities: this.activities,
+        projects: this.projects,
+        damageItems: this.damageItems,
+        serialUpdates: this.serialUpdates,
+        qrRequests: this.qrRequests,
+        batches: this.batches,
+        fees: this.fees,
+        instruments: this.instruments,
+        shipRequests: this.shipRequests,
+        invoices: this.invoices,
+      },
+      projectService: () => this.projectService(),
+      financialService: () => this.financialService(),
+    });
+  }
   private transaction(work:()=>void){this.db.exec('BEGIN');try{work();this.db.exec('COMMIT');}catch(error){try{this.db.exec('ROLLBACK');}catch{}throw error;}}
   /** BEGIN IMMEDIATE 事务（v2Delete 等防并发/TOCTOU 的写路径专用）。 */
   private transactionImmediate(work:()=>void){this.db.exec('BEGIN IMMEDIATE');try{work();this.db.exec('COMMIT');}catch(error){try{this.db.exec('ROLLBACK');}catch{}throw error;}}

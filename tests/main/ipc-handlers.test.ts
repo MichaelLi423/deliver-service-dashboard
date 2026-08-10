@@ -134,7 +134,7 @@ const PROJECT_PAYLOAD = (overrides: Partial<ProjectWizardPayload> = {}): Project
   intent: 'formal',
   customerName: 'IPC客户',
   ecc: 'ECC-IPC-001',
-  region: '华东',
+  region: 'East',
   contractStartDate: '2026-08-01',
   contractEndDate: '2027-07-31',
   oldSiteAddress: '旧址',
@@ -321,7 +321,7 @@ describe('取消项目命令（v2 adjust_status 拒绝 cancelled；cancel_projec
     await establishSession(ctx);
     const created = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'create_project',
-      payload: PROJECT_PAYLOAD({ customerName: '取消客户', ecc: 'ECC-CANCEL-IPC', region: '西南' }),
+      payload: PROJECT_PAYLOAD({ customerName: '取消客户', ecc: 'ECC-CANCEL-IPC', region: 'West' }),
     } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
     return { bus: ctx.bus, projectId: created.changed.projectId };
   }

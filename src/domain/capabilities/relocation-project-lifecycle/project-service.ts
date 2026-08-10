@@ -1,5 +1,5 @@
 import { UniquenessError, ValidationError } from '../../core/errors';
-import { assertRequiredText, normalizeBusinessId, normalizeRegion } from '../../core/ids';
+import { assertRequiredText, normalizeBusinessId, parseProjectRegion } from '../../core/ids';
 import {
   assertValidBusinessDate,
   assertValidDateOnly,
@@ -108,6 +108,11 @@ export interface StatusAdjustFacts {
   hasAnyInvoiceHistory?: boolean;
   /** 首次上门活动开始或首个搬迁批次开始运输（仅完成排期/工程师/运输安排不计）。 */
   executionStarted?: boolean;
+  /**
+   * 当前业务日期（Tasks 3.4）：提供时启用计划上门日期到期自动推进（lifecycle
+   * 转换表），使人工提交的同时若项目已到期，自动触发优先于人工状态值。
+   */
+  today?: BusinessDate;
 }
 
 export class ProjectService {
@@ -218,7 +223,12 @@ export class ProjectService {
 
     // 正式进单后按明确自动触发重新校验主状态（标签已清除，自动触发不再被拦截）；
     // 无自动触发时基线 pending_execution（进单即视为已进入执行准备阶段）。
-    this.adjustStatus(projectId, 'pending_execution');
+    // Tasks 3.4 不倒退：仅仍在待进单（含带标签保持待进单）的项目参与重算；
+    // 已在执行中或后续状态（到期/实际装机/验收/金额闭环自动推进的结果）的项目
+    // 不得因进单回退，保持现状态。重算携带 today，使已到期的项目进单即自动进入执行中。
+    if (project.status === 'pending_entry') {
+      this.adjustStatus(projectId, 'pending_execution', { today: this.today() });
+    }
     return this.requireProject(projectId);
   }
 
@@ -292,6 +302,8 @@ export class ProjectService {
       requestedStatus,
       actualInstallDoneAt: project.actualInstallDoneAt,
       acceptanceReportDate: project.acceptanceReportDate,
+      planVisitAt: project.planVisitAt,
+      today: facts?.today,
       preEntryExecution: project.preEntryExecution,
       executionStarted: facts?.executionStarted ?? false,
       amounts: {
@@ -510,10 +522,15 @@ export class ProjectService {
 
   // ---- 2.7 项目区域 ----
 
-  /** 设置区域：手工文本，去除首尾空白后精确分组（TBD-12）。 */
+  /**
+   * 设置区域（tasks 2.4 / TBD-12）：去除首尾空白后仅允许 East、South、West、
+   * Central、North 五个固定取值，非枚举值拒绝保存并提示（绝不静默写入）；
+   * 空串/纯空白 = 清空区域。存量 legacy 非枚举文本保留在既有数据中、
+   * 由读取/报表归入「待调整」分组，本项目写边界不做猜测映射。
+   */
   setRegion(projectId: string, region: string): Project {
     const project = this.requireProject(projectId);
-    const trimmed = normalizeRegion(region);
+    const trimmed = parseProjectRegion(region);
     project.region = trimmed === '' ? null : trimmed;
     project.updatedAt = this.now();
     this.projects.save(project);

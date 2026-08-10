@@ -66,6 +66,12 @@ import {
   applyRelocationWorkbenchFieldsMigration,
   RELOCATION_WORKBENCH_MIGRATION_VERSION,
 } from './schema-v15';
+import {
+  buildFinancialIntegrityHint,
+  hasAnyFinancialIntegrityIssue,
+  readFinancialIntegrityCounts,
+  type FinancialIntegrityCounts,
+} from './financial-integrity';
 
 /** 初始迁移：v1 创建覆盖 14 个能力的核心表/事实表。 */
 export const INITIAL_MIGRATION: Migration = {
@@ -198,12 +204,20 @@ export interface BootstrapOptions {
   backupDir?: string;
   openOptions?: Omit<OpenDatabaseOptions, 'path'>;
   now?: () => Date;
+  /** 迁移后孤立财务数据诊断输出（缺省 console.warn；测试可注入固定 logger 断言治理提示）。 */
+  logger?: { warn: (message: string) => void };
 }
 
 export interface BootstrapResult {
   db: DatabaseSync;
   dbPath: string;
   migrationResult: ReturnType<typeof runMigrations>;
+  /**
+   * 迁移后/启动孤立财务数据诊断计数（tasks 2.3/4.3 同源实现）。
+   * 只读、仅计数（不返回/打印客户值）、不静默删除任何财务记录；结构性外键违规
+   * 以 foreignKeyViolations 持续报告、不阻断迁移、不宣称 foreign_key_check 归零。
+   */
+  integrityDiagnostics: FinancialIntegrityCounts;
 }
 
 /**
@@ -211,6 +225,7 @@ export interface BootstrapResult {
  * - 数据库文件：{dataDir}/workbench.db
  * - WAL/foreign_keys/busy_timeout 由 openDatabase 配置
  * - 迁移失败保留原库与迁移前安全备份（MigrationError 携带恢复信息）
+ * - 迁移成功后执行只读孤立财务数据诊断（仅计数，不静默删除；存在计数时输出治理清理提示）。
  */
 export function bootstrapDatabase(options: BootstrapOptions): BootstrapResult {
   const dbPath = join(options.dataDir, 'workbench.db');
@@ -222,7 +237,15 @@ export function bootstrapDatabase(options: BootstrapOptions): BootstrapResult {
       backupDir,
       now: options.now,
     });
-    return { db, dbPath, migrationResult };
+    // 迁移后/启动诊断（tasks 2.3）：只读计数，旧库存量结构违规不静默删、不阻断迁移。
+    const integrityDiagnostics = readFinancialIntegrityCounts(db);
+    if (hasAnyFinancialIntegrityIssue(integrityDiagnostics)) {
+      const hint = buildFinancialIntegrityHint(integrityDiagnostics);
+      if (hint !== null) {
+        (options.logger?.warn ?? console.warn)(hint);
+      }
+    }
+    return { db, dbPath, migrationResult, integrityDiagnostics };
   } catch (err) {
     closeDatabase(db);
     throw err;

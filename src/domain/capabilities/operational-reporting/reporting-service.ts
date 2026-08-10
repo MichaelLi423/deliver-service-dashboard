@@ -1,5 +1,5 @@
 import { ValidationError } from '../../core/errors';
-import { normalizeRegion } from '../../core/ids';
+import { normalizeRegion, regionGroupKey } from '../../core/ids';
 import { Money, Ratio, RMB_TO_USD_RATE } from '../../core/money';
 import {
   SystemClock,
@@ -25,7 +25,9 @@ import type { ReportingFactReader } from './reporting-facts';
  *
  * 口径要点：
  * - 月份区间由负责人手工选择（无默认季度，TBD-17）；区域按去除首尾空白后的
- *   精确值分组、不保存快照，区域修改后历史报表实时重算（7.8）。
+ *   固定枚举（East/South/West/Central/North）分组、不保存快照，区域修改后
+ *   历史报表实时重算；存量非枚举非空区域文本保留原值、归入「待调整」独立分组
+ *   （tasks 2.4，不猜测映射、不置空、不丢弃）。
  * - 责任人归属取动作记录中持久化的账号内部 ID 与当时用户名快照，历史统计
  *   不因以后用户名修改而动态变化（7.8）。
  * - 已取消项目排除项目管道、进单金额、掉票金额/次数及金额闭环指标，但取消前
@@ -726,8 +728,13 @@ export class ReportingService {
     };
   }
 
+  /**
+   * 区域分组键（读取/报表消费口径，tasks 2.4）：空 → 无区域分组；
+   * 五个枚举 → 规范化原值；存量非枚举非空文本 → 「待调整」独立分组
+   * （不猜测映射、不置空、不丢弃，区域修改后实时重算）。
+   */
   private regionKey(project: Project): string {
-    return (project.region ?? '').trim();
+    return regionGroupKey(project.region);
   }
 
   private regionMatch(project: Project, f: NormalizedFilter): boolean {

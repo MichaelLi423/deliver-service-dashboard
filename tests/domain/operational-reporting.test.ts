@@ -37,7 +37,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     customerId: null,
     contractId: 'c1',
     entryAt: '2026-07-01',
-    region: '华东',
+    region: 'East',
     oldSiteContact: null,
     newSiteContact: null,
     oldSiteAddress: null,
@@ -245,8 +245,8 @@ describe('各区域新项目进单金额（7.2）', () => {
   it('按进单月份与区域汇总进单金额，每个项目只计一次，不因合同变更改变', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', tempNo: 'TP-1', region: '华东', entryAt: '2026-07-01' }),
-      makeProject({ id: 'p2', tempNo: 'TP-2', region: '华南', entryAt: '2026-07-02' }),
+      makeProject({ id: 'p1', tempNo: 'TP-1', region: 'East', entryAt: '2026-07-01' }),
+      makeProject({ id: 'p2', tempNo: 'TP-2', region: 'South', entryAt: '2026-07-02' }),
     ];
     facts.contracts = [
       makeContract({ projectId: 'p1', entryAmountSnapshotCents: 100000n }),
@@ -254,20 +254,20 @@ describe('各区域新项目进单金额（7.2）', () => {
     ];
     const report = service.buildReport(JULY);
     expect(report.entryAmountByRegion).toEqual([
-      { month: '2026-07', region: '华东', amountCents: 100000n, projectCount: 1 },
-      { month: '2026-07', region: '华南', amountCents: 200000n, projectCount: 1 },
+      { month: '2026-07', region: 'East', amountCents: 100000n, projectCount: 1 },
+      { month: '2026-07', region: 'South', amountCents: 200000n, projectCount: 1 },
     ]);
 
     // 后续合同金额覆盖不改变已计取的快照值（快照在正式进单时锁定）
     facts.contracts[0].usdTaxAmountCents = 999999n;
     const after = service.buildReport(JULY);
-    expect(after.entryAmountByRegion.find((r) => r.region === '华东')!.amountCents).toBe(100000n);
+    expect(after.entryAmountByRegion.find((r) => r.region === 'East')!.amountCents).toBe(100000n);
   });
 
   it('按已记录进单时间归属；补录或修正进单时间后归属实时变化', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', region: '华东', entryAt: '2026-06-20' }),
+      makeProject({ id: 'p1', region: 'East', entryAt: '2026-06-20' }),
     ];
     facts.contracts = [makeContract({ entryAmountSnapshotCents: 100000n })];
     expect(service.buildReport(JULY).entryAmountByRegion).toHaveLength(0);
@@ -283,8 +283,8 @@ describe('各区域新项目进单金额（7.2）', () => {
   it('区域按去除首尾空白后的精确值分组（7.8）', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', region: '华东', entryAt: '2026-07-01' }),
-      makeProject({ id: 'p2', region: '华东 ', entryAt: '2026-07-02' }),
+      makeProject({ id: 'p1', region: 'East', entryAt: '2026-07-01' }),
+      makeProject({ id: 'p2', region: ' East ', entryAt: '2026-07-02' }),
     ];
     facts.contracts = [
       makeContract({ projectId: 'p1', entryAmountSnapshotCents: 100000n }),
@@ -292,19 +292,48 @@ describe('各区域新项目进单金额（7.2）', () => {
     ];
     const report = service.buildReport(JULY);
     expect(report.entryAmountByRegion).toEqual([
-      { month: '2026-07', region: '华东', amountCents: 200000n, projectCount: 2 },
+      { month: '2026-07', region: 'East', amountCents: 200000n, projectCount: 2 },
     ]);
   });
 
   it('区域修改后历史报表实时重算（7.8）', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', region: '华东', entryAt: '2026-07-01' }),
+      makeProject({ id: 'p1', region: 'East', entryAt: '2026-07-01' }),
     ];
     facts.contracts = [makeContract({ entryAmountSnapshotCents: 100000n })];
-    expect(service.buildReport(JULY).entryAmountByRegion[0].region).toBe('华东');
-    facts.projects[0].region = '华南';
-    expect(service.buildReport(JULY).entryAmountByRegion[0].region).toBe('华南');
+    expect(service.buildReport(JULY).entryAmountByRegion[0].region).toBe('East');
+    facts.projects[0].region = 'West';
+    expect(service.buildReport(JULY).entryAmountByRegion[0].region).toBe('West');
+  });
+
+  it('存量非标准区域原值保留并归入「待调整」独立分组（不猜测、不置空、不丢弃）', () => {
+    const { facts, service } = setup();
+    facts.projects = [
+      makeProject({ id: 'p1', region: '华东', entryAt: '2026-07-01' }),
+      makeProject({ id: 'p2', region: 'East', entryAt: '2026-07-02' }),
+      makeProject({ id: 'p3', region: ' 华北 ', entryAt: '2026-07-03' }),
+    ];
+    facts.contracts = [
+      makeContract({ projectId: 'p1', entryAmountSnapshotCents: 100000n }),
+      makeContract({ projectId: 'p2', entryAmountSnapshotCents: 200000n }),
+      makeContract({ projectId: 'p3', entryAmountSnapshotCents: 300000n }),
+    ];
+    const report = service.buildReport(JULY);
+    // 枚举区域按原值分组；两个不同 legacy 文本合并为同一「待调整」分组（不按文本猜测）。
+    expect(report.entryAmountByRegion).toEqual([
+      { month: '2026-07', region: 'East', amountCents: 200000n, projectCount: 1 },
+      { month: '2026-07', region: '待调整', amountCents: 400000n, projectCount: 2 },
+    ]);
+    // 下钻明细同口径：legacy 项目统计事实不丢弃，region 展示为「待调整」。
+    const details = service.getMetricDetails('entry_amount_by_region', JULY) as {
+      region: string;
+      amountCents: bigint;
+    }[];
+    expect(details.filter((d) => d.region === '待调整').reduce((s, d) => s + d.amountCents, 0n)).toBe(400000n);
+    // 原值保留：事实源中的 legacy 文本不被改写、不置空。
+    expect(facts.projects.find((p) => p.id === 'p1')!.region).toBe('华东');
+    expect(facts.projects.find((p) => p.id === 'p3')!.region).toBe(' 华北 ');
   });
 });
 
@@ -506,7 +535,7 @@ describe('损坏维修统计（7.5）', () => {
 describe('月度物流费用汇总、合同占比与历史异常批次（7.6）', () => {
   it('按运输公司与月份汇总，展示批次数、合同预算价/物流成交价合计与差异', () => {
     const { facts, service } = setup();
-    facts.projects = [makeProject({ id: 'p1' }), makeProject({ id: 'p2', tempNo: 'TP-2', region: '华南' })];
+    facts.projects = [makeProject({ id: 'p1' }), makeProject({ id: 'p2', tempNo: 'TP-2', region: 'South' })];
     facts.batches = [
       makeBatch({ id: 'b1', projectId: 'p1', transportCompany: '物流公司甲' }),
       makeBatch({ id: 'b2', projectId: 'p1', transportCompany: '物流公司甲' }),
@@ -835,8 +864,8 @@ describe('已取消项目的统计排除（7.9）', () => {
   it('已取消项目不纳入进单金额统计、不参与掉票统计与项目管道', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', tempNo: 'TP-1', region: '华东', status: 'cancelled', cancelledAt: '2026-07-20', cancelReason: '客户取消' }),
-      makeProject({ id: 'p2', tempNo: 'TP-2', region: '华南' }),
+      makeProject({ id: 'p1', tempNo: 'TP-1', region: 'East', status: 'cancelled', cancelledAt: '2026-07-20', cancelReason: '客户取消' }),
+      makeProject({ id: 'p2', tempNo: 'TP-2', region: 'South' }),
     ];
     facts.contracts = [
       makeContract({ projectId: 'p1', entryAmountSnapshotCents: 100000n }),
@@ -848,7 +877,7 @@ describe('已取消项目的统计排除（7.9）', () => {
     ];
     const report = service.buildReport(JULY);
     // 进单金额排除已取消项目
-    expect(report.entryAmountByRegion.map((r) => r.region)).toEqual(['华南']);
+    expect(report.entryAmountByRegion.map((r) => r.region)).toEqual(['South']);
     // 掉票金额/次数排除已取消项目
     expect(report.monthlyInvoices).toEqual([{ month: '2026-07', amountCents: 500000n, count: 1 }]);
     // 项目管道排除已取消项目
@@ -893,16 +922,16 @@ describe('报表筛选与手工月份区间（7.10）', () => {
   it('按月份区间与区域筛选', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', region: '华东', entryAt: '2026-06-01' }),
-      makeProject({ id: 'p2', region: '华南', entryAt: '2026-07-01' }),
+      makeProject({ id: 'p1', region: 'East', entryAt: '2026-06-01' }),
+      makeProject({ id: 'p2', region: 'South', entryAt: '2026-07-01' }),
     ];
     facts.contracts = [
       makeContract({ projectId: 'p1', entryAmountSnapshotCents: 100000n }),
       makeContract({ projectId: 'p2', entryAmountSnapshotCents: 200000n }),
     ];
-    const report = service.buildReport({ ...JULY, region: '华东' });
-    expect(report.entryAmountByRegion).toHaveLength(0); // 华东项目在 6 月，不在 7 月区间
-    const juneEast = service.buildReport({ monthFrom: '2026-06', monthTo: '2026-06', region: '华东' });
+    const report = service.buildReport({ ...JULY, region: 'East' });
+    expect(report.entryAmountByRegion).toHaveLength(0); // East 项目在 6 月，不在 7 月区间
+    const juneEast = service.buildReport({ monthFrom: '2026-06', monthTo: '2026-06', region: 'East' });
     expect(juneEast.entryAmountByRegion[0].amountCents).toBe(100000n);
   });
 });
@@ -911,8 +940,8 @@ describe('报表下钻（7.10）', () => {
   it('从掉票金额下钻到逐条掉票记录，明细口径与指标口径一致', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', tempNo: 'TP-1', region: '华东' }),
-      makeProject({ id: 'p2', tempNo: 'TP-2', region: '华南' }),
+      makeProject({ id: 'p1', tempNo: 'TP-1', region: 'East' }),
+      makeProject({ id: 'p2', tempNo: 'TP-2', region: 'South' }),
     ];
     facts.invoices = [
       makeInvoice({ id: 'inv-1', projectId: 'p1', amountCents: 300000n }),
@@ -936,7 +965,7 @@ describe('报表下钻（7.10）', () => {
   it('各指标均支持下钻且与聚合口径一致', () => {
     const { facts, service } = setup();
     facts.projects = [
-      makeProject({ id: 'p1', tempNo: 'TP-1', region: '华东', entryAt: '2026-07-01' }),
+      makeProject({ id: 'p1', tempNo: 'TP-1', region: 'East', entryAt: '2026-07-01' }),
     ];
     facts.contracts = [makeContract({ entryAmountSnapshotCents: 100000n })];
     facts.batches = [makeBatch({ id: 'b1' })];

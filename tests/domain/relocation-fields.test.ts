@@ -94,21 +94,77 @@ describe('项目基础字段与合同日期（2.6）', () => {
   });
 });
 
-describe('项目区域（2.7 / TBD-12）', () => {
-  it('区域为自由文本：去除首尾空白后精确分组', () => {
+describe('项目区域（2.7 / 2.4 / TBD-12）', () => {
+  it('五个固定取值均可保存：去除首尾空白后保存规范化值', () => {
     const { projects, service } = setup();
     const projectId = service.createPendingProject().id;
-    service.setRegion(projectId, ' 华东 ');
+    for (const [raw, expected] of [
+      ['East', 'East'],
+      [' South ', 'South'],
+      ['West', 'West'],
+      ['Central', 'Central'],
+      ['North', 'North'],
+    ]) {
+      service.setRegion(projectId, raw);
+      expect(projects.findById(projectId)!.region).toBe(expected);
+    }
+  });
+
+  it('非枚举区域值被拒并提示（含存量 legacy 自由文本，绝不静默写入）', () => {
+    const { projects, service } = setup();
+    const projectId = service.createPendingProject().id;
+    service.setRegion(projectId, 'East');
+    for (const invalid of ['华东', '华南', 'East区域', 'Northeast', 'East West']) {
+      expect(() => service.setRegion(projectId, invalid)).toThrow(
+        /区域仅允许 East、South、West、Central、North 五个固定选项/,
+      );
+      // 校验先于落库：拒绝后原值保持，不产生部分写入。
+      expect(projects.findById(projectId)!.region).toBe('East');
+    }
+  });
+
+  it('非枚举区域值被拒的稳定错误码（INVALID_PROJECT_REGION，供程序化识别）', () => {
+    const { service } = setup();
+    const projectId = service.createPendingProject().id;
+    try {
+      service.setRegion(projectId, '华东');
+    } catch (err) {
+      expect((err as { code?: string }).code).toBe('INVALID_PROJECT_REGION');
+      return;
+    }
+    expect.unreachable('应当抛出拒绝错误');
+  });
+
+  it('空串/纯空白 = 清空区域（保持既有清空语义）', () => {
+    const { projects, service } = setup();
+    const projectId = service.createPendingProject().id;
+    service.setRegion(projectId, 'East');
+    service.setRegion(projectId, '   ');
+    expect(projects.findById(projectId)!.region).toBeNull();
+  });
+
+  it('存量 legacy 非枚举区域原值保留：普通资料编辑不触碰区域、不置空不丢弃', () => {
+    const { projects, service } = setup();
+    const projectId = service.createPendingProject().id;
+    // 模拟升级前已存在 legacy 区域文本（直接落库，不经写边界）。
+    const project = projects.findById(projectId)!;
+    project.region = '华东';
+    // 编辑其他资料不触及区域，原值原样保留。
+    service.updateBasicInfo(projectId, { oldSiteContact: '王工', contractStartDate: '2026-07-01' });
     expect(projects.findById(projectId)!.region).toBe('华东');
+    // legacy 值不允许重新写回（写边界拒绝），只能改为固定枚举。
+    expect(() => service.setRegion(projectId, '华东')).toThrow(/五个固定选项/);
+    service.setRegion(projectId, 'West');
+    expect(projects.findById(projectId)!.region).toBe('West');
   });
 
   it('区域修改后按最新值实时重算分组（不保存快照）', () => {
     const { projects, service } = setup();
     const projectId = service.createPendingProject().id;
-    service.setRegion(projectId, '华东');
-    expect(projects.findById(projectId)!.region).toBe('华东');
-    service.setRegion(projectId, ' 华南 ');
-    expect(projects.findById(projectId)!.region).toBe('华南');
+    service.setRegion(projectId, 'East');
+    expect(projects.findById(projectId)!.region).toBe('East');
+    service.setRegion(projectId, '  West ');
+    expect(projects.findById(projectId)!.region).toBe('West');
   });
 });
 
