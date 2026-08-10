@@ -12,7 +12,10 @@ The current implementation already contains parts of the requested UI and deleti
 - Add date-driven lifecycle progression without bypassing lifecycle validation or allowing later states to regress.
 - Persist the new project fields and fixed region values without silently changing or losing old data.
 - Make deletion observable and safe per record type while retaining project cancellation, invoice reversal and source audit semantics.
-- Provide a focused, repeatable evidence path for dirty-data, migration, lifecycle, history ordering and sticky-header behavior.
+- Make project pagination and reminder-lane selection deterministic at the shared read boundary rather than relying on renderer truncation or grouping.
+- Reuse the existing tentative-instrument-count fact when editing project data, without creating instrument rows, changing status or adding another storage column.
+- Preserve readable, keyboard-accessible reminder lanes at 1024px and 1440px without page-level horizontal overflow.
+- Provide a focused, repeatable evidence path for dirty-data, migration, lifecycle, bounded ordering and responsive interaction behavior.
 
 **Non-Goals:**
 
@@ -89,10 +92,16 @@ Formal entry of a project already advanced from “待进单” must update the 
 
 Use existing page/read patterns for:
 
-- project search by customer name, ECC or temporary number, combined with fixed-region filtering;
+- project search by customer name, ECC or temporary number, combined with fixed-region filtering and a main-process-enforced page size of 20;
 - all-record history grouped by record type and sorted by each type’s business date descending, with record ID as a stable tie-breaker;
-- complete-reminder navigation and reminder-date sorting;
-- project overview containing all scalar project facts, while associated facts stay paginated or tab-scoped.
+- complete-reminder navigation, reminder-date sorting and date-led quick-treatment lanes;
+- project overview containing all scalar project facts, including the existing tentative instrument count, while associated facts stay paginated or tab-scoped.
+
+The project-page contract does not accept an arbitrary renderer page size: the shared contract and main-process read apply 20. Search or filter changes discard the current cursor, recompute `total` from the filtered set and restart from its first page. Every cursor order includes a unique stable tie-breaker after the business sort key so page traversal does not duplicate or omit equal-key projects.
+
+Reminder quick treatment uses two bounded reads in order: first select at most seven distinct, non-empty reminder business dates ascending from the earliest overdue date toward future reminder dates, skipping natural dates with no reminders; then read the projects for exactly those selected dates. It must not truncate a fixed number of reminder records and group afterward. If fewer than seven distinct dates exist, only those dates are returned. Projects within each date use a stable tie-breaker; a high-volume date may use its own bounded cursor, but advancing that column must not recompute or change the selected date set.
+
+“编辑项目资料” reads and writes the already-existing tentative-instrument-count field through the current project scalar DTO. Saving refreshes the project scalar read model so the latest value is shown; it does not add a migration column, enter the per-instrument write path or invoke a lifecycle transition.
 
 “查看全部” changes navigation state and triggers the target read; it is not a visual-only link. Define each record type’s business-date selector in one shared main-process mapping so UI sorting and exported/read results agree.
 
@@ -111,11 +120,25 @@ The preferred evidence path is:
 1. migration tests from v14 to the appended version, including null semantics, legacy region preservation, rollback and `foreign_key_check`;
 2. lifecycle unit tests for before-date, due, overdue catch-up, all state rows in the transition table and repeated zero-write runs;
 3. SQLite integration tests for zero-project pending amount, orphan exclusion, completed-project balance inclusion, per-type deletion success/rejection, audit retention and post-delete recomputation;
-4. focused renderer/interface tests for form fields, search, navigation and deterministic date ordering;
-5. two focused E2E viewport scenarios (1024 and 1440) for sticky behavior, keyboard focus and navigation. Build the Electron package before E2E and run Playwright with one worker;
-6. `npm run typecheck` plus `npm run verify:matrix` after scenario evidence mapping is updated.
+4. shared-contract and main-process read tests proving project pages are fixed at 20, filtered `total` is recomputed, search/filter changes clear the prior cursor, and stable tie-breakers prevent duplicate or missing projects across pages;
+5. reminder read-model tests proving date selection happens before project reads: seven distinct dates, sparse/non-contiguous dates, forward supplementation, fewer than seven dates overall, stable within-column order, and column pagination that leaves the selected dates unchanged;
+6. focused renderer/interface tests for form fields, including tentative-instrument-count save/refresh without instrument or status mutation, search, navigation, date headers and vertical same-date grouping;
+7. two focused E2E viewport scenarios (1024 and 1440) for sticky behavior and reminder lanes: at 1024 the lane owns horizontal scrolling with no page overflow and keyboard focus remains reachable and visible; at 1440 the layout attempts to show all seven lanes but preserves readable lane widths and falls back to internal scrolling instead of compression. Build the Electron package before E2E and run Playwright with one worker;
+8. `npm run typecheck` plus `npm run verify:matrix` after scenario evidence mapping is updated.
 
 This path directly observes persisted state and transitions; renderer snapshots alone are insufficient for financial or lifecycle claims. Full `npm test` is not required unless focused checks expose wider regression risk.
+
+### 9. Make queue and reminder density a contract, not renderer shaping
+
+The shared IPC/read contracts expose two explicit bounded models: a project page whose size is always 20, and a reminder-lane result whose top level is the selected ordered business-date set. The main process owns filtering, totals, cursor interpretation, date selection and stable tie-breakers. The renderer renders the returned models and resets its project cursor when search/filter state changes; it does not fetch an oversized set and slice or regroup it locally.
+
+The reminder renderer shows each selected business date in its column header and stacks that date’s projects vertically. Columns retain a readable minimum width. At 1024px the lane container, not the page, owns horizontal overflow, and keyboard traversal brings focused columns and controls into view with a visible focus indicator. At 1440px the layout should present all seven columns when readable widths permit, but it retains internal scrolling rather than squeezing columns below a usable width.
+
+Editing tentative instrument count remains a scalar project update through the existing fact and DTO. After success, invalidate/refetch the project scalar model only; do not synthesize per-instrument records, infer a lifecycle event or add schema storage.
+
+**Why:** renderer-only truncation makes totals and cursors disagree with persisted filtering, while record-first reminder truncation can consume many projects from one date and incorrectly return fewer than seven available date columns. Keeping these choices in the shared/main-process boundary makes pagination, sparse-date supplementation and refresh behavior testable and consistent without unbounded snapshots.
+
+**Alternatives rejected:** allow the renderer to request 50 records and slice to 20; fetch a fixed reminder-record limit and group it into dates; force seven equal-width columns into every viewport; or add a second tentative-count field alongside the existing fact. These alternatives respectively create pagination drift, under-filled date lanes, unreadable layouts and competing sources of truth.
 
 ## Risks / Trade-offs
 
@@ -126,6 +149,10 @@ This path directly observes persisted state and transitions; renderer snapshots 
 - **[Integrity repair could destroy customer data]** → Make diagnostics count-only and read-only by default; require backup and explicit confirmation for repair, with invoice reversal semantics preserved.
 - **[Sticky content reduces small-screen workspace]** → Allow internal wrapping, verify both target viewport widths and ensure focus scrolling accounts for the sticky offset.
 - **[History ordering differs by record type]** → Centralize business-date selection and use a stable ID tie-breaker.
+- **[A stale project cursor can be reused after filtering changes or equal sort keys can cause duplicate/missing rows]** → Bind traversal to normalized filter/search state, clear the cursor whenever that state changes, recompute filtered `total` in main and append a unique stable tie-breaker to the page order.
+- **[Record-first reminder limits can hide available date columns]** → Select up to seven distinct non-empty business dates first, then query projects for those dates; keep any per-column cursor subordinate to the unchanged selected date set.
+- **[Seven reminder columns can become unreadable or escape the page at narrower widths]** → Preserve a readable column width, use lane-owned horizontal scrolling, keep focus visible and accept internal scrolling at 1440px when all seven columns cannot remain readable.
+- **[Editing tentative count can accidentally diverge from instrument facts or trigger lifecycle side effects]** → Reuse the existing scalar field and DTO, refresh only scalar project data after save, and verify no instrument-row or status writes occur.
 
 ## Migration Plan
 
