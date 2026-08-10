@@ -182,6 +182,81 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
     closeDatabase(db);
   });
 
+  it('任务1.1：pendingAmount 直接取自 contracts.final_confirmable_amount_cents；已完成有效余额纳入、已取消排除', () => {
+    const ctx = makeFacade();
+    const { db } = ctx;
+    // makeFacade 基线：正式进单 final=100000、无掉票 → 待掉票 100000
+    expect(reader(ctx).overview().metrics.pendingAmount).toBe('100000.00');
+    expect(reader(ctx).overview().metrics.totalProjects).toBe(1);
+
+    // 直接 SQL 播种合同与掉票，精确控制 final_confirmable_amount_cents（usd_tax_amount_cents 留空，
+    // 以证明口径来自最终可确认金额而非合同金额）。
+    const seedProject = db.prepare(
+      `INSERT INTO projects (id, temp_no, status, region, entry_at, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+    );
+    const seedContract = db.prepare(
+      `INSERT INTO contracts (id, project_id, temp_number, final_confirmable_amount_cents, created_at, updated_at)
+       VALUES (?,?,?,?,?,?)`,
+    );
+    const seedInvoice = db.prepare(
+      `INSERT INTO invoices (id, project_id, amount_cents, invoiced_at, revoked_at, last_modified_at, created_at)
+       VALUES (?,?,?,?,?,?,?)`,
+    );
+
+    // 已完成项目：final=80000，有效掉票 20000、已撤销 50000 → 待掉票 = 80000-20000 = 60000（已完成仍纳入）
+    seedProject.run('fin-completed', 'TP-FIN-COMP', 'completed', '华东', '2026-08-01', 't', '2026-08-05T00:00:00+08:00');
+    seedContract.run('c-fin-completed', 'fin-completed', 'TP-FIN-COMP', 8000000, 't', 't');
+    seedInvoice.run('inv-fin-1', 'fin-completed', 2000000, '2026-08-02', null, '2026-08-02T00:00:00+08:00', 't');
+    seedInvoice.run('inv-fin-2', 'fin-completed', 5000000, '2026-08-03', '2026-08-04', '2026-08-03T00:00:00+08:00', 't');
+
+    // 已取消项目：final=50000 → 排除
+    seedProject.run('fin-cancelled', 'TP-FIN-CANCEL', 'cancelled', '华北', '2026-08-01', 't', '2026-08-06T00:00:00+08:00');
+    seedContract.run('c-fin-cancelled', 'fin-cancelled', 'TP-FIN-CANCEL', 5000000, 't', 't');
+
+    // 已完成但 final_confirmable_amount_cents 为空 → 不计入
+    seedProject.run('fin-null-final', 'TP-FIN-NULL', 'completed', '华东', '2026-08-01', 't', '2026-08-07T00:00:00+08:00');
+    seedContract.run('c-fin-null', 'fin-null-final', 'TP-FIN-NULL', null, 't', 't');
+
+    const overview = reader(ctx).overview();
+    expect(overview.metrics.totalProjects).toBe(4); // 全量项目数（含已取消与空 final）
+    expect(overview.metrics.pendingAmount).toBe('160000.00'); // 100000 + 60000，已取消与空 final 不计
+    closeDatabase(db);
+  });
+
+  it('任务1.6：reminderPreview 当前按记录数截断（最多 6 条）而非按日期分列（record-first 模型）', () => {
+    const ctx = makeFacade();
+    const { db } = ctx;
+    const stmt = db.prepare(
+      `INSERT INTO projects (id, temp_no, status, region, reminder_at, reminder_note, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+    );
+    // 同一提醒日期 8 条（最早日期）+ 另一日期 1 条：若为"先选日期列再取列内项目"会得到 2 个日期列；
+    // 当前 record-first 模型按记录数截断 6 条，且全部来自最早日期。
+    for (let i = 0; i < 8; i++) {
+      stmt.run(
+        `preview-${i}`,
+        `TP-PV-${String(i).padStart(2, '0')}`,
+        'pending_execution',
+        '华东',
+        '2026-08-07',
+        `备注${i}`,
+        't',
+        `2026-08-0${(i % 8) + 1}T00:00:00+08:00`,
+      );
+    }
+    stmt.run('preview-other', 'TP-PV-OTHER', 'pending_execution', '华东', '2026-08-09', '另一日期', 't', '2026-08-09T00:00:00+08:00');
+
+    const overview = reader(ctx).overview();
+    expect(overview.reminderPreview.length).toBe(6); // 记录数截断，不是 7 个日期列
+    const dates = new Set(overview.reminderPreview.map((r) => r.reminderAt));
+    // 6 条全部来自最早日期（2026-08-07）：证明按记录数截断而非按日期选取
+    expect(dates.size).toBe(1);
+    expect([...dates][0]).toBe('2026-08-07');
+    expect(overview.reminderTotal).toBe(9);
+    closeDatabase(db);
+  });
+
   it('提醒边界：昨日/今日/窗口内/窗口外/仅备注 分类与纯函数完全同口径', () => {
     const ctx = makeFacade();
     const { db } = ctx;
@@ -295,6 +370,54 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
     // reminder 过滤（今日=2026-08-08）
     expect(repo.projectPage({ reminder: 'overdue' }).projects.map((p) => p.id)).toEqual(['filter-r']);
     expect(repo.projectPage({ reminder: 'any' }).projects.map((p) => p.id)).toEqual(['filter-r']);
+    closeDatabase(ctx.db);
+  });
+
+  it('任务1.5：query/region 过滤后 total 按过滤集合重算，cursor 仅在过滤集合内继续翻页', () => {
+    const ctx = makeFacade();
+    const { db } = ctx;
+    seedProjects(db, 55);
+    const repo = reader(ctx);
+    // 过滤前：全量 total 与默认分页（50）
+    const all = repo.projectPage({});
+    expect(all.total).toBe(56); // 55 seed + makeFacade 1
+    expect(all.projects.length).toBe(50);
+    expect(all.nextCursor).toBeTruthy();
+
+    // region 过滤（华北 = i 为奇数 → 27 条）：total 重算为过滤集合，而不是全量
+    const east = repo.projectPage({ region: '华东' });
+    const eastCount = east.total;
+    expect(eastCount).toBe(29); // i 为偶数 28 条 + makeFacade 1 条
+    expect(east.projects.every((p) => p.region === '华东')).toBe(true);
+    // 过滤集合不足默认页 50 → 首页即返回全部过滤集合且无 nextCursor
+    expect(east.projects.length).toBe(29);
+    expect(east.nextCursor).toBeNull();
+
+    // query 过滤（makeFacade 客户名唯一命中）：total=1、无 cursor；不存在的关键词 total=0
+    expect(repo.projectPage({ query: '集成客户' }).total).toBe(1);
+    expect(repo.projectPage({ query: '集成客户' }).nextCursor).toBeNull();
+    expect(repo.projectPage({ query: '绝无此名' }).total).toBe(0);
+
+    // query + region 组合：同时满足才计入（region=华北 且 客户名=集成客户 → 0）
+    expect(repo.projectPage({ query: '集成客户', region: '华北' }).total).toBe(0);
+
+    // 过滤集合超过默认页（50）时：cursor 翻页只覆盖过滤集合、无重复无遗漏
+    const many = repo.projectPage({ region: '华东', limit: 20 });
+    expect(many.projects.length).toBe(20);
+    const seen = new Set<string>(many.projects.map((p) => p.id));
+    let cursor: string | null = many.nextCursor;
+    let guard = 0;
+    while (cursor) {
+      guard += 1;
+      expect(guard).toBeLessThanOrEqual(3);
+      const page = repo.projectPage({ region: '华东', limit: 20, cursor });
+      for (const p of page.projects) {
+        expect(seen.has(p.id), `过滤翻页不应重复: ${p.id}`).toBe(false);
+        seen.add(p.id);
+      }
+      cursor = page.nextCursor;
+    }
+    expect(seen.size).toBe(eastCount);
     closeDatabase(ctx.db);
   });
 
@@ -834,6 +957,33 @@ describe('工作台 v2 跨项目历史分页（historyPage）', () => {
     expect(row.businessDate).toBe('2026-08-10');
     expect(row.id).toBe(instruments[1].id);
     expect(facade.v2HistoryPage({ kind: 'instrument', from: '2026-08-11' }).total).toBe(0); // 上界排除
+    closeDatabase(db);
+  });
+
+  it('任务1.4：historyPage 当前排序为业务日期倒序，同业务日期按 id 倒序（稳定次级键）', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    // 同项目多条 invoice，业务日期有相同也有不同；id 保证可排序（lexicographic）。
+    const invStmt = db.prepare(
+      `INSERT INTO invoices (id, project_id, amount_cents, invoiced_at, last_modified_at, created_at)
+       VALUES (?,?,?,?,?,?)`,
+    );
+    invStmt.run('inv-1', projectId, 1000, '2026-08-10', 't', 't');
+    invStmt.run('inv-2', projectId, 2000, '2026-08-20', 't', 't');
+    invStmt.run('inv-3', projectId, 3000, '2026-08-20', 't', 't'); // 与 inv-2 同日，id 更大应在前
+    invStmt.run('inv-4', projectId, 4000, '2026-08-05', 't', 't');
+
+    const page = facade.v2HistoryPage({ kind: 'invoice' });
+    expect(page.total).toBe(4);
+    const rows = page.rows as Array<Extract<typeof page.rows[number], { kind: 'invoice' }>>;
+    // 业务日期倒序：08-20 两条在前、08-10、08-05；同日期（08-20）按 id 倒序 → inv-3 在 inv-2 前
+    expect(rows.map((r) => r.invoicedAt)).toEqual(['2026-08-20', '2026-08-20', '2026-08-10', '2026-08-05']);
+    expect(rows.map((r) => r.id)).toEqual(['inv-3', 'inv-2', 'inv-1', 'inv-4']);
+
+    // 分页重复加载不改变顺序：limit=2 两次请求拼接顺序与一次性读取一致
+    const first = facade.v2HistoryPage({ kind: 'invoice', limit: 2 });
+    const second = facade.v2HistoryPage({ kind: 'invoice', limit: 2, cursor: first.nextCursor! });
+    expect([...first.rows, ...second.rows].map((r) => r.id)).toEqual(['inv-3', 'inv-2', 'inv-1', 'inv-4']);
     closeDatabase(db);
   });
 

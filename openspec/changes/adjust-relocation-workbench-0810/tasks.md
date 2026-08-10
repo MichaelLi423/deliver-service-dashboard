@@ -10,13 +10,13 @@
 
 先于任何行为改动，为当前实现的关键口径补 focused characterization 测试并运行通过，作为后续改动的回归基线；记录"改动前全绿"证据。
 
-- [ ] 1.1 为 overview 待掉票金额口径新增/扩展 characterization 测试（tests/integration/workbench-read-v2.sqlite.test.ts）：固化当前财务公式（经仍存在且未取消项目 JOIN contracts 计算、已完成项目有效余额纳入、已取消排除、final_confirmable_amount 口径）与 totalProjects/pendingAmount 读数；完成态：focused vitest 在改动前运行通过并记录基线。
-- [ ] 1.2 为 lifecycle 既有转换口径新增/扩展 characterization 测试（tests/domain/lifecycle.test.ts）：固化人工调整、取消约束、金额闭环重算（TBD-11）、实际装机完成→待验收（TBD-07）、验收报告→待掉票等既有自动触发与约束；完成态：focused vitest 全绿，作为自动推进改动的回归基线。
-- [ ] 1.3 为 v2Delete 既有删除契约新增/扩展 characterization 测试（tests/integration/workbench-delete.sqlite.test.ts）：固化 recordType/id/expectedRevision 命令形状、稳定拒绝码（DELETE_REJECTION_CODES）、删除结果信封与原子审计行为、发票仅撤销；完成态：focused vitest 全绿，作为 type-specific 删除策略改动的回归基线。
-- [ ] 1.4 为 v2 队列/历史读取分页与排序新增/扩展 characterization 测试（tests/integration/workbench-read-v2.sqlite.test.ts）：固化 keyset cursor 分页、sort 选项、query/region 参数与历史视图当前排序行为；完成态：focused vitest 全绿，作为第 7 组历史/搜索改动的回归基线。
-- [ ] 1.5 固化当前项目队列分页现状证据（tests/integration/workbench-read-v2.sqlite.test.ts 或新增 focused 用例）：记录当前默认 page size（V2_PROJECT_PAGE_DEFAULT_LIMIT=50、上限 100）、sort/query/region 过滤后 total 与 cursor 的现状行为；完成态：focused vitest 在改动前运行通过并记录基线，作为"固定每页 20"（7.5）的改动前对照证据。
-- [ ] 1.6 固化当前提醒预览按记录数截断的现状证据（tests/integration/workbench-read-v2.sqlite.test.ts 或新增 focused 用例）：记录 overview reminderPreview 当前按记录数截断（最多 6 条）、尚无"先选日期列再取列内项目"的泳道读取模型；完成态：focused vitest 在改动前运行通过并记录基线，作为泳道读取模型（7.6）的改动前对照证据。
-- [ ] 1.7 固化当前"编辑项目资料"与项目标量 DTO 现状证据：记录项目标量 DTO 是否携带 temporaryInstrumentCount、当前编辑表单字段集合（无暂定数量/备注/暂存字段）与保存刷新路径；完成态：focused 测试/断言（tests/renderer/app.test.tsx 或 tests/domain/relocation-fields.test.ts）在改动前运行通过并记录基线，作为第 6 组编辑表单改动的对照证据。
+- [x] 1.1 为 overview 待掉票金额口径新增/扩展 characterization 测试（tests/integration/workbench-read-v2.sqlite.test.ts）：固化当前财务公式（经仍存在且未取消项目 JOIN contracts 计算、已完成项目有效余额纳入、已取消排除、final_confirmable_amount 口径）与 totalProjects/pendingAmount 读数；完成态：focused vitest 在改动前运行通过并记录基线。
+- [x] 1.2 为 lifecycle 既有转换口径新增/扩展 characterization 测试（tests/domain/lifecycle.test.ts）：固化人工调整、取消约束、金额闭环重算（TBD-11）、实际装机完成→待验收（TBD-07）、验收报告→待掉票等既有自动触发与约束；完成态：focused vitest 全绿，作为自动推进改动的回归基线。
+- [x] 1.3 为 v2Delete 既有删除契约新增/扩展 characterization 测试（tests/integration/workbench-delete.sqlite.test.ts）：固化 recordType/id/expectedRevision 命令形状、稳定拒绝码（DELETE_REJECTION_CODES）、删除结果信封与原子审计行为、发票仅撤销；完成态：focused vitest 全绿，作为 type-specific 删除策略改动的回归基线。
+- [x] 1.4 为 v2 队列/历史读取分页与排序新增/扩展 characterization 测试（tests/integration/workbench-read-v2.sqlite.test.ts）：固化 keyset cursor 分页、sort 选项、query/region 参数与历史视图当前排序行为；完成态：focused vitest 全绿，作为第 7 组历史/搜索改动的回归基线。
+- [x] 1.5 固化当前项目队列分页现状证据（tests/integration/workbench-read-v2.sqlite.test.ts 或新增 focused 用例）：记录当前默认 page size（V2_PROJECT_PAGE_DEFAULT_LIMIT=50、上限 100）、sort/query/region 过滤后 total 与 cursor 的现状行为；完成态：focused vitest 在改动前运行通过并记录基线，作为"固定每页 20"（7.5）的改动前对照证据。
+- [x] 1.6 固化当前提醒预览按记录数截断的现状证据（tests/integration/workbench-read-v2.sqlite.test.ts 或新增 focused 用例）：记录 overview reminderPreview 当前按记录数截断（最多 6 条）、尚无"先选日期列再取列内项目"的泳道读取模型；完成态：focused vitest 在改动前运行通过并记录基线，作为泳道读取模型（7.6）的改动前对照证据。
+- [x] 1.7 固化当前"编辑项目资料"与项目标量 DTO 现状证据：记录项目标量 DTO 是否携带 temporaryInstrumentCount、当前编辑表单字段集合（无暂定数量/备注/暂存字段）与保存刷新路径；完成态：focused 测试/断言（tests/renderer/app.test.tsx 或 tests/domain/relocation-fields.test.ts）在改动前运行通过并记录基线，作为第 6 组编辑表单改动的对照证据。
 
 ## 2. 追加迁移 v15：新字段、legacy 区域策略与 IPC/DTO 类型
 
