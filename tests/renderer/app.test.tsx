@@ -785,6 +785,40 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledTimes(2));
   });
 
+  it('基线：detail DTO 已携带 temporaryInstrumentCount，编辑表单尚无暂定数量/备注/暂存字段，保存复用既有刷新路径', async () => {
+    const row = { ...project(1), customerName: '基线客户' };
+    const loaded = detailOf(row);
+    loaded.detail = { ...loaded.detail!, temporaryInstrumentCount: 12 };
+    let detailReads = 0;
+    const api = mockApi({
+      v2ProjectPage: vi.fn().mockResolvedValue(page([row], null, 1)),
+      v2ProjectDetail: vi.fn().mockImplementation(() => Promise.resolve({ ...loaded, businessRevision: ++detailReads > 1 ? 2 : 1 })),
+    });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+    render(<App />);
+    await screen.findByRole('region', { name: '基线客户' });
+
+    // 项目标量/detail 读模型已携带 temporaryInstrumentCount；列表标量行不携带。
+    expect(loaded.detail!.temporaryInstrumentCount).toBe(12);
+    expect(row).not.toHaveProperty('temporaryInstrumentCount');
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
+    const dialog = screen.getByRole('dialog', { name: '编辑项目资料' });
+    for (const name of ['基本信息', '地点与联系人', '执行准备']) expect(within(dialog).getByRole('group', { name })).toBeInTheDocument();
+    // 当前编辑表单字段集合：无 暂定数量（暂定仪器数量）、项目备注、暂存地址、是否暂存。
+    expect(within(dialog).queryByLabelText(/暂定数量|仪器数量/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/项目备注|暂存地址|是否暂存/)).not.toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent('暂定');
+    expect(dialog).not.toHaveTextContent('暂存');
+
+    // 保存复用既有 v2Mutate update_project 刷新路径：关闭弹层并重新读取详情回显项目数据。
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存项目资料' }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: expect.objectContaining({ projectId: 'p-1' }) }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目资料' })).not.toBeInTheDocument());
+    await waitFor(() => expect(vi.mocked(api.v2ProjectDetail!).mock.calls.length).toBeGreaterThan(1));
+    expect(screen.getByRole('region', { name: '基线客户' })).toBeInTheDocument();
+  });
+
   it('正式进单项目谨慎更正进单合同资料，预填金额并在错误时保留表单反馈', async () => {
     const row = { ...project(1), entryAt: '2026-08-01', contractAmount: '0.00', finalAmount: '125000.50' };
     const api = mockApi({
