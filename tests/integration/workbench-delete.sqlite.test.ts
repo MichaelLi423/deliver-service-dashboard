@@ -8,6 +8,7 @@ import { WorkbenchFacade } from '../../src/main/workbench-facade';
 import {
   DELETE_REJECTION_CODES,
   type ProjectWizardPayload,
+  type WorkbenchV2DeleteRequest,
   type WorkbenchV2MutationResult,
 } from '../../src/shared/ipc';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
@@ -329,10 +330,16 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
     );
 
     const result = facade.v2Delete({ kind: 'invoice', id: invoiceId, expectedRevision: readBusinessRevision(db), revokedAt: '2026-08-13', revokeReason: '客户更正' });
-    expect(result.changed?.kind).toBe('invoice');
+    // 删除结果信封：changed 回显 invoice 的 kind/id/projectId，businessRevision 与库一致
+    expect(result.changed).toMatchObject({ kind: 'invoice', id: invoiceId, projectId });
+    expect(result.invalidated).toContain(`project:${projectId}`);
+    expect(result.invalidated).toContain(`sections:${projectId}`);
+    expect(result.businessRevision).toBe(readBusinessRevision(db));
     const row = db.prepare('SELECT revoked_at, revoke_reason FROM invoices WHERE id = ?').get(invoiceId) as { revoked_at: string; revoke_reason: string };
     expect(row.revoked_at).toBe('2026-08-13'); // 物理行保留（撤销终态）
     expect(row.revoke_reason).toBe('客户更正');
+    // 物理行不删除：掉票记录仅可撤销（撤销终态行仍保留在 invoices 表中）
+    expect(db.prepare('SELECT COUNT(*) AS n FROM invoices WHERE id = ?').get(invoiceId)!.n).toBe(1);
     expect(facade.v2SectionPage({ projectId, kind: 'invoices' }).rows[0]).toMatchObject({ active: false });
   });
 
@@ -350,5 +357,143 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
     const row = db.prepare('SELECT revoked_at, revoke_reason FROM invoices WHERE id = ?').get(invoiceId) as { revoked_at: string; revoke_reason: string };
     expect(row.revoked_at).toBe('2026-08-12'); // 保持首次撤销终态
     expect(row.revoke_reason).toBe('第一次撤销');
+  });
+
+  it('命令形状：未知 recordType 稳定拒绝（DELETE_UNKNOWN_KIND），expectedRevision 校验先于类型分发', async () => {
+    const ctx = await makeCtx();
+    const { facade, db } = ctx;
+    const revision = readBusinessRevision(db);
+    // expectedRevision 在 BEGIN IMMEDIATE 事务内核验、类型分发之前 → 未知 kind 带过期修订仍先报修订不匹配
+    expectRejected(
+      () =>
+        facade.v2Delete({
+          kind: 'unknown_kind',
+          id: 'whatever',
+          expectedRevision: revision - 1,
+        } as unknown as WorkbenchV2DeleteRequest),
+      DELETE_REJECTION_CODES.REVISION_MISMATCH,
+    );
+    // 修订一致才进入类型分发：未知 kind 走默认分支拒绝（非稳定码，属程序错误边界，不误伤既有类型）
+    expectRejected(
+      () =>
+        facade.v2Delete({
+          kind: 'unknown_kind',
+          id: 'whatever',
+          expectedRevision: revision,
+        } as unknown as WorkbenchV2DeleteRequest),
+      'DELETE_UNKNOWN_KIND',
+    );
+    // 两次拒绝均无副作用：修订不变、无记录被删
+    expect(readBusinessRevision(db)).toBe(revision);
+    expect(facade.v2IndependentPage({ kind: 'qr_request' }).total).toBe(0);
+  });
+
+  it('稳定拒绝码：不存在的记录统一返回 NOT_FOUND（acceptance 以 projectId 寻址），且不写库', async () => {
+    const ctx = await makeCtx();
+    const { facade, db } = ctx;
+    const revision = readBusinessRevision(db);
+    expectRejected(
+      () => facade.v2Delete({ kind: 'service_order', id: 'so-missing', expectedRevision: revision }),
+      DELETE_REJECTION_CODES.NOT_FOUND,
+    );
+    // acceptance 命令形状差异：以 projectId（而非 id）寻址
+    expectRejected(
+      () => facade.v2Delete({ kind: 'acceptance', projectId: 'proj-missing', expectedRevision: revision }),
+      DELETE_REJECTION_CODES.NOT_FOUND,
+    );
+    // invoice 先校验存在性：即使携带合法撤销字段，记录不存在仍 NOT_FOUND（不落入撤销语义）
+    expectRejected(
+      () => facade.v2Delete({ kind: 'invoice', id: 'inv-missing', expectedRevision: revision, revokedAt: '2026-08-13', revokeReason: '客户更正' }),
+      DELETE_REJECTION_CODES.NOT_FOUND,
+    );
+    expect(readBusinessRevision(db)).toBe(revision);
+  });
+
+  it('删除结果信封：项目关联型成功删除返回 businessRevision/invalidated/changed，修订单调递增且与库一致', async () => {
+    const ctx = await makeCtx();
+    const { facade, db, projectId } = ctx;
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'order', projectId, values: { orderType: 'relocation', serviceOrderNo: 'SO-ENV-001', orderedAt: '2026-08-11', engineer: '工程师甲' } },
+    });
+    const orderId = String(db.prepare('SELECT id FROM service_orders WHERE service_order_no = ?').get('SO-ENV-001')!.id);
+    const revision = readBusinessRevision(db);
+    const result = facade.v2Delete({ kind: 'service_order', id: orderId, expectedRevision: revision });
+    // 信封仅三个字段
+    expect(Object.keys(result).sort()).toEqual(['businessRevision', 'changed', 'invalidated']);
+    expect(result.businessRevision).toBeGreaterThan(revision);
+    expect(result.businessRevision).toBe(readBusinessRevision(db));
+    // changed 回显请求形状：kind/id/projectId
+    expect(result.changed).toEqual({ kind: 'service_order', id: orderId, projectId });
+    // invalidated：overview + projects + project:X + sections:X（唯一去重后的精确集合）
+    expect(result.invalidated).toEqual(['overview', 'projects', `project:${projectId}`, `sections:${projectId}`]);
+  });
+
+  it('删除结果信封：独立/查询型 changed 不含 projectId，携带独立/查询失效标签', async () => {
+    const ctx = await makeCtx();
+    const { facade, db } = ctx;
+
+    // 二维码申请（独立）：changed 无 projectId，失效标签为 independent:qr_request
+    facade.v2Mutate({ op: 'submit_action', action: { type: 'qr_request', values: { applicant: '申请人', requestedAt: '2026-08-10', types: ['A', 'logistics_management'] } } });
+    const qrId = String(db.prepare('SELECT id FROM qr_requests LIMIT 1').get()!.id);
+    const qrResult = facade.v2Delete({ kind: 'qr_request', id: qrId, expectedRevision: readBusinessRevision(db) });
+    expect(qrResult.changed).toEqual({ kind: 'qr_request', id: qrId });
+    expect(qrResult.changed?.projectId).toBeUndefined();
+    expect(qrResult.invalidated).toEqual(['overview', 'projects', 'independent:qr_request']);
+
+    // 独立序列号地址更新（instrumentId 为 null）：changed 同样无 projectId
+    db.prepare(
+      `INSERT INTO serial_address_updates (id, instrument_id, customer_name, new_site_address, serial_no, account_id, updated_at, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+    ).run('sa-env', null, '独立客户', '新址', 'SN-ENV', 'ACC-ENV', '2026-08-10', 't');
+    const saResult = facade.v2Delete({ kind: 'serial_address', id: 'sa-env', expectedRevision: readBusinessRevision(db) });
+    expect(saResult.changed?.projectId).toBeUndefined();
+    expect(saResult.invalidated).toEqual(['overview', 'projects', 'independent:serial_address']);
+
+    // Ship-to 申请（查询型）：changed 无 projectId，失效标签为 lookup:ship_to_requests
+    const pending = facade.createShipToRequest({ customerName: 'ShipTo 信封客户', newSiteAddress: '新址' });
+    facade.submitShipToRequest(pending.request.id);
+    const stResult = facade.v2Delete({ kind: 'ship_to_request', id: pending.request.id, expectedRevision: readBusinessRevision(db) });
+    expect(stResult.changed).toEqual({ kind: 'ship_to_request', id: pending.request.id });
+    expect(stResult.invalidated).toEqual(['overview', 'projects', 'lookup:ship_to_requests']);
+  });
+
+  it('原子审计联动：成功删除随行清除目标表审计（批次+唯一物流费用），拒绝路径保留审计', async () => {
+    const ctx = await makeCtx();
+    const { facade, db, projectId } = ctx;
+
+    // 批次 + 唯一物流费用均挂 import_record_audit → 删除时审计随行原子清除
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', transportCompany: '运输公司', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '11000' } } });
+    const batchId = String(db.prepare('SELECT id FROM batches WHERE project_id = ?').get(projectId)!.id);
+    const feeId = String(db.prepare('SELECT id FROM logistics_fees WHERE batch_id = ?').get(batchId)!.id);
+    db.prepare(
+      "INSERT INTO import_record_audit (id, source_key, target_table, target_id, import_source_hash, target_snapshot_hash, imported_at) VALUES ('audit-batch', 'b-1', 'batches', ?, 'h', 'h', '2026-08-11T00:00:00+08:00')",
+    ).run(batchId);
+    db.prepare(
+      "INSERT INTO import_record_audit (id, source_key, target_table, target_id, import_source_hash, target_snapshot_hash, imported_at) VALUES ('audit-fee', 'f-1', 'logistics_fees', ?, 'h', 'h', '2026-08-11T00:00:00+08:00')",
+    ).run(feeId);
+    const result = facade.v2Delete({ kind: 'batch', id: batchId, expectedRevision: readBusinessRevision(db) });
+    expect(result.changed?.kind).toBe('batch');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE target_table = ? AND target_id = ?').get('batches', batchId)!.n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE target_table = ? AND target_id = ?').get('logistics_fees', feeId)!.n).toBe(0);
+
+    // 拒绝路径：依赖拒绝时目标表审计保留（不误删、不级联清审计）
+    const instrumentId = String(db.prepare('SELECT id FROM instruments WHERE project_id = ?').get(projectId)!.id);
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'damage', projectId, values: { instrumentId, damageReason: '磕碰', partNumber: 'P-3', partQuantity: '1', partAmount: '100', partCurrency: 'USD', partStatus: 'arrived', issueStatus: 'processing', registeredAt: '2026-08-12' } },
+    });
+    const damageId = String(db.prepare('SELECT id FROM damage_repair_items WHERE project_id = ?').get(projectId)!.id);
+    db.prepare(
+      "INSERT INTO import_record_audit (id, source_key, target_table, target_id, import_source_hash, target_snapshot_hash, imported_at) VALUES ('audit-damage', 'd-1', 'damage_repair_items', ?, 'h', 'h', '2026-08-11T00:00:00+08:00')",
+    ).run(damageId);
+    const revisionAtReject = readBusinessRevision(db);
+    expectRejected(
+      () => facade.v2Delete({ kind: 'damage_repair_item', id: damageId, expectedRevision: revisionAtReject }),
+      DELETE_REJECTION_CODES.DEPENDENCIES,
+    );
+    expect(db.prepare('SELECT COUNT(*) AS n FROM import_record_audit WHERE target_table = ? AND target_id = ?').get('damage_repair_items', damageId)!.n).toBe(1);
+    expect(readBusinessRevision(db)).toBe(revisionAtReject);
   });
 });
