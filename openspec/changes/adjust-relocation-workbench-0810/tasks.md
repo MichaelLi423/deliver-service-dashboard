@@ -20,25 +20,25 @@
 
 ## 2. 追加迁移 v15：新字段、legacy 区域策略与 IPC/DTO 类型
 
-- [ ] 2.1 追加 schema-v15 迁移（新增 `schema-v15.ts` 并登记入 `bootstrap.ts` 的 MIGRATIONS，不修改 v1–v14）：`projects` 增加可空列 `project_note`（项目备注）、`temporary_storage_address`（暂存地址）、`is_temporary_storage`（是否暂存，允许空表示"未填写"而非推断"否"）、`manager_approved`（是否批复）；"计划装机日期"复用既有 `planned_install_done_at` 列仅更名展示（如 apply 期证明需独立事实再追加，见 design D1）；完成态：迁移仅追加、旧库升级不重建表、不改写存量值。
-- [ ] 2.2 新增迁移测试（tests/persistence/migration-v15.test.ts）：全新库引导到 v15（迁移序列 1..15、user_version=15、新列已建）；v14 存量库升级保留既有业务数据、新列以空/兼容默认值初始化；region 历史文本原样保留；注入失败保留迁移前数据与可恢复状态（备份）；`PRAGMA foreign_key_check` 通过；完成态：focused vitest 全绿。
-- [ ] 2.3 将孤立财务事实诊断接入迁移/启动路径：迁移执行或启动时诊断（仅计数：孤立合同、孤立掉票/最终可确认金额事实、断裂 project/contract 链接、foreign_key_check），给出清理路径提示，MUST NOT 静默删除财务记录；掉票记录仍仅可撤销、不物理删除；完成态：诊断输出 counts、无客户值打印，focused 测试通过（与 4.3/4.4 清理路径衔接）。
+- [x] 2.1 追加 schema-v15 迁移（新增 `schema-v15.ts` 并登记入 `bootstrap.ts` 的 MIGRATIONS，不修改 v1–v14）：`projects` 增加可空列 `project_note`（项目备注）、`temporary_storage_address`（暂存地址）、`is_temporary_storage`（是否暂存，允许空表示"未填写"而非推断"否"）、`manager_approved`（是否批复）；"计划装机日期"复用既有 `planned_install_done_at` 列仅更名展示（如 apply 期证明需独立事实再追加，见 design D1）；完成态：迁移仅追加、旧库升级不重建表、不改写存量值。
+- [x] 2.2 新增迁移测试（tests/persistence/migration-v15.test.ts）：全新库引导到 v15（迁移序列 1..15、user_version=15、新列已建）；v14 存量库升级保留既有业务数据、新列以空/兼容默认值初始化；region 历史文本原样保留；注入失败保留迁移前数据与可恢复状态（备份）；`PRAGMA foreign_key_check` 通过；完成态：focused vitest 全绿。
+- [ ] 2.3 将孤立财务事实诊断接入迁移/启动路径：迁移执行或启动时诊断（仅计数：孤立合同、孤立掉票/最终可确认金额事实、断裂 project/contract 链接、foreign_key_check），给出治理清理路径提示，MUST NOT 静默删除财务记录；掉票记录仍仅可撤销、不物理删除；因非空项目 FK 且治理清理保留原行，结构性外键违规以 unresolved count 持续报告、不阻断迁移，不宣称 foreign_key_check 归零；完成态：诊断输出 counts、无客户值打印，focused 测试通过（与 4.3/4.4 治理路径衔接）。
 - [ ] 2.4 实现区域五枚举领域写边界与 legacy "待调整"策略：新建/编辑项目区域去除首尾空白后仅允许 East、South、West、Central、North，非枚举值拒绝保存并提示（relocation-project-lifecycle 与 workbench-interface 均不提供自由输入）；存量非枚举 region 文本保留原值、读模型/报表标注为"待调整"、不猜测映射、不置空不丢弃；完成态：domain 单测覆盖非枚举拒绝/trim 校验/存量保留"待调整"分组。
 - [ ] 2.5 更新 IPC/DTO 类型与接线（src/shared/ipc.ts、src/preload/index.ts、workbench-facade 相关 DTO）：新增/调整项目备注、暂存地址、是否暂存、计划装机日期（更名）、区域枚举类型、是否批复（替换批复原因）；建档输入类型移除最终可确认金额、服务单号、工程师、开单备注、缺失资料（既有 WIZARD_REJECTION_CODES 废弃字段有值即拒绝规则保持）；完成态：`npm run typecheck` 通过，IPC 契约测试（tests/main/workbench-v2-ipc.test.ts）通过。
 
 ## 3. 生命周期：plan_visit_date<=today 自动推进
 
-- [ ] 3.1 在 `lifecycle.ts` 增加计划上门日期到期自动推进的显式路径（design D5 转换表）：候选 `plan_visit_at <= today`，仅 待进单(pending_entry)/待执行(pending_execution)→执行中(executing)；执行中幂等不写；待验收(pending_acceptance)/待掉票(pending_invoice) 不倒退；已完成/已取消终态不变；转换必须经 lifecycle 唯一入口（resolveStatus 等既有入口），覆盖到期/未到期/逾期漏跑补推进全状态行；完成态：tests/domain/lifecycle.test.ts 新增场景全绿（含待进单带"未进单先执行"标签到期自动进入执行中）。
+- [x] 3.1 在 `lifecycle.ts` 增加计划上门日期到期自动推进的显式路径（design D5 转换表）：候选 `plan_visit_at <= today`，仅 待进单(pending_entry)/待执行(pending_execution)→执行中(executing)；执行中幂等不写；待验收(pending_acceptance)/待掉票(pending_invoice) 不倒退；已完成/已取消终态不变；转换必须经 lifecycle 唯一入口（resolveStatus 等既有入口），覆盖到期/未到期/逾期漏跑补推进全状态行；完成态：tests/domain/lifecycle.test.ts 新增场景全绿（含待进单带"未进单先执行"标签到期自动进入执行中）。
 - [ ] 3.2 实现自动推进的幂等与审计：仅真实转换才更新 project revision 与审计事实；重复检查零写、无重复/反向转换审计；推进在事务内重查候选状态后再写入，防与人工编辑竞争；完成态：领域测试覆盖幂等零写、事务内重查、revision/audit 只在真实转换时变化。
 - [ ] 3.3 实现主进程应用操作 `advanceDuePlanVisits(today)` 及其触发点：迁移后首次工作台读取前、应用 activate/resume 时、运行中跨本地业务日期边界时执行；不承诺后台运行，漏跑在下次激活补推进；通过 facade/接线层暴露；完成态：focused domain/integration 测试验证触发语义，typecheck 通过。
 - [ ] 3.4 保证自动推进优先级与不倒退：自动触发优先于人工提交的状态值、系统不覆盖自动触发结果；正式进单在原项目上完成、不新建项目，已在执行中或后续状态的项目不得因进单回退；实际装机完成/验收报告/金额闭环等更强事实保留优先级；完成态：tests/integration/relocation-project-lifecycle.sqlite.test.ts 覆盖人工提交与自动触发并发优先级、正式进单不倒退场景。
 
 ## 4. Overview 同修订读取、有效项目财务口径与孤立数据治理
 
-- [ ] 4.1 将 `WorkbenchReadRepository.overview()` 改为同修订读取：totalProjects 与待掉票金额在同一个 SQLite 读事务（或单一聚合查询）内计算，消除"分别读取的修订之间可观察不一致"（design D2）；不改变财务公式本身；完成态：focused 集成测试断言同修订一致性。
-- [ ] 4.2 固化"仅由仍存在项目的有效财务事实计算"口径：财务聚合经仍存在且未取消项目 JOIN，孤立/脏事实不计入，已完成但仍有有效待掉票余额的项目纳入、已取消项目排除，不改为"仅活跃项目"筛选；系统中无任何项目时 pendingAmount 必为 0；完成态：tests/integration/financial-closure.sqlite.test.ts 覆盖 零项目为 0/孤立排除/已完成余额纳入/已取消排除 四场景。
-- [ ] 4.3 实现只读孤立数据诊断：输出仅计数（孤立合同、孤立掉票/最终可确认金额事实、断裂 project/contract 链接、`PRAGMA foreign_key_check`），不打印任何客户值；默认只读、不删除任何财务记录；可接入迁移/启动诊断（与 2.3 同源实现）；完成态：focused 测试断言计数正确且无客户值输出。
-- [ ] 4.4 实现安全清理路径（防复发）：清理要求先备份 + 负责人显式确认 + 审计结果记录；清理不物理删除掉票记录（保持仅可撤销语义）；提供防复发校验（新写入仍经有效性约束）；清理后待掉票金额指标恢复正常；完成态：tests/integration/data-cleanup.sqlite.test.ts（或同目录新增 focused 用例）覆盖 备份前置/确认前置/审计结果/防复发。
+- [x] 4.1 将 `WorkbenchReadRepository.overview()` 改为同修订读取：totalProjects 与待掉票金额在同一个 SQLite 读事务（或单一聚合查询）内计算，消除"分别读取的修订之间可观察不一致"（design D2）；不改变财务公式本身；完成态：focused 集成测试断言同修订一致性。
+- [x] 4.2 固化"仅由仍存在项目的有效财务事实计算"口径：财务聚合经仍存在且未取消项目 JOIN，孤立/脏事实不计入，已完成但仍有有效待掉票余额的项目纳入、已取消项目排除，不改为"仅活跃项目"筛选；系统中无任何项目时 pendingAmount 必为 0；完成态：tests/integration/financial-closure.sqlite.test.ts 覆盖 零项目为 0/孤立排除/已完成余额纳入/已取消排除 四场景。
+- [ ] 4.3 实现只读孤立数据诊断：输出仅计数（孤立合同、孤立掉票/最终可确认金额事实、断裂 project/contract 链接、`PRAGMA foreign_key_check`），不打印任何客户值；默认只读、不删除任何财务记录；因非空项目 FK 且治理撤销保留原行，结构性外键违规（含治理撤销后的保留行）持续以 unresolved count 报告并给出人工恢复/治理路径，不宣称 foreign_key_check 归零；可接入迁移/启动诊断（与 2.3 同源实现）；完成态：focused 测试断言计数正确、结构性违规以 unresolved count 呈现且无客户值输出。
+- [ ] 4.4 实现安全治理清理路径（防复发）：对活跃孤立掉票执行治理撤销，前置为 先备份 + 负责人显式确认 + 审计结果记录；治理撤销经既有撤销语义使掉票进入撤销终态并保留原行，SHALL NOT 物理删除掉票记录；治理后因非空项目 FK 与保留原行，结构性外键违规仍以 unresolved count 持续报告，提供人工恢复/治理路径，不宣称 foreign_key_check 归零；提供防复发校验（新写入仍经有效性约束）；治理后待掉票金额指标恢复正常（不再计入已撤销孤立掉票）；完成态：tests/integration/data-cleanup.sqlite.test.ts（或同目录新增 focused 用例）覆盖 备份前置/确认前置/审计结果/撤销终态保留原行/防复发/结构性违规仍报告且不归零。
 
 ## 5. 登记记录删除：type-specific 领域策略
 

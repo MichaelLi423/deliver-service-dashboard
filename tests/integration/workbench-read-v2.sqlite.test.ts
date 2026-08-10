@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
 import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
-import { closeDatabase } from '../../src/domain/capabilities/local-data-persistence/connection';
+import { closeDatabase, openDatabase } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { readBusinessRevision } from '../../src/domain/capabilities/local-data-persistence/identity';
 import {
   V2_PROJECT_PAGE_DEFAULT_LIMIT,
@@ -31,6 +31,7 @@ afterEach(() => {
 
 interface Ctx {
   db: DatabaseSync;
+  dbPath: string;
   facade: WorkbenchFacade;
   projectId: string;
 }
@@ -38,7 +39,7 @@ interface Ctx {
 function makeFacade(): Ctx {
   const dir = makeTempDir('workbench-v2-');
   dirs.push(dir);
-  const { db } = bootstrapDatabase({ dataDir: dir });
+  const { db, dbPath } = bootstrapDatabase({ dataDir: dir });
   // 同步初始化（测试里账号服务是异步的，这里直接建行避免异步初始化开销）。
   db.prepare(
     'INSERT INTO accounts (id, username, password_hash, password_salt, created_at, updated_at) VALUES (?,?,?,?,?,?)',
@@ -67,7 +68,7 @@ function makeFacade(): Ctx {
     projectId,
     action: { type: 'instrument', projectId, values: { name: '质谱仪', ups: true, qrRequested: false } },
   });
-  return { db, facade, projectId };
+  return { db, dbPath, facade, projectId };
 }
 
 function reader(ctx: Ctx, today = '2026-08-08', windowDays = 7): WorkbenchReadRepository {
@@ -221,6 +222,43 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
     const overview = reader(ctx).overview();
     expect(overview.metrics.totalProjects).toBe(4); // 全量项目数（含已取消与空 final）
     expect(overview.metrics.pendingAmount).toBe('160000.00'); // 100000 + 60000，已取消与空 final 不计
+    closeDatabase(db);
+  });
+
+  it('任务4.1：totalProjects 与待掉票金额在同一修订一致快照内读取（单一聚合查询）', () => {
+    const ctx = makeFacade();
+    const { db, dbPath } = ctx;
+    // 第二连接模拟并发写入者（WAL 下可与读者事务并存）。
+    const writer = openDatabase({ path: dbPath });
+    const repo = reader(ctx);
+
+    expect(repo.overview().metrics).toMatchObject({ totalProjects: 1, pendingAmount: '100000.00' });
+
+    // 读者连接持有读事务快照（S0），写者连接随后提交新项目与合同 → 数据库修订推进。
+    db.exec('BEGIN');
+    db.prepare('SELECT COUNT(*) AS n FROM projects').get(); // 首次读建立快照 S0
+    writer.prepare(
+      `INSERT INTO projects (id, temp_no, status, region, entry_at, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+    ).run('rev-b', 'TP-REV-B', 'pending_invoice', '华东', '2026-08-01', 't', 't');
+    writer.prepare(
+      `INSERT INTO contracts (id, project_id, temp_number, final_confirmable_amount_cents, created_at, updated_at)
+       VALUES (?,?,?,?,?,?)`,
+    ).run('c-rev-b', 'rev-b', 'TP-REV-B', 5000000, 't', 't');
+
+    // 快照未释放：overview() 仍读到 S0，total 与金额保持同一修订
+    // （不出现 totalProjects=2 而 pendingAmount 仍为旧值的混读）。
+    const mid = repo.overview();
+    expect(mid.metrics.totalProjects).toBe(1);
+    expect(mid.metrics.pendingAmount).toBe('100000.00');
+
+    // 提交读者事务后：读到新修订，total 与金额同步变化（100000 + 50000 = 150000）。
+    db.exec('COMMIT');
+    const after = repo.overview();
+    expect(after.metrics.totalProjects).toBe(2);
+    expect(after.metrics.pendingAmount).toBe('150000.00');
+
+    closeDatabase(writer);
     closeDatabase(db);
   });
 

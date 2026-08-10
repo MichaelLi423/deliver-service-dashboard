@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { DatabaseSync } from 'node:sqlite';
 import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { closeDatabase } from '../../src/domain/capabilities/local-data-persistence/connection';
+import { WorkbenchReadRepository } from '../../src/domain/capabilities/local-data-persistence/workbench-read-repository';
 import { SqliteInvoiceRepository } from '../../src/domain/capabilities/local-data-persistence/financial-repositories';
 import {
   SqliteContractRepository,
@@ -189,6 +191,130 @@ describe('project-financial-closure SQLite 集成（5.12）', () => {
       closeDatabase(ctx.db);
     } finally {
       cleanupTempDir(dir);
+    }
+  });
+});
+
+/**
+ * 任务 4.2：待掉票金额指标仅由「仍存在项目」的有效财务事实计算。
+ * 直接观测 WorkbenchReadRepository.overview() 的 pendingAmount 指标，覆盖四场景：
+ * 零项目为 0 / 孤立排除 / 已完成余额纳入 / 已取消排除。
+ * 财务公式不变：final_confirmable_amount_cents − 有效（未撤销）掉票合计，
+ * 仅对仍存在且非 cancelled 的已进单项目计算（JOIN contracts）。
+ */
+describe('待掉票金额指标（4.2：仅仍存在项目的有效财务事实）', () => {
+  interface FinCtx {
+    db: DatabaseSync;
+    repo: WorkbenchReadRepository;
+    dir: string;
+  }
+
+  function openFinCtx(): FinCtx {
+    const dir = makeTempDir('fin-closure-42-');
+    const { db } = bootstrapDatabase({ dataDir: dir });
+    const repo = new WorkbenchReadRepository(db, { today: '2026-08-08', windowDays: 7 });
+    return { db, repo, dir };
+  }
+
+  function seedProject(db: DatabaseSync, id: string, tempNo: string, status: string): void {
+    db.prepare(
+      `INSERT INTO projects (id, temp_no, status, region, entry_at, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?)`,
+    ).run(id, tempNo, status, '华东', '2026-08-01', 't', 't');
+  }
+
+  function seedContract(db: DatabaseSync, id: string, projectId: string, tempNo: string, finalCents: number): void {
+    db.prepare(
+      `INSERT INTO contracts (id, project_id, temp_number, final_confirmable_amount_cents, created_at, updated_at)
+       VALUES (?,?,?,?,?,?)`,
+    ).run(id, projectId, tempNo, finalCents, 't', 't');
+  }
+
+  function seedInvoice(
+    db: DatabaseSync,
+    id: string,
+    projectId: string,
+    amountCents: number,
+    revokedAt: string | null,
+  ): void {
+    db.prepare(
+      `INSERT INTO invoices (id, project_id, amount_cents, invoiced_at, revoked_at, last_modified_at, created_at)
+       VALUES (?,?,?,?,?,?,?)`,
+    ).run(id, projectId, amountCents, '2026-08-02', revokedAt, '2026-08-02T00:00:00+08:00', 't');
+  }
+
+  /** 写入引用不存在项目的孤立财务事实（模拟旧库遗留脏数据；FK 临时关闭）。 */
+  function seedOrphan(db: DatabaseSync, contractId: string, invoiceId: string, ghostProject: string): void {
+    db.exec('PRAGMA foreign_keys = OFF');
+    seedContract(db, contractId, ghostProject, 'TP-GHOST', 90000000);
+    seedInvoice(db, invoiceId, ghostProject, 80000000, null);
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+
+  it('零项目为 0：仅孤立/脏财务事实（无任何项目）时 pendingAmount 必为 0', () => {
+    const ctx = openFinCtx();
+    try {
+      seedOrphan(ctx.db, 'c-ghost-a', 'inv-ghost-a', 'ghost-a');
+      const overview = ctx.repo.overview();
+      expect(overview.metrics.totalProjects).toBe(0);
+      expect(overview.metrics.pendingAmount).toBe('0.00'); // 不因孤立数据显示非 0
+    } finally {
+      closeDatabase(ctx.db);
+      cleanupTempDir(ctx.dir);
+    }
+  });
+
+  it('孤立排除：引用不存在项目的掉票/合同事实不计入指标', () => {
+    const ctx = openFinCtx();
+    try {
+      const { db, repo } = ctx;
+      // 有效项目：final=5000.00 且无掉票 → 待掉票 5000.00
+      seedProject(db, 'p-valid', 'TP-VALID', 'pending_invoice');
+      seedContract(db, 'c-valid', 'p-valid', 'TP-VALID', 500000);
+      // 孤立：final=900000.00 合同 + 800000.00 有效掉票（引用不存在项目）
+      seedOrphan(db, 'c-ghost-b', 'inv-ghost-b', 'ghost-b');
+
+      const overview = repo.overview();
+      expect(overview.metrics.totalProjects).toBe(1);
+      expect(overview.metrics.pendingAmount).toBe('5000.00');
+    } finally {
+      closeDatabase(ctx.db);
+      cleanupTempDir(ctx.dir);
+    }
+  });
+
+  it('已完成余额纳入：已完成项目仍有有效待掉票余额时按 final − 有效掉票计入', () => {
+    const ctx = openFinCtx();
+    try {
+      const { db, repo } = ctx;
+      seedProject(db, 'p-done', 'TP-DONE', 'completed');
+      seedContract(db, 'c-done', 'p-done', 'TP-DONE', 800000); // final 8000.00
+      seedInvoice(db, 'inv-done-1', 'p-done', 200000, null); // 有效 2000.00
+      seedInvoice(db, 'inv-done-2', 'p-done', 500000, '2026-08-05'); // 已撤销 5000.00 不计
+
+      const overview = repo.overview();
+      expect(overview.metrics.totalProjects).toBe(1);
+      expect(overview.metrics.pendingAmount).toBe('6000.00'); // 8000 − 2000
+    } finally {
+      closeDatabase(ctx.db);
+      cleanupTempDir(ctx.dir);
+    }
+  });
+
+  it('已取消排除：仅已取消项目存在时 pendingAmount 为 0（口径不改动为仅活跃项目）', () => {
+    const ctx = openFinCtx();
+    try {
+      const { db, repo } = ctx;
+      seedProject(db, 'p-cancel', 'TP-CANCEL', 'cancelled');
+      seedContract(db, 'c-cancel', 'p-cancel', 'TP-CANCEL', 500000); // 若计入将是 5000.00
+
+      const overview = repo.overview();
+      expect(overview.metrics.totalProjects).toBe(1);
+      expect(overview.metrics.activeProjects).toBe(0);
+      expect(overview.metrics.pendingAmount).toBe('0.00');
+    } finally {
+      closeDatabase(ctx.db);
+      cleanupTempDir(ctx.dir);
     }
   });
 });

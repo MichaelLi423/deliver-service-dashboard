@@ -18,6 +18,10 @@ import {
  * - 标记验收报告并填写报告形成日期 → 自动置为待掉票（不要求当前状态已待验收，
  *   只要有效验收报告事实即生效；已取消拒绝）
  * - 录入实际装机完成时间 → 自动置为待验收（TBD-07）
+ * - 计划上门日期到期自动推进（today >= planVisitAt，tasks 3.1 / design D5 转换表）：
+ *   仅待进单/待执行 → 执行中；执行中幂等不写、待验收/待掉票不倒退、
+ *   已完成/已取消终态不变；未到期不推进、逾期（漏跑）补推进；
+ *   带"未进单先执行"标签的待进单项目到期同样自动进入执行中
  * - 待掉票/已完成之间按掉票事实自动重算（已确认语义：任意成功登记一笔掉票
  *   （累计有效 > 0）即视为闭环完成，撤销最后有效掉票后回到待掉票；
  *   无 0 金额闭环：最终可确认金额为空或 0 时不产生闭环判定）
@@ -50,6 +54,10 @@ export interface TransitionContext {
   actualInstallDoneAt: BusinessDate | null;
   /** 验收报告形成日期（业务日期）；null = 尚未验收。 */
   acceptanceReportDate: BusinessDate | null;
+  /** 计划上门日期（业务日期）；null/未提供 = 未填写。 */
+  planVisitAt?: BusinessDate | null;
+  /** 当前业务日期；提供时才启用计划上门日期到期自动推进。 */
+  today?: BusinessDate;
   amounts: AmountClosureFacts;
   cancel: CancelFacts;
   /** 未进单先执行标签是否生效（存在时主状态保持待进单，TBD-08）。 */
@@ -61,6 +69,7 @@ export interface TransitionContext {
 export type TransitionReason =
   | 'manual'
   | 'execution_started'
+  | 'plan_visit_due'
   | 'auto_install_done'
   | 'auto_acceptance'
   | 'auto_amount_closure'
@@ -111,6 +120,26 @@ export function resolveStatus(context: TransitionContext): TransitionResult {
       ]);
     }
     return ok(CANCELLED_STATUS, 'cancel');
+  }
+
+  // 自动触发：计划上门日期到期自动推进（tasks 3.1 / design D5 转换表）。
+  // 候选：today >= planVisitAt（today 未提供或计划上门日期为空时不启用）。
+  // 仅待进单/待执行 → 执行中；执行中幂等不写；待验收/待掉票不倒退；
+  // 已完成/已取消终态不变；未到期不推进、逾期（漏跑）补推进。
+  // 放在"未进单先执行保持待进单"标签规则之前：带标签的待进单项目到期同样
+  // 自动进入执行中（spec：待进单属自动推进范围，不因标签规则停留待进单）。
+  // 更强事实优先：存在验收报告或实际装机完成事实时不按到期推进，交由对应自动触发。
+  if (isPlanVisitDue(context)) {
+    if (
+      (currentStatus === 'pending_entry' || currentStatus === 'pending_execution') &&
+      context.acceptanceReportDate === null &&
+      context.actualInstallDoneAt === null
+    ) {
+      return ok('executing', 'plan_visit_due');
+    }
+    // 其余状态行在到期检查下保持现状：执行中幂等不写（不产生真实转换）、
+    // 待验收/待掉票不倒退、已完成终态不变；已取消已在终态检查处拒绝。
+    // 同状态请求（自动推进检查的典型用法）由下方 unchanged 分支返回。
   }
 
   // 未进单先执行标签：带标签的待进单项目主状态保持待进单（TBD-08）。
@@ -197,4 +226,19 @@ export function assertLegalStatus(status: string): asserts status is ProjectStat
   if (!isLegalStatus(status)) {
     throw new ValidationError('ILLEGAL_STATUS', `非法状态: ${status}`);
   }
+}
+
+/**
+ * 计划上门日期是否已到期（today >= planVisitAt）。
+ * today 未提供或计划上门日期为空时视为未启用（不触发到期自动推进），
+ * 保证既有调用方在不提供 today 时行为不变。
+ */
+function isPlanVisitDue(context: TransitionContext): boolean {
+  const { planVisitAt, today } = context;
+  return (
+    today !== undefined &&
+    planVisitAt !== null &&
+    planVisitAt !== undefined &&
+    today >= planVisitAt
+  );
 }

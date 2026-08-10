@@ -180,22 +180,28 @@ export class WorkbenchReadRepository {
       return row.n;
     };
 
-    const pendingAmountRow = prepareReadBigInt(
+    // 任务4.1：totalProjects 与待掉票金额在同一聚合查询（单一 SQLite 语句）内计算。
+    // SQLite 单条语句在自身事务内读取一致快照，二者必然来自同一业务修订，消除
+    // 「分别读取的修订之间可观察不一致」（design D2）；财务公式本身（final − 有效未撤销掉票、
+    // 仅仍存在且非 cancelled 的已进单项目、JOIN contracts）保持不变。
+    const aggregateRow = prepareReadBigInt(
       this.db,
-      `SELECT COALESCE(SUM(
-         CASE WHEN COALESCE(inv.total, 0) < c.final_confirmable_amount_cents
-              THEN c.final_confirmable_amount_cents - COALESCE(inv.total, 0)
-              ELSE 0 END
-       ), 0) AS pending_cents
-       FROM projects p
-       JOIN contracts c ON c.project_id = p.id
-       LEFT JOIN (SELECT project_id, SUM(amount_cents) AS total FROM invoices WHERE revoked_at IS NULL GROUP BY project_id) inv ON inv.project_id = p.id
-       WHERE p.entry_at IS NOT NULL AND c.final_confirmable_amount_cents IS NOT NULL
-         AND p.status <> 'cancelled'`,
-    ).get() as { pending_cents: bigint | string | number };
+      `SELECT
+         (SELECT COUNT(*) FROM projects) AS total_projects,
+         (SELECT COALESCE(SUM(
+            CASE WHEN COALESCE(inv.total, 0) < c.final_confirmable_amount_cents
+                 THEN c.final_confirmable_amount_cents - COALESCE(inv.total, 0)
+                 ELSE 0 END
+          ), 0) AS pending_cents
+          FROM projects p
+          JOIN contracts c ON c.project_id = p.id
+          LEFT JOIN (SELECT project_id, SUM(amount_cents) AS total FROM invoices WHERE revoked_at IS NULL GROUP BY project_id) inv ON inv.project_id = p.id
+          WHERE p.entry_at IS NOT NULL AND c.final_confirmable_amount_cents IS NOT NULL
+            AND p.status <> 'cancelled') AS pending_cents`,
+    ).get() as { total_projects: number | bigint; pending_cents: bigint | string | number };
 
     const metrics = {
-      totalProjects: count('SELECT COUNT(*) AS n FROM projects'),
+      totalProjects: Number(aggregateRow.total_projects),
       activeProjects: count("SELECT COUNT(*) AS n FROM projects WHERE status NOT IN ('completed','cancelled')"),
       reminderCount: count('SELECT COUNT(*) AS n FROM projects WHERE reminder_at IS NOT NULL OR reminder_note IS NOT NULL'),
       reminderOverdue: count('SELECT COUNT(*) AS n FROM projects WHERE reminder_at IS NOT NULL AND substr(reminder_at,1,10) < ?', today),
@@ -210,7 +216,7 @@ export class WorkbenchReadRepository {
            WHERE d.project_id = p.id AND d.issue_status NOT IN ('repaired','closed_unrepaired')
          )`,
       ),
-      pendingAmount: formatCents(BigInt(String(pendingAmountRow.pending_cents))),
+      pendingAmount: formatCents(BigInt(String(aggregateRow.pending_cents))),
     };
 
     const stageRows = this.db

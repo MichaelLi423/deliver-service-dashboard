@@ -41,7 +41,7 @@ New and edited projects accept only `East | South | West | Central | North`. Exi
 
 Compute `totalProjects` and pending-invoice amount in one SQLite read transaction (or one aggregate query) and derive the invariant `totalProjects === 0 => pendingAmount === 0`. The financial aggregate joins through an existing, non-cancelled project and retains valid balances for completed projects; it does not substitute an “active project only” filter.
 
-Add a read-only integrity diagnostic that reports counts only for orphan contracts, orphan invoice facts, broken project/contract links and `PRAGMA foreign_key_check`. Do not print customer values. Migration or startup may diagnose, but it must not silently delete financial records. Any repair path requires backup, explicit confirmation and an audit result while preserving the rule that invoice records are reversed rather than physically deleted.
+Add a read-only integrity diagnostic that reports counts only for orphan contracts, orphan invoice facts, broken project/contract links and `PRAGMA foreign_key_check`. Do not print customer values. Migration or startup may diagnose, but it must not silently delete financial records. Orphan invoice records are never physically deleted; an active orphan invoice may be governance-revoked only after backup, explicit owner confirmation and an audited result, and the revocation keeps the original row while excluding it from the pending-amount metric. Because invoice tables keep a non-null project FK and revoked rows are preserved, structural `PRAGMA foreign_key_check` violations remain reportable as an unresolved count with a manual recovery/governance path; cleanup must not claim `foreign_key_check` is zeroed.
 
 **Why:** hiding the card would mask the inconsistency, while changing the financial scope would lose legitimate balances from completed projects.
 
@@ -147,6 +147,7 @@ Editing tentative instrument count remains a scalar project update through the e
 - **[Automatic progression can race with manual edits]** → Recheck status and revision in the transaction and route both paths through lifecycle validation.
 - **[Deletion can remove evidence needed by another capability]** → Reject dependent deletes, retain source audit/tombstones and recompute lifecycle only through its authority.
 - **[Integrity repair could destroy customer data]** → Make diagnostics count-only and read-only by default; require backup and explicit confirmation for repair, with invoice reversal semantics preserved.
+- **[Governance cleanup could be mistaken for full FK zeroing]** → Active orphan invoices are governance-revoked with the original row preserved, never physically deleted; with the non-null project FK, `PRAGMA foreign_key_check` keeps reporting those preserved rows, so cleanup reports them as an unresolved count with a manual recovery/governance path instead of claiming the check is zeroed.
 - **[Sticky content reduces small-screen workspace]** → Allow internal wrapping, verify both target viewport widths and ensure focus scrolling accounts for the sticky offset.
 - **[History ordering differs by record type]** → Centralize business-date selection and use a stable ID tie-breaker.
 - **[A stale project cursor can be reused after filtering changes or equal sort keys can cause duplicate/missing rows]** → Bind traversal to normalized filter/search state, clear the cursor whenever that state changes, recompute filtered `total` in main and append a unique stable tie-breaker to the page order.
@@ -158,7 +159,7 @@ Editing tentative instrument count remains a scalar project update through the e
 
 1. Back up the database using the existing backup path and record the pre-migration schema version.
 2. Apply the appended migration transactionally; add nullable fields/indexes without rewriting existing values.
-3. Run foreign-key and orphan-count diagnostics. Abort and restore the pre-migration database if structural checks fail.
+3. Run foreign-key and orphan-count diagnostics. Structural foreign-key violations caused by pre-existing orphan rows are reported as an unresolved count with a manual recovery/governance path and do not block migration. Abort and restore the pre-migration database only if the migration itself produces a structural failure.
 4. Start with domain write validation for the five regions while exposing legacy values as “待调整”.
 5. Deploy read-model, lifecycle, deletion and UI changes against the migrated schema.
 6. On rollback, restore the pre-migration backup before running an older binary; do not attempt to make the older binary interpret the newer schema.

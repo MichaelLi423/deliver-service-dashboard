@@ -10,6 +10,10 @@ import {
   businessRevisionTriggerName,
 } from '../../src/domain/capabilities/local-data-persistence/schema-v10';
 import {
+  RELOCATION_WORKBENCH_MIGRATION_VERSION,
+  RELOCATION_WORKBENCH_NON_BUSINESS_TABLES,
+} from '../../src/domain/capabilities/local-data-persistence/schema-v15';
+import {
   readBusinessRevision,
   readDatabaseIdentity,
   rotateContentGeneration,
@@ -29,13 +33,17 @@ import { cleanupTempDir, makeTempDir, makeTempDbPath } from '../helpers/tmp-db';
  */
 
 const rev = (db: DatabaseSync): number => readBusinessRevision(db);
+const ALL_NON_BUSINESS_TABLES = [
+  ...NON_BUSINESS_TABLES,
+  ...RELOCATION_WORKBENCH_NON_BUSINESS_TABLES,
+] as const;
 
 describe('schema v10：正式库身份与业务修订迁移（tasks 8.15 / D25）', () => {
   it('首次建库生成稳定 instance/generation，business_revision 从 0 起；关闭重开身份不变', () => {
     const dir = makeTempDir();
     try {
       const first = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(first.db)).toBe(14);
+      expect(readSchemaVersion(first.db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
       const identity = readDatabaseIdentity(first.db);
       expect(identity.databaseInstanceId).toBeTruthy();
       expect(identity.contentGenerationId).toBeTruthy();
@@ -70,9 +78,9 @@ describe('schema v10：正式库身份与业务修订迁移（tasks 8.15 / D25�
         't',
       );
 
-      // 升级到 v10（含后续 v11~v13）
+      // 升级到 v10（含后续 v11~v15）
       runMigrations(db, { migrations: [...MIGRATIONS], backupDir });
-      expect(readSchemaVersion(db)).toBe(14);
+      expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
       expect(readDatabaseIdentity(db).businessRevision).toBe(0);
       expect(db.prepare('SELECT name FROM customers WHERE id = ?').get('c-legacy')).toMatchObject({
         name: '存量客户',
@@ -153,10 +161,10 @@ describe('schema v10：正式库身份与业务修订迁移（tasks 8.15 / D25�
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
       expect(rev(db)).toBe(0);
-      // 注：v13/v14 已是正式迁移；用 v15 自定义迁移验证「后续迁移的 DML 也走触发器」。
+      // 注：v15 已是正式迁移；用 v16 自定义迁移验证「后续迁移的 DML 也走触发器」。
       const seedLater: Migration = {
-        version: 15,
-        name: 'v15-seed-customer',
+        version: RELOCATION_WORKBENCH_MIGRATION_VERSION + 1,
+        name: 'next-seed-customer',
         up: (d: DatabaseSync) => {
           d.prepare('INSERT INTO customers (id, name, created_at, updated_at) VALUES (?,?,?,?)').run(
             'mig-c',
@@ -192,7 +200,7 @@ describe('schema v10：触发器覆盖（design D25 / R9 防漏报）', () => {
       )
         .map((r) => r.name)
         .sort();
-      expect(allTables).toEqual([...BUSINESS_TABLES, ...NON_BUSINESS_TABLES].sort());
+      expect(allTables).toEqual([...BUSINESS_TABLES, ...ALL_NON_BUSINESS_TABLES].sort());
 
       // 每张业务表恰好有 insert/update/delete 三个触发器
       for (const table of BUSINESS_TABLES) {
@@ -209,7 +217,7 @@ describe('schema v10：触发器覆盖（design D25 / R9 防漏报）', () => {
       }
 
       // 非业务表（账号/审计/meta）零触发器
-      for (const table of NON_BUSINESS_TABLES) {
+      for (const table of ALL_NON_BUSINESS_TABLES) {
         const triggers = db
           .prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name = ?")
           .all(table) as { name: string }[];

@@ -281,3 +281,171 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
     expectReason(result, 'execution_started');
   });
 });
+
+describe('计划上门日期到期自动推进（tasks 3.1 / design D5 转换表）', () => {
+  const dueCtx = (overrides: Partial<TransitionContext> = {}) =>
+    ctx({
+      today: '2026-08-10',
+      planVisitAt: '2026-08-10', // today >= plan_visit_date：已到期
+      ...overrides,
+    });
+
+  it('到期：待进单 → 执行中（reason plan_visit_due）', () => {
+    const result = resolveStatus(
+      dueCtx({ currentStatus: 'pending_entry', requestedStatus: 'pending_entry' }),
+    );
+    expectStatus(result, 'executing');
+    expectReason(result, 'plan_visit_due');
+  });
+
+  it('到期：待执行 → 执行中', () => {
+    const result = resolveStatus(
+      dueCtx({ currentStatus: 'pending_execution', requestedStatus: 'pending_execution' }),
+    );
+    expectStatus(result, 'executing');
+    expectReason(result, 'plan_visit_due');
+  });
+
+  it('到期：执行中幂等不写（保持执行中）', () => {
+    const result = resolveStatus(
+      dueCtx({ currentStatus: 'executing', requestedStatus: 'executing' }),
+    );
+    expectStatus(result, 'executing');
+    expectReason(result, 'unchanged');
+  });
+
+  it('到期：待验收/待掉票不倒退', () => {
+    const acceptance = resolveStatus(
+      dueCtx({ currentStatus: 'pending_acceptance', requestedStatus: 'pending_acceptance' }),
+    );
+    expectStatus(acceptance, 'pending_acceptance');
+    expectReason(acceptance, 'unchanged');
+
+    const invoice = resolveStatus(
+      dueCtx({ currentStatus: 'pending_invoice', requestedStatus: 'pending_invoice' }),
+    );
+    expectStatus(invoice, 'pending_invoice');
+    expectReason(invoice, 'unchanged');
+  });
+
+  it('到期：已完成终态不变', () => {
+    const result = resolveStatus(
+      dueCtx({
+        currentStatus: 'completed',
+        requestedStatus: 'completed',
+        amounts: { confirmedAmountCents: 100n, finalConfirmableAmountCents: 100n },
+      }),
+    );
+    expectStatus(result, 'completed');
+  });
+
+  it('到期：已取消终态不变（仍拒绝流转）', () => {
+    const result = resolveStatus(
+      dueCtx({ currentStatus: 'cancelled', requestedStatus: 'cancelled' }),
+    );
+    expectRejected(result, '不可恢复');
+  });
+
+  it('未到期不推进：today < planVisitAt 时保持现状', () => {
+    const result = resolveStatus(
+      ctx({
+        currentStatus: 'pending_execution',
+        requestedStatus: 'pending_execution',
+        today: '2026-08-10',
+        planVisitAt: '2026-08-20',
+      }),
+    );
+    expectStatus(result, 'pending_execution');
+    expectReason(result, 'unchanged');
+  });
+
+  it('逾期补推进：计划上门日期早于 today 数日（漏跑）仍自动进入执行中', () => {
+    const result = resolveStatus(
+      ctx({
+        currentStatus: 'pending_execution',
+        requestedStatus: 'pending_execution',
+        today: '2026-08-10',
+        planVisitAt: '2026-07-01',
+      }),
+    );
+    expectStatus(result, 'executing');
+    expectReason(result, 'plan_visit_due');
+  });
+
+  it('到期自动推进优先于人工目标值', () => {
+    const result = resolveStatus(
+      dueCtx({
+        currentStatus: 'pending_execution',
+        requestedStatus: 'pending_acceptance', // 负责人同时提交其他人工状态值
+      }),
+    );
+    expectStatus(result, 'executing');
+    expectReason(result, 'plan_visit_due');
+  });
+
+  it('待进单带"未进单先执行"标签到期自动进入执行中', () => {
+    const result = resolveStatus(
+      dueCtx({
+        currentStatus: 'pending_entry',
+        requestedStatus: 'pending_entry',
+        preEntryExecution: true,
+      }),
+    );
+    expectStatus(result, 'executing');
+    expectReason(result, 'plan_visit_due');
+  });
+
+  it('更强事实优先：到期但存在实际装机完成事实 → 待验收', () => {
+    const result = resolveStatus(
+      dueCtx({
+        currentStatus: 'pending_execution',
+        requestedStatus: 'pending_execution',
+        actualInstallDoneAt: '2026-08-09',
+      }),
+    );
+    expectStatus(result, 'pending_acceptance');
+    expectReason(result, 'auto_install_done');
+  });
+
+  it('更强事实优先：到期但存在验收报告事实 → 待掉票', () => {
+    const result = resolveStatus(
+      dueCtx({
+        currentStatus: 'pending_entry',
+        requestedStatus: 'pending_entry',
+        acceptanceReportDate: '2026-08-05',
+      }),
+    );
+    expectStatus(result, 'pending_invoice');
+    expectReason(result, 'auto_acceptance');
+  });
+
+  it('更强事实优先：待掉票到期且金额已达闭环 → 已完成（金额闭环优先）', () => {
+    const result = resolveStatus(
+      dueCtx({
+        currentStatus: 'pending_invoice',
+        requestedStatus: 'pending_invoice',
+        amounts: { confirmedAmountCents: 100n, finalConfirmableAmountCents: 800000n },
+      }),
+    );
+    expectStatus(result, 'completed');
+    expectReason(result, 'auto_amount_closure');
+  });
+
+  it('未提供 today 或计划上门日期为空时不启用到期推进', () => {
+    const noToday = resolveStatus(
+      ctx({
+        currentStatus: 'pending_execution',
+        requestedStatus: 'pending_execution',
+        planVisitAt: '2026-08-01',
+      }),
+    );
+    expectStatus(noToday, 'pending_execution');
+    expectReason(noToday, 'unchanged');
+
+    const noPlan = resolveStatus(
+      ctx({ currentStatus: 'pending_execution', requestedStatus: 'pending_execution', today: '2026-08-10' }),
+    );
+    expectStatus(noPlan, 'pending_execution');
+    expectReason(noPlan, 'unchanged');
+  });
+});

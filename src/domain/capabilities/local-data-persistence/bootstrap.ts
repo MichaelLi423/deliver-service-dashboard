@@ -62,6 +62,10 @@ import {
   applySupplementFieldsMigration,
   SUPPLEMENT_FIELDS_MIGRATION_VERSION,
 } from './schema-v14';
+import {
+  applyRelocationWorkbenchFieldsMigration,
+  RELOCATION_WORKBENCH_MIGRATION_VERSION,
+} from './schema-v15';
 
 /** 初始迁移：v1 创建覆盖 14 个能力的核心表/事实表。 */
 export const INITIAL_MIGRATION: Migration = {
@@ -161,6 +165,13 @@ export const SUPPLEMENT_FIELDS_MIGRATION: Migration = {
   up: (db) => applySupplementFieldsMigration(db),
 };
 
+/** v15 迁移：搬迁工作台 0810 反馈新增字段（项目备注、暂存地址、是否暂存、是否批复；计划装机日期复用 v14 列）。 */
+export const RELOCATION_WORKBENCH_MIGRATION: Migration = {
+  version: RELOCATION_WORKBENCH_MIGRATION_VERSION,
+  name: 'relocation-workbench-fields',
+  up: (db) => applyRelocationWorkbenchFieldsMigration(db),
+};
+
 /** 当前迁移序列（后续 schema 升级追加新 Migration，不修改已发布迁移）。 */
 export const MIGRATIONS: readonly Migration[] = [
   INITIAL_MIGRATION,
@@ -177,6 +188,7 @@ export const MIGRATIONS: readonly Migration[] = [
   READ_INDEX_MIGRATION,
   BUSINESS_DATE_MIGRATION,
   SUPPLEMENT_FIELDS_MIGRATION,
+  RELOCATION_WORKBENCH_MIGRATION,
 ];
 
 export interface BootstrapOptions {

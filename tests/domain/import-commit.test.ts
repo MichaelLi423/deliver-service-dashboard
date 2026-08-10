@@ -4,6 +4,7 @@ import { bootstrapWorkspaceDatabase, closeWorkspaceDatabase } from '../../src/do
 import { WorkspaceRepository } from '../../src/domain/capabilities/historical-data-import/workspace/workspace-repository';
 import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { closeDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
+import { RELOCATION_WORKBENCH_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
 import { businessKeyFromCells, toAppendRowInput, type NormalizedRow } from '../../src/domain/capabilities/historical-data-import/normalized-row';
 import { buildPlanFromRows } from '../../src/domain/capabilities/historical-data-import/validation-kernel';
 import { validatePlan } from '../../src/domain/capabilities/historical-data-import/validation';
@@ -172,7 +173,7 @@ describe('8.16 import_run 运行审计（schema v11 / operation_id 唯一）', (
     const dir = makeTempDir();
     try {
       const { db, close } = openEnv(dir);
-      expect(readSchemaVersion(db)).toBe(14);
+      expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
       const cols = db.prepare('PRAGMA table_info(import_run)').all() as { name: string }[];
       const names = cols.map((c) => c.name);
       for (const col of [
