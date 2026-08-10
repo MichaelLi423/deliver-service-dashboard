@@ -379,6 +379,33 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     expect(String(feeAfter.deal_price_cents)).toBe('1250000');
     expect(String(feeAfter.logistics_cost_cents)).toBe('1250000');
   });
+
+  // domain/persistence 已支持 set_window_days(0)（见 domain/sqlite 测试）；
+  // 本用例针对接线缺口：v2Mutate 目前没有该 op，运行时将以 V2_MUTATION_UNKNOWN 拒绝 → Red。
+  it('v2Mutate set_window_days 0 为合法配置：mutation 成功且 overview.reminderWindowDays 为 0', async () => {
+    const ctx = await loggedIn();
+    const before = readBusinessRevision(ctx.db());
+    const result = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'set_window_days',
+      windowDays: 0,
+    } as unknown as WorkbenchV2MutationRequest)) as { businessRevision: number; invalidated: string[] };
+    expect(result.businessRevision).toBeGreaterThan(before);
+    expect(result.invalidated).toContain('overview');
+    const overview = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Overview, 100)) as WorkbenchV2OverviewDto;
+    expect(overview.reminderWindowDays).toBe(0);
+  });
+
+  it('v2Mutate set_window_days 负数/非整数返回 INVALID_WINDOW_DAYS', async () => {
+    const ctx = await loggedIn();
+    for (const windowDays of [-1, 2.5]) {
+      await expect(
+        ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+          op: 'set_window_days',
+          windowDays,
+        } as unknown as WorkbenchV2MutationRequest),
+      ).rejects.toMatchObject({ code: 'INVALID_WINDOW_DAYS' });
+    }
+  });
 });
 
 describe('IPC：受保护删除（v2Delete）与清理全部业务数据（cleanPrepare/cleanConfirm）', () => {

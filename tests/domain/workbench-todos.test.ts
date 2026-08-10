@@ -219,6 +219,27 @@ describe('临期窗口可配置、默认 7 个自然日（6.3）', () => {
     expect(() => ctx.service.setUpcomingWindowDays(-1)).toThrow(/不小于 0 的整数/);
     expect(() => ctx.service.setUpcomingWindowDays(2.5)).toThrow(/不小于 0 的整数/);
   });
+
+  // domain 已支持 0 为合法窗口（validate 仅拒绝负数/非整数）；
+  // 0 不能当 falsy 处理——0 表示「仅当天 today」，昨天的提醒仍 overdue，明天不分类。
+  it('窗口为 0 合法：今天 today、昨天 overdue、明天不进入任何分类', () => {
+    const ctx = setup();
+    addProject(ctx);
+    ctx.service.setUpcomingWindowDays(0);
+    expect(ctx.service.getUpcomingWindowDays()).toBe(0);
+    expect(ctx.service.classifyAt('2026-08-07')).toBe('today');
+    expect(ctx.service.classifyAt('2026-08-06')).toBe('overdue');
+    expect(ctx.service.classifyAt('2026-08-08')).toBeNull();
+  });
+
+  it('窗口无上限：大整数如 100000 合法并立即生效', () => {
+    const ctx = setup();
+    addProject(ctx);
+    ctx.service.setUpcomingWindowDays(100000);
+    expect(ctx.service.getUpcomingWindowDays()).toBe(100000);
+    expect(ctx.service.classifyAt('2026-08-08')).toBe('upcoming');
+    expect(ctx.service.classifyAt('2026-08-09')).toBe('upcoming');
+  });
 });
 
 describe('提醒仅工作台内展示（6.4）', () => {

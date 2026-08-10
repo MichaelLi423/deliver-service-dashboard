@@ -820,6 +820,25 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(vi.mocked(api.v2ProjectDetail!).mock.calls.filter(([id]) => id === 'p-51')).toHaveLength(2);
   });
 
+  // domain/persistence 已支持 set_window_days(0)（见 domain/sqlite 测试）；
+  // 本用例针对 UI/接线缺口：提醒面板当前没有「临期窗口」输入与显式保存按钮，也不显示提醒日期 → Red。
+  it('提醒面板提供临期窗口数字输入与显式保存：设为 0 走 set_window_days 且提醒行显示格式化日期', async () => {
+    const api = mockApi();
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+    render(<App />);
+    const panel = await screen.findByRole('region', { name: /项目提醒快速处理/ });
+    const windowInput = within(panel).getByLabelText(/临期窗口/);
+    fireEvent.change(windowInput, { target: { value: '0' } });
+    fireEvent.click(within(panel).getByRole('button', { name: '保存' }));
+    await waitFor(() =>
+      expect(api.v2Mutate).toHaveBeenCalledWith(
+        expect.objectContaining({ op: 'set_window_days', windowDays: 0 }),
+      ),
+    );
+    // 提醒行显示格式化提醒日期（yyyy-mm-dd），而不只是备注
+    expect(within(panel).getByText('2026-08-08')).toBeInTheDocument();
+  });
+
   it('新建项目成功后清除隐藏筛选、回到首屏、刷新列表并自动选中新项目', async () => {
     const created = { ...project(1), id: 'p-new', customerName: '新建客户', ecc: 'ECC-NEW-001', status: 'pending_entry' as const };
     let projectCreated = false;

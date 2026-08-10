@@ -185,6 +185,32 @@ describe('workbench-todos SQLite 集成（6.5）', () => {
     }
   });
 
+  // 持久化已支持 0：0 是合法配置值，必须按 0 落库并重读，绝不能当 falsy 回退默认 7。
+  it('窗口配置为 0 时按 0 持久化，关闭重开后仍为 0（0 不当作 falsy 回退 7）', () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      ctx.reminders.setUpcomingWindowDays(0);
+      expect(ctx.reminders.getUpcomingWindowDays()).toBe(0);
+      // 0 窗口下：当天 today、昨天 overdue、明天不分类
+      expect(ctx.reminders.classifyAt('2026-08-07')).toBe('today');
+      expect(ctx.reminders.classifyAt('2026-08-06')).toBe('overdue');
+      expect(ctx.reminders.classifyAt('2026-08-08')).toBeNull();
+      closeDatabase(ctx.db);
+
+      const reopened = openService(dir);
+      expect(reopened.reminders.getUpcomingWindowDays()).toBe(0);
+      expect(reopened.reminders.classifyAt('2026-08-08')).toBeNull();
+      const row = reopened.db
+        .prepare("SELECT value FROM app_settings WHERE key = 'reminder_upcoming_window_days'")
+        .get() as { value: string };
+      expect(row.value).toBe('0');
+      closeDatabase(reopened.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
   it('listReminders 供工作台展示：按当前提醒列出项目与到期分类，关闭重开仍可列出', () => {
     const dir = makeTempDir();
     try {
