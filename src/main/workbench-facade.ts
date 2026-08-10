@@ -476,6 +476,19 @@ export class WorkbenchFacade {
           isTemporaryStorage: input.isTemporaryStorage,
         });
       }
+      // 暂定仪器范围（v16 手工维护项目级标量事实：名称/型号/是否配备 UPS；
+      // 不创建/删除/修改任何 instruments 行，不触发主状态流转）。
+      if (
+        input.temporaryInstrumentName !== undefined ||
+        input.temporaryInstrumentModel !== undefined ||
+        input.temporaryHasUps !== undefined
+      ) {
+        projectService.updateTemporaryInstrument(project.id, {
+          temporaryInstrumentName: input.temporaryInstrumentName,
+          temporaryInstrumentModel: input.temporaryInstrumentModel,
+          temporaryHasUps: input.temporaryHasUps,
+        });
+      }
       // 暂定仪器数量（正整数，可空）：有值（正整数）才记录数量并确认搬迁范围，
       // 不生成虚拟仪器；未提供/0/空则不确定范围（正式进单已不再要求搬迁范围）。
       const instrumentCount = input.instrumentCount;
@@ -621,6 +634,20 @@ export class WorkbenchFacade {
           projectService.setTemporaryInstrumentCount(projectId, update.temporaryInstrumentCount);
         }
       }
+      // 暂定仪器范围（v16）：名称/型号/是否配备 UPS，三态输入与暂存信息同语义
+      // （undefined=未提交、null=清空、有值=覆盖）；只更新项目标量，不建仪器、
+      // 不触发主状态流转。
+      if (
+        update.temporaryInstrumentName !== undefined ||
+        update.temporaryInstrumentModel !== undefined ||
+        update.temporaryHasUps !== undefined
+      ) {
+        projectService.updateTemporaryInstrument(projectId, {
+          temporaryInstrumentName: update.temporaryInstrumentName,
+          temporaryInstrumentModel: update.temporaryInstrumentModel,
+          temporaryHasUps: update.temporaryHasUps,
+        });
+      }
 
       // 以下更正仅允许已正式进单项目；待进单项目必须走 core/formalEntry 语义。
       // 进单日期字段名兼容：新契约 entryAt，旧名 enteredAt 继续接受。
@@ -729,6 +756,20 @@ export class WorkbenchFacade {
         }
         projectService.setTemporaryInstrumentCount(projectId, instrumentCount);
         projectService.confirmScope(projectId);
+      }
+
+      // 暂定仪器范围（v16）：名称/型号/是否配备 UPS，三态输入与暂存信息同语义；
+      // 只更新项目标量，不建仪器、不触发主状态流转。
+      if (
+        input.temporaryInstrumentName !== undefined ||
+        input.temporaryInstrumentModel !== undefined ||
+        input.temporaryHasUps !== undefined
+      ) {
+        projectService.updateTemporaryInstrument(projectId, {
+          temporaryInstrumentName: input.temporaryInstrumentName,
+          temporaryInstrumentModel: input.temporaryInstrumentModel,
+          temporaryHasUps: input.temporaryHasUps,
+        });
       }
 
       // 实际装机完成日期：先于正式进单记录实际装机事实（null/空串 = 保持现值），

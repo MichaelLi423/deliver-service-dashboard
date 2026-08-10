@@ -214,6 +214,55 @@ describe('项目备注 / 暂存信息 / 是否批复（0810 现场反馈）', ()
   });
 });
 
+describe('项目暂定仪器范围（v16）', () => {
+  it('暂定仪器名称/型号/是否 UPS 可空：建档后可填写/修改/清空，trim 后保存、空串统一 null', () => {
+    const { projects, service } = setup();
+    const projectId = service.createPendingProject().id;
+    expect(projects.findById(projectId)!.temporaryInstrumentName).toBeNull();
+    expect(projects.findById(projectId)!.temporaryInstrumentModel).toBeNull();
+    expect(projects.findById(projectId)!.temporaryHasUps).toBeNull();
+    // 填写（trim 后保存）。
+    service.updateTemporaryInstrument(projectId, {
+      temporaryInstrumentName: '  生化分析仪  ',
+      temporaryInstrumentModel: ' BS-200 ',
+      temporaryHasUps: true,
+    });
+    const project = projects.findById(projectId)!;
+    expect(project.temporaryInstrumentName).toBe('生化分析仪');
+    expect(project.temporaryInstrumentModel).toBe('BS-200');
+    expect(project.temporaryHasUps).toBe(true);
+    expect(project.status).toBe('pending_entry');
+    // 修改（显式否）。
+    service.updateTemporaryInstrument(projectId, { temporaryHasUps: false });
+    expect(projects.findById(projectId)!.temporaryHasUps).toBe(false);
+    // 清空：空串统一 null；null = 未填写（UPS 三态）。
+    service.updateTemporaryInstrument(projectId, {
+      temporaryInstrumentName: '   ',
+      temporaryInstrumentModel: null,
+      temporaryHasUps: null,
+    });
+    const cleared = projects.findById(projectId)!;
+    expect(cleared.temporaryInstrumentName).toBeNull();
+    expect(cleared.temporaryInstrumentModel).toBeNull();
+    expect(cleared.temporaryHasUps).toBeNull(); // 未填写 ≠ 推断「否」
+    expect(cleared.status).toBe('pending_entry');
+  });
+
+  it('undefined = 未提交保持现值：局部更新不覆盖未提交字段', () => {
+    const { projects, service } = setup();
+    const projectId = service.createPendingProject().id;
+    service.updateTemporaryInstrument(projectId, {
+      temporaryInstrumentName: '离心机',
+      temporaryHasUps: true,
+    });
+    service.updateTemporaryInstrument(projectId, { temporaryInstrumentModel: 'L-50' });
+    const project = projects.findById(projectId)!;
+    expect(project.temporaryInstrumentName).toBe('离心机'); // 保持现值
+    expect(project.temporaryInstrumentModel).toBe('L-50');
+    expect(project.temporaryHasUps).toBe(true); // 保持现值
+  });
+});
+
 describe('未进单与已进单判定事实（TBD-08 视觉区分依据）', () => {
   it('提供已进单判定事实：正式进单后为已进单，待进单项目为未进单', () => {
     const { projects, service } = setup();

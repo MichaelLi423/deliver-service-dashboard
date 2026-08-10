@@ -9,7 +9,7 @@ import {
 } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { closeDatabase, openDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { MigrationError, runMigrations } from '../../src/domain/capabilities/local-data-persistence/migration';
-import { RELOCATION_WORKBENCH_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
 import { SqliteShipToRequestRepository } from '../../src/domain/capabilities/local-data-persistence/ship-to-repositories';
 import { UniquenessError } from '../../src/domain/core/errors';
 import { localCalendarDateOf } from '../../src/domain/capabilities/local-data-persistence/business-date';
@@ -56,7 +56,7 @@ function seedV2(db: DatabaseSync): void {
 }
 
 function assertMigratedToV10(db: DatabaseSync): void {
-  expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+  expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
   // project_id 已按 instrument 回填
   const row = db.prepare('SELECT project_id FROM damage_repair_items WHERE id = ?').get('d1') as {
     project_id: string;

@@ -29,7 +29,7 @@ The current implementation already contains parts of the requested UI and deleti
 
 ### 1. Append one migration and preserve legacy values
 
-Append the next schema migration (expected v15) rather than editing v1–v14. Add nullable storage for project note, temporary-storage address and temporary-storage flag. Reuse the existing planned-installation date column and change only its domain/UI label to “计划装机日期” unless apply-time inspection proves a separate fact is required.
+Append the next schema migration (v15，已发布入库) rather than editing v1–v14. Add nullable storage for project note, temporary-storage address and temporary-storage flag. Reuse the existing planned-installation date column and change only its domain/UI label to “计划装机日期” unless apply-time inspection proves a separate fact is required.
 
 New and edited projects accept only `East | South | West | Central | North`. Existing non-enum region text remains stored unchanged and is surfaced as “待调整” until a user explicitly selects a supported value. Null temporary-storage values remain “未填写”, not an inferred “否”. Legacy manager-approval reason/missing-data columns remain readable for history but are no longer collected by the new-project flow.
 
@@ -117,7 +117,7 @@ Use a single page scroll root. Keep global navigation at `top: 0`, then place th
 
 The preferred evidence path is:
 
-1. migration tests from v14 to the appended version, including null semantics, legacy region preservation, rollback and `foreign_key_check`;
+1. migration tests from the published v15 to the appended v16, including null semantics, legacy region preservation, rollback and `foreign_key_check`;
 2. lifecycle unit tests for before-date, due, overdue catch-up, all state rows in the transition table and repeated zero-write runs;
 3. SQLite integration tests for zero-project pending amount, orphan exclusion, completed-project balance inclusion, per-type deletion success/rejection, audit retention and post-delete recomputation;
 4. shared-contract and main-process read tests proving project pages are fixed at 20, filtered `total` is recomputed, search/filter changes clear the prior cursor, and stable tie-breakers prevent duplicate or missing projects across pages;
@@ -140,6 +140,14 @@ Editing tentative instrument count remains a scalar project update through the e
 
 **Alternatives rejected:** allow the renderer to request 50 records and slice to 20; fetch a fixed reminder-record limit and group it into dates; force seven equal-width columns into every viewport; or add a second tentative-count field alongside the existing fact. These alternatives respectively create pagination drift, under-filled date lanes, unreadable layouts and competing sources of truth.
 
+### 10. 项目暂定搬迁范围标量经 v16 持久化，不写入 instruments
+
+v15 已发布入库；项目暂定搬迁范围标量经追加迁移 v16 持久化（不修改 v1–v15）：`projects` 增加可空 `temporary_instrument_name`（仪器名称）、`temporary_instrument_model`（型号，选填）、`temporary_has_ups`（UPS 是/否），对应领域/DTO 字段 `temporaryInstrumentName`/`temporaryInstrumentModel`/`temporaryHasUps`。这些标量承载 workbench-interface 建档表单“搬迁范围”分组的仪器名称、型号（选填）、UPS 是/否字段（见 `specs/workbench-interface/spec.md`），可建档时填写、留空，建档后经“编辑项目资料”后补或调整。UPS 取值区分 null（未填写，展示“未填写”）与 false（否），SHALL NOT 将 null 推断为“否”。
+
+**为什么不能写入 instruments：** `instruments` 行代表已登记的实际逐台仪器事实（逐台含序列号等，参与仪器级统计、验收与执行追踪）；项目建档时设备清单尚未逐台确定。将暂定名称/型号/UPS 写成 `instruments` 行会伪造逐台仪器事实，使其进入仪器级统计与执行流转，造成数量与工作量虚高，且与既有 `temporaryInstrumentCount`“只记暂定标量、不建行”的语义（Decision 6/9）冲突。因此暂定搬迁范围字段与暂定数量一致，仅作为项目标量持久化：不创建任何 `instruments` 行、不改变既有逐台仪器事实、不触发 lifecycle 状态流转，建档/编辑走项目标量写路径。
+
+**迁移/回滚说明：** v16 为纯追加可空列迁移，不改写存量值、不重建表；旧库升级新列以空值初始化，迁移失败保留可恢复状态（见 Migration Plan 步骤 1–2、6）。回滚时先恢复 v15 备份再用旧二进制，不得让旧二进制解析新 schema；v16 不修改 v1–v15，已发布迁移不回改。
+
 ## Risks / Trade-offs
 
 - **[Legacy regions remain outside the new enum]** → Preserve them as “待调整”, prevent new invalid writes and require explicit user correction; never guess a mapping.
@@ -157,9 +165,9 @@ Editing tentative instrument count remains a scalar project update through the e
 
 ## Migration Plan
 
-1. Back up the database using the existing backup path and record the pre-migration schema version.
-2. Apply the appended migration transactionally; add nullable fields/indexes without rewriting existing values.
+1. Back up the database using the existing backup path and record the pre-migration schema version（追加 v16 前为 v15）。
+2. Apply the appended v16 migration transactionally（v15 已发布入库，v16 仅新增可空列/索引）; add nullable fields/indexes without rewriting existing values.
 3. Run foreign-key and orphan-count diagnostics. Structural foreign-key violations caused by pre-existing orphan rows are reported as an unresolved count with a manual recovery/governance path and do not block migration. Abort and restore the pre-migration database only if the migration itself produces a structural failure.
 4. Start with domain write validation for the five regions while exposing legacy values as “待调整”.
 5. Deploy read-model, lifecycle, deletion and UI changes against the migrated schema.
-6. On rollback, restore the pre-migration backup before running an older binary; do not attempt to make the older binary interpret the newer schema.
+6. On rollback from v16, restore the pre-migration v15 backup before running an older binary; do not attempt to make the older binary interpret the newer schema.

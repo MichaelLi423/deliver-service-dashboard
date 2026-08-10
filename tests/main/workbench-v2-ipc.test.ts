@@ -300,6 +300,9 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
         isTemporaryStorage: true,
         managerApproved: true,
         temporaryInstrumentCount: 4,
+        temporaryInstrumentName: 'IPC 生化分析仪',
+        temporaryInstrumentModel: 'IPC-BS200',
+        temporaryHasUps: true,
         plannedInstallAt: '2026-09-15',
       },
     } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
@@ -317,6 +320,9 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
         isTemporaryStorage: boolean | null;
         managerApproved: boolean | null;
         temporaryInstrumentCount: number | null;
+        temporaryInstrumentName: string | null;
+        temporaryInstrumentModel: string | null;
+        temporaryHasUps: boolean | null;
         plannedInstallAt: string | null;
         plannedInstallDoneAt: string | null;
       } | null;
@@ -326,6 +332,9 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     expect(detail.detail?.isTemporaryStorage).toBe(true);
     expect(detail.detail?.managerApproved).toBe(true);
     expect(detail.detail?.temporaryInstrumentCount).toBe(4);
+    expect(detail.detail?.temporaryInstrumentName).toBe('IPC 生化分析仪');
+    expect(detail.detail?.temporaryInstrumentModel).toBe('IPC-BS200');
+    expect(detail.detail?.temporaryHasUps).toBe(true);
     // 「计划装机日期」公开字段 + 兼容 alias 同值；主状态不被标量保存触发。
     expect(detail.detail?.plannedInstallAt).toBe('2026-09-15');
     expect(detail.detail?.plannedInstallDoneAt).toBe('2026-09-15');

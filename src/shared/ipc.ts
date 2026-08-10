@@ -548,6 +548,12 @@ export interface WorkbenchV2ProjectDetailDto {
     cancelledAt: string | null;
     cancelReason: string | null;
     temporaryInstrumentCount: number | null;
+    /** 暂定仪器范围：暂定仪器名称（可空；手工维护标量事实，不建仪器、不触发主状态）。 */
+    temporaryInstrumentName: string | null;
+    /** 暂定仪器范围：暂定仪器型号（可空；手工维护标量事实，不建仪器、不触发主状态）。 */
+    temporaryInstrumentModel: string | null;
+    /** 暂定仪器范围：是否配备 UPS（可空；null=未填写、false=否、true=是）。 */
+    temporaryHasUps: boolean | null;
     /** 审计/技术创建时间（精确 ISO）。 */
     createdAt: string;
     customerId: string | null;
@@ -1341,6 +1347,12 @@ export interface ProjectWizardPayload {
   temporaryStorageAddress?: string | null;
   /** 是否暂存（可空；空表示「未填写」而非推断「否」，不触发主状态流转）。 */
   isTemporaryStorage?: boolean | null;
+  /** 暂定仪器范围：暂定仪器名称（可空；建档时填写，trim 后保存、空串统一 null；不建仪器、不触发主状态）。 */
+  temporaryInstrumentName?: string | null;
+  /** 暂定仪器范围：暂定仪器型号（可空；trim 后保存、空串统一 null；不建仪器、不触发主状态）。 */
+  temporaryInstrumentModel?: string | null;
+  /** 暂定仪器范围：是否配备 UPS（可空；null=未填写、false=否、true=是；不触发主状态）。 */
+  temporaryHasUps?: boolean | null;
   /** 计划上门日期（业务日期 yyyy-mm-dd）。 */
   planVisitAt?: string;
   /** 计划运输日期（业务日期 yyyy-mm-dd）。 */
@@ -1421,6 +1433,12 @@ export interface ProjectUpdatePayload {
    * 取值校验遵循既有 setTemporaryInstrumentCount 规则（不小于 0 的整数）。
    */
   temporaryInstrumentCount?: number | null;
+  /** 暂定仪器范围：暂定仪器名称（可空；null 或空串 = 清空；不建仪器、不触发主状态）。 */
+  temporaryInstrumentName?: string | null;
+  /** 暂定仪器范围：暂定仪器型号（可空；null 或空串 = 清空；不建仪器、不触发主状态）。 */
+  temporaryInstrumentModel?: string | null;
+  /** 暂定仪器范围：是否配备 UPS（可空；null = 未填写、false = 否、true = 是；不触发主状态）。 */
+  temporaryHasUps?: boolean | null;
   /** 已正式进单项目更正：ECC（去除首尾空白后全局唯一，必填非空；null 视为未提交）。 */
   ecc?: string | null;
   /** 已正式进单项目更正：进单日期（业务日期 yyyy-mm-dd，允许补录修正；null 视为未提交）。 */
@@ -1485,6 +1503,12 @@ export interface ProjectSupplementPayload {
    * 未提供时保持现值。
    */
   instrumentCount?: number;
+  /** 暂定仪器范围：暂定仪器名称（可空；null 或空串 = 清空；不建仪器、不触发主状态）。 */
+  temporaryInstrumentName?: string | null;
+  /** 暂定仪器范围：暂定仪器型号（可空；null 或空串 = 清空；不建仪器、不触发主状态）。 */
+  temporaryInstrumentModel?: string | null;
+  /** 暂定仪器范围：是否配备 UPS（可空；null = 未填写、false = 否、true = 是；不触发主状态）。 */
+  temporaryHasUps?: boolean | null;
   /** 未进单先执行经理批复原因（携带时 setPreEntryExecution；正式进单后忽略）。 */
   approvalReason?: string | null;
   missingItems?: string | null;

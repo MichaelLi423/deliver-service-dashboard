@@ -92,8 +92,9 @@ export class SqliteProjectRepository implements ProjectRepository {
              acceptance_report, acceptance_report_date,
              cancelled_at, cancel_reason, reminder_at, reminder_note,
              reminder_account_id, reminder_username_snapshot, temporary_instrument_count,
+             temporary_instrument_name, temporary_instrument_model, temporary_has_ups,
              created_at, updated_at
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET
              status=excluded.status, pre_entry_execution=excluded.pre_entry_execution,
              scope_confirmed=excluded.scope_confirmed,
@@ -117,6 +118,9 @@ export class SqliteProjectRepository implements ProjectRepository {
              reminder_account_id=excluded.reminder_account_id,
              reminder_username_snapshot=excluded.reminder_username_snapshot,
              temporary_instrument_count=excluded.temporary_instrument_count,
+             temporary_instrument_name=excluded.temporary_instrument_name,
+             temporary_instrument_model=excluded.temporary_instrument_model,
+             temporary_has_ups=excluded.temporary_has_ups,
              updated_at=excluded.updated_at
         `,
         )
@@ -156,6 +160,9 @@ export class SqliteProjectRepository implements ProjectRepository {
           project.reminderAccountId,
           project.reminderUsernameSnapshot,
           project.temporaryInstrumentCount,
+          project.temporaryInstrumentName,
+          project.temporaryInstrumentModel,
+          project.temporaryHasUps === null ? null : project.temporaryHasUps ? 1 : 0,
           project.createdAt,
           project.updatedAt,
         );
@@ -391,6 +398,11 @@ function rowToProject(row: Record<string, unknown>): Project {
       row.reminder_username_snapshot === null ? null : String(row.reminder_username_snapshot),
     temporaryInstrumentCount:
       row.temporary_instrument_count === null ? null : Number(row.temporary_instrument_count),
+    temporaryInstrumentName:
+      row.temporary_instrument_name === null ? null : String(row.temporary_instrument_name),
+    temporaryInstrumentModel:
+      row.temporary_instrument_model === null ? null : String(row.temporary_instrument_model),
+    temporaryHasUps: toNullableBool(row.temporary_has_ups),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };

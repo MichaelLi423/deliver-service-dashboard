@@ -67,6 +67,10 @@ import {
   RELOCATION_WORKBENCH_MIGRATION_VERSION,
 } from './schema-v15';
 import {
+  applyTemporaryInstrumentFieldsMigration,
+  TEMPORARY_INSTRUMENT_FIELDS_MIGRATION_VERSION,
+} from './schema-v16';
+import {
   buildFinancialIntegrityHint,
   hasAnyFinancialIntegrityIssue,
   readFinancialIntegrityCounts,
@@ -178,6 +182,13 @@ export const RELOCATION_WORKBENCH_MIGRATION: Migration = {
   up: (db) => applyRelocationWorkbenchFieldsMigration(db),
 };
 
+/** v16 迁移：项目暂定仪器范围字段（暂定仪器名称/型号/是否配备 UPS；只加可空列不改业务数据）。 */
+export const TEMPORARY_INSTRUMENT_FIELDS_MIGRATION: Migration = {
+  version: TEMPORARY_INSTRUMENT_FIELDS_MIGRATION_VERSION,
+  name: 'temporary-instrument-fields',
+  up: (db) => applyTemporaryInstrumentFieldsMigration(db),
+};
+
 /** 当前迁移序列（后续 schema 升级追加新 Migration，不修改已发布迁移）。 */
 export const MIGRATIONS: readonly Migration[] = [
   INITIAL_MIGRATION,
@@ -195,6 +206,7 @@ export const MIGRATIONS: readonly Migration[] = [
   BUSINESS_DATE_MIGRATION,
   SUPPLEMENT_FIELDS_MIGRATION,
   RELOCATION_WORKBENCH_MIGRATION,
+  TEMPORARY_INSTRUMENT_FIELDS_MIGRATION,
 ];
 
 export interface BootstrapOptions {

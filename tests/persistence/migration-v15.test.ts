@@ -8,6 +8,7 @@ import {
 import { closeDatabase, openDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { Migration, MigrationError, runMigrations } from '../../src/domain/capabilities/local-data-persistence/migration';
 import { RELOCATION_WORKBENCH_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 
 /**
@@ -46,13 +47,13 @@ function indexRows(db: DatabaseSync): { name: string; tbl_name: string; sql: str
 }
 
 describe('schema v15：搬迁工作台新增字段 + 审计结构最小持久化支撑', () => {
-  it('全新库引导到 v15：迁移序列 1..15、user_version=15、四列已建立、审计表/索引/FK 已建、可写入最小审计事实', () => {
+  it('全新库引导到最新版本：迁移序列 1..16、user_version=16、v15 四列已建立、审计表/索引/FK 已建、可写入最小审计事实', () => {
     const dir = makeTempDir();
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
       expect(MIGRATIONS.map((m) => m.version)).toEqual(
-        Array.from({ length: RELOCATION_WORKBENCH_MIGRATION_VERSION }, (_, i) => i + 1),
+        Array.from({ length: LATEST_SCHEMA_VERSION }, (_, i) => i + 1),
       );
       const cols = (db.prepare('PRAGMA table_info(projects)').all() as { name: string }[]).map(
         (c) => c.name,
@@ -340,7 +341,7 @@ describe('schema v15：搬迁工作台新增字段 + 审计结构最小持久化
       ).run('audit-legacy', 'sk-legacy', 'projects', 'p1', 'h1', 'h2', now);
       db.exec('COMMIT');
 
-      runMigrations(db, { migrations: [...MIGRATIONS], backupDir });
+      runMigrations(db, { migrations: MIGRATIONS.slice(0, 15), backupDir });
       expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
       const project = db.prepare('SELECT * FROM projects WHERE id = ?').get('p1') as Record<
         string,

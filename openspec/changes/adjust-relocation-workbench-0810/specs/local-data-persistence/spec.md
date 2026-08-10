@@ -47,3 +47,34 @@
 - **WHEN** 新版本启动
 - **THEN** 系统保留迁移前的数据与可恢复状态
 - **AND** 不静默丢弃现有数据
+
+### Requirement: 追加迁移 v16 保存项目暂定搬迁范围字段
+
+v15 已发布入库；项目暂定搬迁范围字段 SHALL 通过追加迁移 v16 持久化，SHALL NOT 修改 v1–v15。`projects` 表 SHALL 增加可空列 `temporary_instrument_name`、`temporary_instrument_model`、`temporary_has_ups`，对应领域/DTO 字段 `temporaryInstrumentName`/`temporaryInstrumentModel`/`temporaryHasUps`。升级旧库时 SHALL 保留既有业务数据，新增列 SHALL 以空值初始化、SHALL NOT 丢弃或改写存量值；迁移失败 SHALL 保留可恢复状态。
+
+#### Scenario: v15 已发布库追加 v16 不修改既有迁移
+
+- **GIVEN** 数据库已应用至 v15 且 v15 已发布入库
+- **WHEN** 新版本需要保存项目暂定搬迁范围字段
+- **THEN** 系统仅追加 v16 迁移
+- **AND** 不修改 v1–v15 任何已发布迁移
+
+#### Scenario: v15 库升级保留数据并初始化暂定范围列
+
+- **GIVEN** 旧库已应用 v15 且存在项目等业务数据、尚无暂定范围列
+- **WHEN** 新版本首次启动执行 v16 迁移
+- **THEN** 既有业务数据完整保留
+- **AND** temporary_instrument_name/temporary_instrument_model/temporary_has_ups 以空值初始化，可正常录入
+
+#### Scenario: 暂定搬迁范围字段持久化保留
+
+- **GIVEN** 负责人录入仪器名称、型号与 UPS 是否
+- **WHEN** 系统保存并关闭重开应用
+- **THEN** 暂定范围字段持久化保留
+
+#### Scenario: v16 迁移失败保留可恢复状态
+
+- **GIVEN** v16 追加迁移执行失败
+- **WHEN** 新版本启动
+- **THEN** 系统保留迁移前的数据与可恢复状态
+- **AND** 不静默丢弃现有数据

@@ -10,9 +10,9 @@ import {
   businessRevisionTriggerName,
 } from '../../src/domain/capabilities/local-data-persistence/schema-v10';
 import {
-  RELOCATION_WORKBENCH_MIGRATION_VERSION,
   RELOCATION_WORKBENCH_NON_BUSINESS_TABLES,
 } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
 import {
   readBusinessRevision,
   readDatabaseIdentity,
@@ -43,7 +43,7 @@ describe('schema v10：正式库身份与业务修订迁移（tasks 8.15 / D25�
     const dir = makeTempDir();
     try {
       const first = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(first.db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(readSchemaVersion(first.db)).toBe(LATEST_SCHEMA_VERSION);
       const identity = readDatabaseIdentity(first.db);
       expect(identity.databaseInstanceId).toBeTruthy();
       expect(identity.contentGenerationId).toBeTruthy();
@@ -80,7 +80,7 @@ describe('schema v10：正式库身份与业务修订迁移（tasks 8.15 / D25�
 
       // 升级到 v10（含后续 v11~v15）
       runMigrations(db, { migrations: [...MIGRATIONS], backupDir });
-      expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
       expect(readDatabaseIdentity(db).businessRevision).toBe(0);
       expect(db.prepare('SELECT name FROM customers WHERE id = ?').get('c-legacy')).toMatchObject({
         name: '存量客户',
@@ -161,9 +161,9 @@ describe('schema v10：正式库身份与业务修订迁移（tasks 8.15 / D25�
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
       expect(rev(db)).toBe(0);
-      // 注：v15 已是正式迁移；用 v16 自定义迁移验证「后续迁移的 DML 也走触发器」。
+      // 注：v16 已是正式迁移；用 v17 自定义迁移验证「后续迁移的 DML 也走触发器」。
       const seedLater: Migration = {
-        version: RELOCATION_WORKBENCH_MIGRATION_VERSION + 1,
+        version: LATEST_SCHEMA_VERSION + 1,
         name: 'next-seed-customer',
         up: (d: DatabaseSync) => {
           d.prepare('INSERT INTO customers (id, name, created_at, updated_at) VALUES (?,?,?,?)').run(

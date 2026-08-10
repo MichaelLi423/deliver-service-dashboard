@@ -1,8 +1,8 @@
 # 调整搬迁工作台（0810 现场反馈）· 实施任务
 
-本文件按依赖顺序拆分实施任务，属规划工件，不包含代码实现。实施基准为 `proposal.md`（Why/What/Impact）、`design.md`（D1~D9 决策与迁移计划）与 `specs/**/spec.md`（12 份 delta 规格）。design.md 无未决 Open Questions（TBD-07/09/11 等均为对既有规格的交叉引用，不改变本次建设范围）。
+本文件按依赖顺序拆分实施任务，属规划工件，不包含代码实现。实施基准为 `proposal.md`（Why/What/Impact）、`design.md`（D1~D10 决策与迁移计划）与 `specs/**/spec.md`（12 份 delta 规格）。design.md 无未决 Open Questions（TBD-07/09/11 等均为对既有规格的交叉引用，不改变本次建设范围）。
 
-约定：状态转换与校验唯一入口为 `relocation-project-lifecycle/lifecycle.ts`（design D5 所有权）；renderer 无 Node 环境，只能经 `src/preload/index.ts` + `src/shared/ipc.ts` 的共享 IPC 契约访问主进程，SQLite 仅主进程；金额为"分"整数（BigInt/prepareReadBigInt）、业务日期 `yyyy-mm-dd`、审计时间 ISO；迁移通过 `PRAGMA user_version` 只追加、不修改 v1–v14；仓库无 lint/formatter/CI/hook，不引入不存在的命令。
+约定：状态转换与校验唯一入口为 `relocation-project-lifecycle/lifecycle.ts`（design D5 所有权）；renderer 无 Node 环境，只能经 `src/preload/index.ts` + `src/shared/ipc.ts` 的共享 IPC 契约访问主进程，SQLite 仅主进程；金额为"分"整数（BigInt/prepareReadBigInt）、业务日期 `yyyy-mm-dd`、审计时间 ISO；迁移通过 `PRAGMA user_version` 只追加、不修改 v1–v15（v15 已发布入库，本 change 后续追加 v16）；仓库无 lint/formatter/CI/hook，不引入不存在的命令。
 
 验证约定（design D8）：不做全量 `npm test` 默认任务；每个验证任务使用 focused vitest（`npx vitest run tests/<路径>test.ts`）；E2E 必须先 `npm run e2e:build`（electron-forge package）再以 `workers=1` 运行 playwright；类型以 `npm run typecheck`（tsc --noEmit）为准（webpack ts-loader 为 transpileOnly）。
 
@@ -18,13 +18,14 @@
 - [x] 1.6 固化当前提醒预览按记录数截断的现状证据（tests/integration/workbench-read-v2.sqlite.test.ts 或新增 focused 用例）：记录 overview reminderPreview 当前按记录数截断（最多 6 条）、尚无"先选日期列再取列内项目"的泳道读取模型；完成态：focused vitest 在改动前运行通过并记录基线，作为泳道读取模型（7.6）的改动前对照证据。
 - [x] 1.7 固化当前"编辑项目资料"与项目标量 DTO 现状证据：记录项目标量 DTO 是否携带 temporaryInstrumentCount、当前编辑表单字段集合（无暂定数量/备注/暂存字段）与保存刷新路径；完成态：focused 测试/断言（tests/renderer/app.test.tsx 或 tests/domain/relocation-fields.test.ts）在改动前运行通过并记录基线，作为第 6 组编辑表单改动的对照证据。
 
-## 2. 追加迁移 v15：新字段、legacy 区域策略与 IPC/DTO 类型
+## 2. 追加迁移 v15/v16：新字段、legacy 区域策略与 IPC/DTO 类型
 
 - [x] 2.1 追加 schema-v15 迁移（新增 `schema-v15.ts` 并登记入 `bootstrap.ts` 的 MIGRATIONS，不修改 v1–v14）：`projects` 增加可空列 `project_note`（项目备注）、`temporary_storage_address`（暂存地址）、`is_temporary_storage`（是否暂存，允许空表示"未填写"而非推断"否"）、`manager_approved`（是否批复）；"计划装机日期"复用既有 `planned_install_done_at` 列仅更名展示（如 apply 期证明需独立事实再追加，见 design D1）；完成态：迁移仅追加、旧库升级不重建表、不改写存量值。
 - [x] 2.2 新增迁移测试（tests/persistence/migration-v15.test.ts）：全新库引导到 v15（迁移序列 1..15、user_version=15、新列已建）；v14 存量库升级保留既有业务数据、新列以空/兼容默认值初始化；region 历史文本原样保留；注入失败保留迁移前数据与可恢复状态（备份）；`PRAGMA foreign_key_check` 通过；完成态：focused vitest 全绿。
 - [x] 2.3 将孤立财务事实诊断接入迁移/启动路径：迁移执行或启动时诊断（仅计数：孤立合同、孤立掉票/最终可确认金额事实、断裂 project/contract 链接、foreign_key_check），给出治理清理路径提示，MUST NOT 静默删除财务记录；掉票记录仍仅可撤销、不物理删除；因非空项目 FK 且治理清理保留原行，结构性外键违规以 unresolved count 持续报告、不阻断迁移，不宣称 foreign_key_check 归零；完成态：诊断输出 counts、无客户值打印，focused 测试通过（与 4.3/4.4 治理路径衔接）。
 - [x] 2.4 实现区域五枚举领域写边界与 legacy "待调整"策略：新建/编辑项目区域去除首尾空白后仅允许 East、South、West、Central、North，非枚举值拒绝保存并提示（relocation-project-lifecycle 与 workbench-interface 均不提供自由输入）；存量非枚举 region 文本保留原值、读模型/报表标注为"待调整"、不猜测映射、不置空不丢弃；完成态：domain 单测覆盖非枚举拒绝/trim 校验/存量保留"待调整"分组。
 - [x] 2.5 更新 IPC/DTO 类型与接线（src/shared/ipc.ts、src/preload/index.ts、workbench-facade 相关 DTO）：新增/调整项目备注、暂存地址、是否暂存、计划装机日期（更名）、区域枚举类型、是否批复（替换批复原因）；建档输入类型移除最终可确认金额、服务单号、工程师、开单备注、缺失资料（既有 WIZARD_REJECTION_CODES 废弃字段有值即拒绝规则保持）；完成态：`npm run typecheck` 通过，IPC 契约测试（tests/main/workbench-v2-ipc.test.ts）通过。
+- [x] 2.6 追加迁移 v16 与暂定搬迁范围字段接线（design D10；v15 已发布入库，新增 `schema-v16.ts` 并登记入 `bootstrap.ts` 的 MIGRATIONS，不修改 v1–v15）：`projects` 增加可空 `temporary_instrument_name`/`temporary_instrument_model`/`temporary_has_ups`，对应领域/DTO 字段 `temporaryInstrumentName`/`temporaryInstrumentModel`/`temporaryHasUps`；UPS 区分 null=未填写 与 false=否；新增迁移测试（tests/persistence/migration-v16.test.ts）覆盖 v15 存量库升级保留既有数据、新列空值初始化、不重建表、失败保留可恢复状态；更新 src/shared/ipc.ts、src/preload/index.ts 与 workbench-facade 相关 DTO 使建档/编辑表单可真实读写暂定范围字段（headless 接线）；完成态：`npm run typecheck` 通过、focused vitest 全绿。
 
 ## 3. 生命周期：plan_visit_date<=today 自动推进
 
@@ -53,7 +54,7 @@
 
 - [x] 6.1 实现序列号地址更新双模式（serial-address-update）：独立登记不关联任何项目/仪器，必填客户名称、新址地址、序列号、Account ID、更新日期，序列号仅非空校验、不执行仪器一致性校验；选择关联项目/仪器时执行一致性校验（序列号与仪器一致否则拒绝）；一台仪器可有多条更新事实按更新日期保留；不引入未确认的序列号格式约束；完成态：tests/domain/serial-address-update.test.ts 全绿。
 - [x] 6.2 确认/补齐二维码申请独立与删除语义（qr-request-tracking）：申请保持独立记录、不新增可空项目/仪器外键；重复申请保留完整历史、各自独立计数工作量；确认删除后从申请历史、详情与工作量统计中消失；删除不影响仪器"二维码是否申请"标记；完成态：tests/domain/qr-request-tracking.test.ts 与关联集成测试全绿。
-- [ ] 6.3 调整建档表单（renderer 单页分组录入）：项目与进单分组含进单日期、区域（五固定选项）、旧址/新址联系人、合同起止日期与可选项目备注，不含项目负责人、销售通知时间、最终可确认金额、服务单号、工程师、开单备注；搬迁范围含旧址/新址地址、仪器名称与数量、型号（选填）、UPS 是/否与暂存地址，旧址/新址/数量允许留空后补、无 Ship-to 地址快照；执行准备含计划上门/运输日期（分开）、场地确认、实际装机完成日期、计划装机日期（更名）与是否暂存，不含工程师与服务单号；保存意图含 待进单/正式进单/未进单先执行 三路径，未进单先执行记录是否批复、不收集缺失资料；保存不同次创建开单记录；可后补字段留空不无提示丢失、不自动生成提醒；完成态：tests/renderer/app.test.tsx 与 tests/interface/layout.test.ts 表单/导航断言全绿。
+- [ ] 6.3 调整建档表单（renderer 单页分组录入）：项目与进单分组含进单日期、区域（五固定选项）、旧址/新址联系人、合同起止日期与可选项目备注，不含项目负责人、销售通知时间、最终可确认金额、服务单号、工程师、开单备注；搬迁范围含旧址/新址地址、仪器名称与数量、型号（选填）、UPS 是/否与暂存地址，旧址/新址/数量允许留空后补、无 Ship-to 地址快照；仪器名称、型号、UPS 是/否经 v16 暂定范围字段（temporaryInstrumentName/temporaryInstrumentModel/temporaryHasUps，对应 design D10）真实保存到 projects，不制作假输入（不以仅前端状态或占位值冒充已保存）；执行准备含计划上门/运输日期（分开）、场地确认、实际装机完成日期、计划装机日期（更名）与是否暂存，不含工程师与服务单号；保存意图含 待进单/正式进单/未进单先执行 三路径，未进单先执行记录是否批复、不收集缺失资料；保存不同次创建开单记录；可后补字段留空不无提示丢失、不自动生成提醒；完成态：tests/renderer/app.test.tsx 与 tests/interface/layout.test.ts 表单/导航断言全绿。
 - [x] 6.4 落实项目领域写边界：新建/编辑项目校验五枚举区域（trim 后，非枚举拒绝，legacy 值保留待调整）；废弃字段（最终可确认金额/服务单号/工程师/开单备注/缺失资料）有值即拒绝（WIZARD_REJECTION_CODES 保持）；项目备注可空、建档后补充/修改不影响主状态；暂存地址/是否暂存为手工维护执行事实、不触发主状态流转；完成态：tests/domain/relocation-fields.test.ts、relocation-entry.test.ts 与 tests/integration/create-project-ecc-rules.sqlite.test.ts 全绿。
 - [x] 6.5 实现"编辑项目资料"暂定仪器数量维护（复用既有 temporaryInstrumentCount 事实与项目标量 DTO，design D6/D9，不新增迁移列）：编辑表单展示当前暂定仪器数量，允许查看、留空、补录或调整，保存走既有项目标量更新路径、保存后刷新项目标量读模型回显最新值；不生成虚拟仪器记录、不改变既有逐台仪器事实、不触发主状态流转；取值校验遵循既有输入校验规则、不引入新格式约束；完成态：tests/domain/relocation-fields.test.ts 或 relocation-execution.test.ts 覆盖 查看/留空/补录/调整/回显 与 不建仪器/不改仪器事实/不触发状态 场景全绿。
 - [x] 6.6 落实"编辑项目资料"renderer 表单与 DTO/IPC 接线：确认项目标量 DTO 与编辑保存请求已携带 temporaryInstrumentCount（沿用既有字段与校验，不新增 schema 列），renderer 编辑表单接入并回显最新保存值；完成态：`npm run typecheck` 通过，tests/renderer/app.test.tsx 断言 查看/留空/补录/调整后回显最新值，无 schema-v15 之外的新增列改动。

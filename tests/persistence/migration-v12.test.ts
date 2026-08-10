@@ -6,7 +6,7 @@ import {
 } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { closeDatabase, openDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { runMigrations } from '../../src/domain/capabilities/local-data-persistence/migration';
-import { RELOCATION_WORKBENCH_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
 import { cleanupTempDir, makeTempDir, makeTempDbPath } from '../helpers/tmp-db';
 
 /**
@@ -63,7 +63,7 @@ describe('schema v12：只加支撑索引的迁移（Oracle #10）', () => {
       const { db } = seedV11(dir);
 
       runMigrations(db, { migrations: [...MIGRATIONS], backupDir: `${dir}/migration-backups` });
-      expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
       const row = db
         .prepare('SELECT status, region FROM projects WHERE id = ?')
         .get('p-legacy') as { status: string; region: string };
@@ -87,9 +87,9 @@ describe('schema v12：只加支撑索引的迁移（Oracle #10）', () => {
     const dir = makeTempDir();
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
       expect(MIGRATIONS.map((m) => m.version)).toEqual(
-        Array.from({ length: RELOCATION_WORKBENCH_MIGRATION_VERSION }, (_, i) => i + 1),
+        Array.from({ length: LATEST_SCHEMA_VERSION }, (_, i) => i + 1),
       );
       expect(namesOf(db).length).toBeGreaterThanOrEqual(V12_INDEXES.length);
       closeDatabase(db);

@@ -74,6 +74,12 @@ export interface Project {
   reminderUsernameSnapshot: string | null;
   /** 暂定仪器数量（不生成虚拟仪器，见 3.1）。 */
   temporaryInstrumentCount: number | null;
+  /** 暂定仪器范围：暂定仪器名称（可空；手工维护标量事实，不建仪器、不触发主状态）。 */
+  temporaryInstrumentName: string | null;
+  /** 暂定仪器范围：暂定仪器型号（可空；手工维护标量事实，不建仪器、不触发主状态）。 */
+  temporaryInstrumentModel: string | null;
+  /** 暂定仪器范围：是否配备 UPS（可空；null=未填写、false=否、true=是；不触发主状态）。 */
+  temporaryHasUps: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -135,6 +141,9 @@ export function createPendingProject(input: CreateProjectInput = {}): Project {
     reminderAccountId: null,
     reminderUsernameSnapshot: null,
     temporaryInstrumentCount: null,
+    temporaryInstrumentName: null,
+    temporaryInstrumentModel: null,
+    temporaryHasUps: null,
     createdAt: now,
     updatedAt: input.updatedAt ?? now,
   };

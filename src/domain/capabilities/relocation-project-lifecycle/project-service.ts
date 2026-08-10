@@ -600,6 +600,38 @@ export class ProjectService {
     return project;
   }
 
+  /**
+   * 维护项目暂定仪器范围（v16）：暂定仪器名称/型号与是否配备 UPS 均为负责人
+   * 手工维护的项目级标量事实，建档与编辑资料均可填写。
+   * 三态语义与 updateTemporaryStorage 一致：undefined = 未提交保持现值；
+   * null = 显式清空（是否 UPS null = 未填写）。
+   * 仅更新项目标量：绝不创建/修改/删除任何 instruments 行，不触发主状态流转。
+   */
+  updateTemporaryInstrument(
+    projectId: string,
+    input: {
+      temporaryInstrumentName?: string | null;
+      temporaryInstrumentModel?: string | null;
+      temporaryHasUps?: boolean | null;
+    },
+  ): Project {
+    const project = this.requireProject(projectId);
+    if (input.temporaryInstrumentName !== undefined) {
+      const trimmed = input.temporaryInstrumentName?.trim() ?? '';
+      project.temporaryInstrumentName = trimmed === '' ? null : trimmed;
+    }
+    if (input.temporaryInstrumentModel !== undefined) {
+      const trimmed = input.temporaryInstrumentModel?.trim() ?? '';
+      project.temporaryInstrumentModel = trimmed === '' ? null : trimmed;
+    }
+    if (input.temporaryHasUps !== undefined) {
+      project.temporaryHasUps = input.temporaryHasUps;
+    }
+    project.updatedAt = this.now();
+    this.projects.save(project);
+    return project;
+  }
+
   // ---- 2.7 项目区域 ----
 
   /**

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
+import { closeDatabase } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { SqliteAccountRepository } from '../../src/domain/capabilities/local-data-persistence/repositories';
 import { LocalAccountService } from '../../src/domain/capabilities/workbench-access';
 import { WorkbenchFacade } from '../../src/main/workbench-facade';
@@ -399,5 +400,141 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
     // 清空备注。
     facade.v2Mutate({ op: 'update_project', payload: { projectId, projectNote: null } });
     expect(facade.v2ProjectDetail(projectId).detail!.projectNote).toBeNull();
+  });
+});
+
+describe('项目暂定仪器范围（v16）', () => {
+  it('建档持久化与回显：暂定仪器名称/型号/是否 UPS 建档时保存，trim 后回显，不建仪器、不触发状态', async () => {
+    const { facade, db } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({
+        intent: 'draft',
+        customerName: '暂定仪器范围客户',
+        instrumentCount: null,
+        temporaryInstrumentName: '  生化分析仪  ',
+        temporaryInstrumentModel: ' BS-200 ',
+        temporaryHasUps: true,
+      }),
+    });
+    const projectId = projectIdOf(created);
+    // detail DTO 回显最新值（trim 后保存）。
+    const detail = facade.v2ProjectDetail(projectId).detail!;
+    expect(detail.temporaryInstrumentName).toBe('生化分析仪');
+    expect(detail.temporaryInstrumentModel).toBe('BS-200');
+    expect(detail.temporaryHasUps).toBe(true);
+    // 物理列已持久化。
+    const row = db
+      .prepare(
+        `SELECT temporary_instrument_name, temporary_instrument_model, temporary_has_ups FROM projects WHERE id = ?`,
+      )
+      .get(projectId) as Record<string, unknown>;
+    expect(row.temporary_instrument_name).toBe('生化分析仪');
+    expect(row.temporary_instrument_model).toBe('BS-200');
+    expect(row.temporary_has_ups).toBe(1);
+    // 不创建任何仪器记录，不触发主状态流转。
+    expect(facade.v2SectionPage({ projectId, kind: 'instruments' }).total).toBe(0);
+    expect(facade.v2ProjectDetail(projectId).project!.status).toBe('pending_entry');
+    expect(facade.v2ProjectDetail(projectId).project!.formallyEntered).toBe(false);
+  });
+
+  it('编辑资料回显：update_project 填写/修改/清空范围字段，不建仪器、不改状态', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'draft', customerName: '暂定范围编辑客户', instrumentCount: null }),
+    });
+    const projectId = projectIdOf(created);
+    // 初始未填写（三态 null）。
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryInstrumentName).toBeNull();
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryHasUps).toBeNull();
+    // 填写。
+    facade.v2Mutate({
+      op: 'update_project',
+      payload: {
+        projectId,
+        temporaryInstrumentName: '质谱仪',
+        temporaryInstrumentModel: 'Q-TOF',
+        temporaryHasUps: true,
+      },
+    });
+    let detail = facade.v2ProjectDetail(projectId).detail!;
+    expect(detail.temporaryInstrumentName).toBe('质谱仪');
+    expect(detail.temporaryInstrumentModel).toBe('Q-TOF');
+    expect(detail.temporaryHasUps).toBe(true);
+    // 显式「否」。
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, temporaryHasUps: false } });
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryHasUps).toBe(false);
+    // 清空（null / 空串统一 null）。
+    facade.v2Mutate({
+      op: 'update_project',
+      payload: { projectId, temporaryInstrumentName: null, temporaryInstrumentModel: '   ', temporaryHasUps: null },
+    });
+    detail = facade.v2ProjectDetail(projectId).detail!;
+    expect(detail.temporaryInstrumentName).toBeNull();
+    expect(detail.temporaryInstrumentModel).toBeNull();
+    expect(detail.temporaryHasUps).toBeNull();
+    // 不创建/删除/修改任何仪器记录，不触发主状态流转。
+    expect(facade.v2SectionPage({ projectId, kind: 'instruments' }).total).toBe(0);
+    const project = facade.v2ProjectDetail(projectId).project!;
+    expect(project.status).toBe('pending_entry');
+    expect(project.formallyEntered).toBe(false);
+  });
+
+  it('暂定数量与暂定范围独立：update 范围不改变数量，补录数量不改变范围', async () => {
+    const { facade } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'draft', customerName: '范围数量独立客户', instrumentCount: null }),
+    });
+    const projectId = projectIdOf(created);
+    facade.v2Mutate({
+      op: 'update_project',
+      payload: { projectId, temporaryInstrumentName: '离心机', temporaryHasUps: false, temporaryInstrumentCount: 3 },
+    });
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryInstrumentCount).toBe(3);
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryInstrumentName).toBe('离心机');
+    facade.v2Mutate({ op: 'update_project', payload: { projectId, temporaryInstrumentCount: 5 } });
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryInstrumentCount).toBe(5);
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryInstrumentName).toBe('离心机'); // 范围不受影响
+    expect(facade.v2ProjectDetail(projectId).detail!.temporaryHasUps).toBe(false);
+  });
+
+  it('关闭重开持久化：建档/编辑的暂定仪器范围字段重开后保留', async () => {
+    const dir = makeTempDir('v16-reopen-');
+    dirs.push(dir);
+    const { db } = bootstrapDatabase({ dataDir: dir });
+    const { account } = await new LocalAccountService(new SqliteAccountRepository(db)).initialize({
+      username: '负责人',
+      password: 'password1',
+    });
+    const facade1 = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }));
+    const created = facade1.v2Mutate({
+      op: 'create_project',
+      payload: wizard({
+        intent: 'draft',
+        customerName: '重开持久化客户',
+        instrumentCount: null,
+        temporaryInstrumentName: '重开仪器',
+        temporaryInstrumentModel: 'RE-1',
+        temporaryHasUps: true,
+      }),
+    });
+    const projectId = projectIdOf(created);
+    // 编辑后关闭。
+    facade1.v2Mutate({
+      op: 'update_project',
+      payload: { projectId, temporaryInstrumentName: '重开仪器改', temporaryHasUps: false },
+    });
+    closeDatabase(db);
+
+    // 重开后经新 facade 回读：字段保留（建档与编辑的值均持久化）。
+    const reopened = bootstrapDatabase({ dataDir: dir });
+    const facade2 = new WorkbenchFacade(reopened.db, () => ({ accountId: account.id, username: account.username }));
+    const detail = facade2.v2ProjectDetail(projectId).detail!;
+    expect(detail.temporaryInstrumentName).toBe('重开仪器改');
+    expect(detail.temporaryInstrumentModel).toBe('RE-1');
+    expect(detail.temporaryHasUps).toBe(false);
+    closeDatabase(reopened.db);
   });
 });

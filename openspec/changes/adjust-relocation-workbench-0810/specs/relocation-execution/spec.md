@@ -44,6 +44,38 @@
 - **WHEN** 计划装机日期到达或已过
 - **THEN** 项目主状态不因计划装机日期改变
 
+### Requirement: 项目暂定搬迁范围字段
+
+项目 SHALL 可记录**暂定搬迁范围标量**：**仪器名称**、**型号**（选填）与 **UPS 是否**；对应领域/DTO 字段 `temporaryInstrumentName`/`temporaryInstrumentModel`/`temporaryHasUps`，经追加迁移 v16 在 `projects` 增加可空列 `temporary_instrument_name`/`temporary_instrument_model`/`temporary_has_ups` 持久化（见 `local-data-persistence`）。本字段承载 workbench-interface 建档表单“搬迁范围”分组要求的仪器名称、型号（选填）、UPS 是/否；SHALL 允许建档时填写、留空，建档后经“编辑项目资料”后补或调整。UPS 取值 SHALL 区分 null（未填写，展示“未填写”）与 false（否），SHALL NOT 将 null 推断为“否”。暂定搬迁范围字段 SHALL NOT 创建任何 `instruments` 行，SHALL NOT 改变已存在的逐台仪器事实，SHALL NOT 触发项目主状态流转。
+
+#### Scenario: 建档时填写暂定搬迁范围并持久化
+
+- **GIVEN** 负责人建档时填写仪器名称、型号与 UPS 是否
+- **WHEN** 保存项目并关闭重开应用
+- **THEN** 系统经 v16 列持久化保留三个字段的最新值
+- **AND** 建档写入不创建任何仪器记录
+
+#### Scenario: 暂定搬迁范围允许留空后补
+
+- **GIVEN** 项目建档时未填写仪器名称、型号或 UPS 是否
+- **WHEN** 负责人保存项目并在建档后经“编辑项目资料”补录
+- **THEN** 系统允许建档并保存补充后的值
+- **AND** 后补不改变项目主状态
+
+#### Scenario: UPS 未填写区别于否
+
+- **GIVEN** 负责人未选择 UPS 是否
+- **WHEN** 保存并重新读取项目
+- **THEN** UPS 以未填写（null）呈现，展示“未填写”
+- **AND** 系统不将未填写推断为“否”
+
+#### Scenario: 暂定搬迁范围不建仪器不改既有事实
+
+- **GIVEN** 项目已存在逐台仪器记录
+- **WHEN** 负责人在“编辑项目资料”中调整仪器名称、型号或 UPS 是否并保存
+- **THEN** 系统保存调整后的暂定范围值
+- **AND** 不创建、删除或修改任何逐台仪器记录，项目主状态保持不变
+
 ## MODIFIED Requirements
 
 ### Requirement: 暂定数量登记

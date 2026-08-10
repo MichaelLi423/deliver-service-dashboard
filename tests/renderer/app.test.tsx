@@ -74,7 +74,7 @@ function detailOf(projectRow: WorkbenchProjectRow | null): WorkbenchV2ProjectDet
       oldSiteAddress: null, newSiteAddress: null, contractStartDate: null, contractEndDate: null,
       planVisitAt: null, planTransportAt: null, siteConfirmed: false, plannedInstallAt: null, plannedInstallDoneAt: null, actualInstallDoneAt: null,
       acceptanceReport: false, acceptanceReportDate: null, cancelledAt: null, cancelReason: null,
-      temporaryInstrumentCount: null, createdAt: '2026-08-01T00:00:00Z', customerId: 'c1', contractId: 'ct1',
+      temporaryInstrumentCount: null, temporaryInstrumentName: null, temporaryInstrumentModel: null, temporaryHasUps: null, createdAt: '2026-08-01T00:00:00Z', customerId: 'c1', contractId: 'ct1',
     },
   };
 }
@@ -86,7 +86,7 @@ function mockApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
     getSession: vi.fn().mockResolvedValue({ accountId: 'a1', username: '负责人' }),
     v2Overview: vi.fn().mockResolvedValue(overview),
     v2ProjectPage: vi.fn().mockImplementation((request: { cursor?: string | null }) => Promise.resolve(request.cursor ? page(secondProjects, null) : page())),
-    v2ProjectDetail: vi.fn().mockImplementation((projectId: string) => Promise.resolve({ businessRevision: 1, project: [...firstProjects, ...secondProjects].find((row) => row.id === projectId) ?? null, detail: { managerApprovalReason: null, managerApprovalMissing: null, managerApproved: null, projectNote: null, temporaryStorageAddress: null, isTemporaryStorage: null, oldSiteContact: null, newSiteContact: null, oldSiteAddress: null, newSiteAddress: null, contractStartDate: null, contractEndDate: null, planVisitAt: null, planTransportAt: null, siteConfirmed: false, plannedInstallAt: null, plannedInstallDoneAt: null, actualInstallDoneAt: null, acceptanceReport: false, acceptanceReportDate: null, cancelledAt: null, cancelReason: null, temporaryInstrumentCount: null, createdAt: '2026-08-01T00:00:00Z', customerId: 'c1', contractId: 'ct1' } })),
+    v2ProjectDetail: vi.fn().mockImplementation((projectId: string) => Promise.resolve({ businessRevision: 1, project: [...firstProjects, ...secondProjects].find((row) => row.id === projectId) ?? null, detail: { managerApprovalReason: null, managerApprovalMissing: null, managerApproved: null, projectNote: null, temporaryStorageAddress: null, isTemporaryStorage: null, oldSiteContact: null, newSiteContact: null, oldSiteAddress: null, newSiteAddress: null, contractStartDate: null, contractEndDate: null, planVisitAt: null, planTransportAt: null, siteConfirmed: false, plannedInstallAt: null, plannedInstallDoneAt: null, actualInstallDoneAt: null, acceptanceReport: false, acceptanceReportDate: null, cancelledAt: null, cancelReason: null, temporaryInstrumentCount: null, temporaryInstrumentName: null, temporaryInstrumentModel: null, temporaryHasUps: null, createdAt: '2026-08-01T00:00:00Z', customerId: 'c1', contractId: 'ct1' } })),
     v2SectionPage: vi.fn().mockImplementation((request: { kind: WorkbenchV2SectionPageDto['kind']; projectId: string }) => Promise.resolve(section(request.kind, request.projectId))),
     v2HistoryPage: vi.fn().mockImplementation((request: { kind: WorkbenchV2HistoryPageDto['kind'] }) => Promise.resolve({
       businessRevision: 1, kind: request.kind, total: 1, nextCursor: null, limit: 50,

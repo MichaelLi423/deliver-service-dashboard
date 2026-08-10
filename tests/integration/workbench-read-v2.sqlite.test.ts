@@ -669,6 +669,9 @@ describe('工作台 v2 项目详情 + 子记录分页（Oracle #10）', () => {
         temporaryStorageAddress: '临时仓 A',
         isTemporaryStorage: true,
         temporaryInstrumentCount: 3,
+        temporaryInstrumentName: '生化分析仪',
+        temporaryInstrumentModel: 'BS-200',
+        temporaryHasUps: true,
         plannedInstallAt: '2026-09-01',
         plannedVisitAt: '2026-08-20',
         plannedTransportAt: '2026-08-18',
@@ -707,6 +710,13 @@ describe('工作台 v2 项目详情 + 子记录分页（Oracle #10）', () => {
     // 项目备注 + 暂定仪器数量（既有事实）
     expect(d.projectNote).toBe('客户要求 0815 前完工');
     expect(d.temporaryInstrumentCount).toBe(3);
+
+    // 暂定仪器范围（v16）：名称/型号/是否 UPS 回显，且不产生任何仪器行
+    expect(d.temporaryInstrumentName).toBe('生化分析仪');
+    expect(d.temporaryInstrumentModel).toBe('BS-200');
+    expect(d.temporaryHasUps).toBe(true);
+    // 登记暂定范围前后仪器行数不变（只更新项目标量，不建/不改/不删仪器）
+    expect(facade.v2SectionPage({ projectId, kind: 'instruments' }).total).toBe(1);
 
     // legacy 非枚举区域：raw 保留原值 + regionNeedsAdjustment=true（不猜测映射）
     db.prepare("UPDATE projects SET region = '华东' WHERE id = ?").run(projectId);

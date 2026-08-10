@@ -218,6 +218,28 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     expect(order.note).toBe('补齐资料时创建的开单');
   });
 
+  it('supplement 补齐暂定仪器范围（v16）：名称/型号/是否 UPS 落库并回显，不建仪器、不触发正式进单', async () => {
+    const { facade, projectId } = await makePendingProject();
+    const result = facade.v2Mutate({
+      op: 'supplement_project',
+      payload: {
+        projectId,
+        temporaryInstrumentName: '  supplement 仪器 ',
+        temporaryInstrumentModel: 'SUP-1',
+        temporaryHasUps: true,
+      },
+    });
+    expect(result.changed?.projectId).toBe(projectId);
+    const detail = facade.v2ProjectDetail(projectId).detail!;
+    expect(detail.temporaryInstrumentName).toBe('supplement 仪器'); // trim 后保存
+    expect(detail.temporaryInstrumentModel).toBe('SUP-1');
+    expect(detail.temporaryHasUps).toBe(true);
+    // 不创建任何仪器记录；未携带 ECC 不触发正式进单；主状态不变。
+    expect(facade.v2SectionPage({ projectId, kind: 'instruments' }).total).toBe(0);
+    expect(facade.v2ProjectDetail(projectId).project!.formallyEntered).toBe(false);
+    expect(facade.v2ProjectDetail(projectId).project!.status).toBe('pending_entry');
+  });
+
   it('supplement 缺工程师（填服务单号）时整体回滚：开单与项目均不保存', async () => {
     const { facade, projectId } = await makePendingProject();
     expect(() =>

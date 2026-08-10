@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
 import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { closeDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
-import { RELOCATION_WORKBENCH_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
 import {
   SqliteContractRepository,
   SqliteInvoiceReadRepository,
@@ -110,11 +110,11 @@ function addProject(db: DatabaseSync, id: string): void {
 }
 
 describe('workbench-todos SQLite 集成（6.5）', () => {
-  it(`schema v${RELOCATION_WORKBENCH_MIGRATION_VERSION}：项目提醒归属快照列存在并随迁移写入 user_version=${RELOCATION_WORKBENCH_MIGRATION_VERSION}`, () => {
+  it(`schema v${LATEST_SCHEMA_VERSION}：项目提醒归属快照列存在并随迁移写入 user_version=${LATEST_SCHEMA_VERSION}`, () => {
     const dir = makeTempDir();
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
       const cols = db.prepare('PRAGMA table_info(projects)').all() as { name: string }[];
       expect(cols.map((c) => c.name)).toContain('reminder_account_id');
       expect(cols.map((c) => c.name)).toContain('reminder_username_snapshot');

@@ -4,19 +4,19 @@ import type { DatabaseSync } from 'node:sqlite';
 import { bootstrapDatabase, INITIAL_MIGRATION, MIGRATIONS } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { closeDatabase, openDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { Migration, MigrationError, runMigrations } from '../../src/domain/capabilities/local-data-persistence/migration';
-import { RELOCATION_WORKBENCH_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
 import { applyInitialSchema } from '../../src/domain/capabilities/local-data-persistence/schema';
 import { cleanupTempDir, makeTempDir, makeTempDbPath } from '../helpers/tmp-db';
 
 describe('schema 迁移（tasks 1.10 / D17）', () => {
-  it(`成功迁移：v0 → v${RELOCATION_WORKBENCH_MIGRATION_VERSION} 应用初始 schema、归属快照列、迁移来源列、导入记录审计、正式库身份与业务修订触发器、v2 读取索引、业务日期化并写入 user_version`, () => {
+  it(`成功迁移：v0 → v${LATEST_SCHEMA_VERSION} 应用初始 schema、归属快照列、迁移来源列、导入记录审计、正式库身份与业务修订触发器、v2 读取索引、业务日期化并写入 user_version`, () => {
     const dir = makeTempDir();
     try {
       const { db, migrationResult } = bootstrapDatabase({ dataDir: dir });
       expect(migrationResult.fromVersion).toBe(0);
-      expect(migrationResult.toVersion).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(migrationResult.toVersion).toBe(LATEST_SCHEMA_VERSION);
       expect(migrationResult.applied).toHaveLength(MIGRATIONS.length);
-      expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
       // v2 补充的账号归属快照列存在（tasks 3.x 手工事实归属）
       const workCols = db
         .prepare('PRAGMA table_info(work_facts)')
@@ -72,7 +72,7 @@ describe('schema 迁移（tasks 1.10 / D17）', () => {
 
       const second = bootstrapDatabase({ dataDir: dir });
       expect(second.migrationResult.applied).toHaveLength(0);
-      expect(readSchemaVersion(second.db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(readSchemaVersion(second.db)).toBe(LATEST_SCHEMA_VERSION);
       closeDatabase(second.db);
     } finally {
       cleanupTempDir(dir);

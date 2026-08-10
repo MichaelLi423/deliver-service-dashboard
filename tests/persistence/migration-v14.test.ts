@@ -5,7 +5,7 @@ import {
 } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { closeDatabase, openDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { runMigrations } from '../../src/domain/capabilities/local-data-persistence/migration';
-import { RELOCATION_WORKBENCH_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 
 /**
@@ -16,13 +16,13 @@ import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
  */
 
 describe('schema v14：补齐资料/批量导入新增字段', () => {
-  it(`全新库引导到最新版本：迁移序列 1..${RELOCATION_WORKBENCH_MIGRATION_VERSION}、版本写入 ${RELOCATION_WORKBENCH_MIGRATION_VERSION}、三列已建立`, () => {
+  it(`全新库引导到最新版本：迁移序列 1..${LATEST_SCHEMA_VERSION}、版本写入 ${LATEST_SCHEMA_VERSION}、三列已建立`, () => {
     const dir = makeTempDir();
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
-      expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
       expect(MIGRATIONS.map((m) => m.version)).toEqual(
-        Array.from({ length: RELOCATION_WORKBENCH_MIGRATION_VERSION }, (_, i) => i + 1),
+        Array.from({ length: LATEST_SCHEMA_VERSION }, (_, i) => i + 1),
       );
       const projectCols = db.prepare('PRAGMA table_info(projects)').all() as { name: string }[];
       expect(projectCols.map((c) => c.name)).toContain('planned_install_done_at');
@@ -57,7 +57,7 @@ describe('schema v14：补齐资料/批量导入新增字段', () => {
       db.exec('COMMIT');
 
       runMigrations(db, { migrations: [...MIGRATIONS], backupDir });
-      expect(readSchemaVersion(db)).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
       const project = db.prepare('SELECT * FROM projects WHERE id = ?').get('p1') as {
         temp_no: string;
         entry_at: string;

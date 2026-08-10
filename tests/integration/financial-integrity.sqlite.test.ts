@@ -17,7 +17,7 @@ import {
 } from '../../src/domain/capabilities/local-data-persistence/financial-integrity';
 import { readDatabaseIdentity } from '../../src/domain/capabilities/local-data-persistence/identity';
 import { runMigrations } from '../../src/domain/capabilities/local-data-persistence/migration';
-import { RELOCATION_WORKBENCH_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
 import { WorkbenchReadRepository } from '../../src/domain/capabilities/local-data-persistence/workbench-read-repository';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 
@@ -548,7 +548,7 @@ describe('2.3 bootstrap 迁移后诊断（只读计数 + 治理提示；不静�
       const logger = { warn: vi.fn() };
       const result = bootstrapDatabase({ dataDir: dir, logger });
       db = result.db;
-      expect(result.migrationResult.toVersion).toBe(RELOCATION_WORKBENCH_MIGRATION_VERSION);
+      expect(result.migrationResult.toVersion).toBe(LATEST_SCHEMA_VERSION);
       expect(result.integrityDiagnostics).toEqual({
         orphanContracts: 1,
         orphanInvoices: 1,

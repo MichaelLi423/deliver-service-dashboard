@@ -124,6 +124,58 @@ describe('编辑项目资料维护暂定仪器数量（6.5：查看/留空/补�
   });
 });
 
+describe('项目暂定仪器范围（v16：只更新项目标量，不建仪器、不触发主状态）', () => {
+  it('填写/修改/清空名称/型号/是否 UPS：不创建/删除/修改任何仪器记录，不触发主状态', () => {
+    const { projects, projectService, instruments, service } = setup();
+    const project = projectService.createPendingProject();
+    // 既有逐台仪器事实（不受暂定范围维护影响）。
+    const existing = service.registerInstrument(project.id, { name: '既有仪器' }, ACTOR);
+
+    // 填写。
+    projectService.updateTemporaryInstrument(project.id, {
+      temporaryInstrumentName: '质谱仪',
+      temporaryInstrumentModel: 'Q-TOF',
+      temporaryHasUps: true,
+    });
+    const projectRow = projects.findById(project.id)!;
+    expect(projectRow.temporaryInstrumentName).toBe('质谱仪');
+    expect(projectRow.temporaryInstrumentModel).toBe('Q-TOF');
+    expect(projectRow.temporaryHasUps).toBe(true);
+    // 修改。
+    projectService.updateTemporaryInstrument(project.id, { temporaryInstrumentModel: 'Q-TOF-II' });
+    expect(projects.findById(project.id)!.temporaryInstrumentModel).toBe('Q-TOF-II');
+    // 清空。
+    projectService.updateTemporaryInstrument(project.id, {
+      temporaryInstrumentName: null,
+      temporaryInstrumentModel: null,
+      temporaryHasUps: null,
+    });
+    const cleared = projects.findById(project.id)!;
+    expect(cleared.temporaryInstrumentName).toBeNull();
+    expect(cleared.temporaryInstrumentModel).toBeNull();
+    expect(cleared.temporaryHasUps).toBeNull();
+
+    // 不创建/删除/修改任何仪器记录，不触发主状态。
+    expect(instruments.all).toEqual([existing]);
+    expect(projects.findById(project.id)!.status).toBe('pending_entry');
+  });
+
+  it('暂定仪器范围与暂定数量独立：维护范围不改变数量，维护数量不改变范围', () => {
+    const { projects, projectService } = setup();
+    const project = projectService.createPendingProject();
+    projectService.setTemporaryInstrumentCount(project.id, 6);
+    projectService.updateTemporaryInstrument(project.id, {
+      temporaryInstrumentName: '离心机',
+      temporaryHasUps: false,
+    });
+    expect(projects.findById(project.id)!.temporaryInstrumentCount).toBe(6); // 数量不受影响
+    expect(projects.findById(project.id)!.temporaryInstrumentName).toBe('离心机');
+    projectService.setTemporaryInstrumentCount(project.id, 8);
+    expect(projects.findById(project.id)!.temporaryInstrumentName).toBe('离心机'); // 范围不受影响
+    expect(projects.findById(project.id)!.temporaryHasUps).toBe(false);
+  });
+});
+
 describe('占位仪器与序列号唯一性（3.1 / TBD-02）', () => {
   it('建立无序列号占位仪器：序列号可空', () => {
     const { service, projectService } = setup();
