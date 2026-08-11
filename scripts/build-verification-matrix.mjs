@@ -3,7 +3,7 @@
  * 场景→测试矩阵生成脚本（tasks 10.1）。
  *
  * 职责：
- * 1. 扫描 openspec/changes/add-relocation-service-workbench/specs 下各能力的 spec.md，
+ * 1. 扫描 openspec/changes/adjust-relocation-workbench-0810/specs 下各能力的 spec.md，
  *    提取每个能力的 Requirement / Scenario。
  * 2. 读取 docs/verification/scenario-map.mjs 登记表（场景→测试证据 + 状态/备注）。
  * 3. 校验登记表证据真实性：引用的测试文件必须存在，且文件中必须出现登记的关键词
@@ -22,7 +22,7 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
-const specsDir = join(repoRoot, 'openspec', 'changes', 'add-relocation-service-workbench', 'specs');
+const specsDir = join(repoRoot, 'openspec', 'changes', 'adjust-relocation-workbench-0810', 'specs');
 const registryUrl = new URL('../docs/verification/scenario-map.mjs', import.meta.url);
 const outputPath = join(repoRoot, 'docs', 'verification', 'scenario-test-matrix.md');
 

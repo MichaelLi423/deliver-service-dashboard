@@ -77,17 +77,17 @@
 
 ## 9. 聚焦验证与交付
 
-- [ ] 9.1 focused domain 验证：运行本 change 涉及的领域测试文件（lifecycle、relocation-fields、relocation-entry、relocation-execution、serial-address-update、ship-to-management、damage-repair-tracking、qr-request-tracking、service-order-recording、operational-reporting、workbench-todos 等）；完成态：`npx vitest run tests/domain/...` 全绿。
-- [ ] 9.2 focused persistence 验证：运行 migration-v15、schema、connection 等持久化测试；完成态：`npx vitest run tests/persistence/migration-v15.test.ts tests/persistence/schema.test.ts` 全绿。
-- [ ] 9.3 focused integration 验证：运行 workbench-read-v2、workbench-delete、financial-closure、relocation-project-lifecycle、ship-to-serial、operational-reporting、damage-repair-qr、data-cleanup 等 sqlite 集成测试；完成态：`npx vitest run tests/integration/...` 全绿。
-- [ ] 9.4 focused renderer/interface 验证：运行 tests/renderer/app.test.tsx 与 tests/interface/layout.test.ts；完成态：focused vitest 全绿。
-- [ ] 9.5 类型验证：完成态：`npm run typecheck`（tsc --noEmit）零错误（webpack 打包通过不代表类型正确）。
-- [ ] 9.6 更新证据映射并运行验证矩阵：按真实新增/修改的测试登记 `docs/verification/scenario-map.mjs` 证据（[文件, 标题关键词]），运行 `npm run verify:matrix` 重写 scenario-test-matrix.md；完成态：矩阵无缺口或如实登记 pending/note，不得谎称覆盖。
-- [ ] 9.7 E2E 聚焦场景：先 `npm run e2e:build`（electron-forge package）再以 `workers=1` 运行 focused E2E（workbench-v2-layout 等），覆盖 sticky 固定头部在 1024/1440 视口、键盘焦点与导航跳转；完成态：playwright focused 用例全绿（未构建时用例会 skip 而非失败，须先构建）。
-- [ ] 9.8 提交并推送：检查实际 diff，提交本 change 相关改动（tasks/代码/测试/矩阵）并推送到远程仓库（项目规则：不留存仅本地工作区的已完成修改）；完成态：git 状态干净、改动已推送。
-- [ ] 9.9 扩展 focused integration 证据（20 项分页与 7 日期泳道）：运行 tests/integration/workbench-read-v2.sqlite.test.ts 的固定 20 分页/过滤后重算 total/cursor 重置/等键稳定场景 与 tests/integration/workbench-todos.sqlite.test.ts 的 7 日期列读取模型场景（对应 7.5/7.6）；完成态：focused vitest 全绿。
-- [ ] 9.10 扩展 focused renderer/interface 证据（编辑表单暂定数量 + 泳道 UI + 1024/1440）：运行 tests/renderer/app.test.tsx（暂定数量查看/留空/补录/调整/回显，对应 6.5/6.6）与 tests/interface/layout.test.ts（泳道日期列头/同日纵列/1024 内部横滚不溢出/1440 可读或内部滚动，对应 8.4）；完成态：focused vitest 全绿。
-- [ ] 9.11 扩展 E2E 证据（泳道 1024/1440）：先 `npm run e2e:build`（electron-forge package）再以 `workers=1` 运行 focused E2E，覆盖提醒泳道在 1024（容器内横向滚动、页面无溢出、键盘可达）与 1440（尽量 7 列可读或内部滚动）以及 sticky 固定头部；完成态：playwright focused 用例全绿（未构建时用例会 skip 而非失败，须先构建）。
-- [ ] 9.12 扩展 verify matrix 证据：按 20 项分页与 7 日期列相关新增测试登记 `docs/verification/scenario-map.mjs` 证据（[文件, 标题关键词]），运行 `npm run verify:matrix` 重写 scenario-test-matrix.md；完成态：矩阵无缺口或如实登记 pending/note，不得谎称覆盖。
+- [x] 9.1 focused domain 验证：运行本 change 涉及的领域测试文件（lifecycle、relocation-fields、relocation-entry、relocation-execution、serial-address-update、ship-to-management、damage-repair-tracking、qr-request-tracking、service-order-recording、operational-reporting、workbench-todos 等）；完成态：`npx vitest run tests/domain/...` 全绿。
+- [x] 9.2 focused persistence 验证：运行 migration-v15、schema、connection 等持久化测试；完成态：`npx vitest run tests/persistence/migration-v15.test.ts tests/persistence/schema.test.ts` 全绿。
+- [x] 9.3 focused integration 验证：运行 workbench-read-v2、workbench-delete、financial-closure、relocation-project-lifecycle、ship-to-serial、operational-reporting、damage-repair-qr、data-cleanup 等 sqlite 集成测试；完成态：`npx vitest run tests/integration/...` 全绿。
+- [x] 9.4 focused renderer/interface 验证：运行 tests/renderer/app.test.tsx 与 tests/interface/layout.test.ts；完成态：focused vitest 全绿。
+- [x] 9.5 类型验证：完成态：`npm run typecheck`（tsc --noEmit）零错误（webpack 打包通过不代表类型正确）。
+- [x] 9.6 更新证据映射并运行验证矩阵：按真实新增/修改的测试登记 `docs/verification/scenario-map.mjs` 证据（[文件, 标题关键词]），运行 `npm run verify:matrix` 重写 scenario-test-matrix.md；完成态：矩阵无缺口或如实登记 pending/note，不得谎称覆盖。
+- [x] 9.7 E2E 聚焦场景：先 `npm run e2e:build`（electron-forge package）再以 `workers=1` 运行 focused E2E（workbench-v2-layout 等），覆盖 sticky 固定头部在 1024/1440 视口、键盘焦点与导航跳转；完成态：playwright focused 用例全绿（未构建时用例会 skip 而非失败，须先构建）。
+- [x] 9.8 提交并推送：检查实际 diff，提交本 change 相关改动（tasks/代码/测试/矩阵）并推送到远程仓库（项目规则：不留存仅本地工作区的已完成修改）；完成态：git 状态干净、改动已推送。
+- [x] 9.9 扩展 focused integration 证据（20 项分页与 7 日期泳道）：运行 tests/integration/workbench-read-v2.sqlite.test.ts 的固定 20 分页/过滤后重算 total/cursor 重置/等键稳定场景 与 tests/integration/workbench-todos.sqlite.test.ts 的 7 日期列读取模型场景（对应 7.5/7.6）；完成态：focused vitest 全绿。
+- [x] 9.10 扩展 focused renderer/interface 证据（编辑表单暂定数量 + 泳道 UI + 1024/1440）：运行 tests/renderer/app.test.tsx（暂定数量查看/留空/补录/调整/回显，对应 6.5/6.6）与 tests/interface/layout.test.ts（泳道日期列头/同日纵列/1024 内部横滚不溢出/1440 可读或内部滚动，对应 8.4）；完成态：focused vitest 全绿。
+- [x] 9.11 扩展 E2E 证据（泳道 1024/1440）：先 `npm run e2e:build`（electron-forge package）再以 `workers=1` 运行 focused E2E，覆盖提醒泳道在 1024（容器内横向滚动、页面无溢出、键盘可达）与 1440（尽量 7 列可读或内部滚动）以及 sticky 固定头部；完成态：playwright focused 用例全绿（未构建时用例会 skip 而非失败，须先构建）。
+- [x] 9.12 扩展 verify matrix 证据：按 20 项分页与 7 日期列相关新增测试登记 `docs/verification/scenario-map.mjs` 证据（[文件, 标题关键词]），运行 `npm run verify:matrix` 重写 scenario-test-matrix.md；完成态：矩阵无缺口或如实登记 pending/note，不得谎称覆盖。
 
 说明：本任务列表默认不做全量 `npm test`（含 100k/50k 性能用例，耗时极长）；如 focused 验证暴露更广回归风险，再由实施者判断补跑相关 focused 范围。仓库无 lint/CI/hook，不设置对应任务。

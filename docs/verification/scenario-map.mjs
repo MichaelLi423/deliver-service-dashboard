@@ -75,7 +75,7 @@ export const scenarioMap = {
     },
     '经理批复由负责人记录': {
       evidence: [
-        ['tests/domain/relocation-status.test.ts', '未进单先执行标签与主状态并存：记录批复/原因/缺失项，主状态保持待进单'],
+        ['tests/domain/relocation-status.test.ts', '未进单先执行标签与主状态并存：记录「是否批复」boolean 事实，主状态保持待进单'],
       ],
     },
     '工程师执行信息由负责人记录': {
@@ -98,6 +98,22 @@ export const scenarioMap = {
 
   // ─────────────────────── relocation-project-lifecycle ───────────────────
   'relocation-project-lifecycle': {
+    '建档时填写可选项目备注': { evidence: [['tests/domain/relocation-fields.test.ts', '项目备注可空：建档后补充/修改/清空，不触发主状态流转']] },
+    '建档后补充或修改项目备注': { evidence: [['tests/domain/relocation-fields.test.ts', '项目备注可空：建档后补充/修改/清空，不触发主状态流转']] },
+    '计划上门日期到达自动进入执行中优先于人工状态值': { evidence: [['tests/domain/lifecycle.test.ts', '到期自动推进优先于人工目标值']] },
+    '建档移除字段不阻塞进单': { evidence: [['tests/renderer/app.test.tsx', '新建项目由明确意图提交正式进单且不夹带服务单等已移除字段']] },
+    '计划上门日期到期后待进单自动进入执行中': { evidence: [['tests/domain/lifecycle.test.ts', '待进单带"未进单先执行"标签到期自动进入执行中']] },
+    '已在执行中的项目正式进单不倒退': { evidence: [['tests/integration/relocation-project-lifecycle.sqlite.test.ts', '正式进单不倒退：已在执行中的项目进单后保持执行中，在原项目上完成']] },
+    '计划上门日期到达待执行项目自动进入执行中': { evidence: [['tests/domain/lifecycle.test.ts', '到期：待执行 → 执行中']] },
+    '计划上门日期到期待进单项目自动进入执行中': { evidence: [['tests/domain/lifecycle.test.ts', '到期：待进单 → 执行中（reason plan_visit_due）']] },
+    '自动推进幂等重复检查不重复触发': { evidence: [['tests/integration/relocation-project-lifecycle.sqlite.test.ts', '重复执行幂等零写：项目/revision/audit 全零变化']] },
+    '待验收与待掉票不倒退': { evidence: [['tests/domain/lifecycle.test.ts', '到期：待验收/待掉票不倒退']] },
+    '终态项目不因计划上门日期改变': { evidence: [['tests/domain/lifecycle.test.ts', '到期：已完成终态不变'], ['tests/domain/lifecycle.test.ts', '到期：已取消终态不变（仍拒绝流转）']] },
+    '漏跑后补推进': { evidence: [['tests/domain/lifecycle.test.ts', '逾期补推进：计划上门日期早于 today 数日（漏跑）仍自动进入执行中']] },
+    '计划运输日期与场地确认不触发流转': { evidence: [['tests/integration/relocation-project-lifecycle.sqlite.test.ts', '实际装机完成自动待验收并持久化；计划时间与场地确认不触发']] },
+    '旧址与新址允许建档后补充': { evidence: [['tests/domain/relocation-fields.test.ts', '记录项目默认旧址与新址']] , status: 'pending', note: '现有标题仅直接证明字段保存；未找到明确覆盖建档留空后补的自动化标题。' },
+    '区域仅五个固定选项': { evidence: [['tests/domain/relocation-fields.test.ts', '五个固定取值均可保存：去除首尾空白后保存规范化值']] },
+    '非枚举区域值被拒': { evidence: [['tests/domain/relocation-fields.test.ts', '非枚举区域值被拒并提示（含存量 legacy 自由文本，绝不静默写入）']] },
     '待进单分配内部编号且合同可空': {
       evidence: [
         ['tests/domain/relocation-entry.test.ts', '待进单分配稳定内部编号且合同可空（不强制合同草稿）'],
@@ -155,7 +171,7 @@ export const scenarioMap = {
     },
     '未进单先执行标签并存': {
       evidence: [
-        ['tests/domain/relocation-status.test.ts', '未进单先执行标签与主状态并存：记录批复/原因/缺失项，主状态保持待进单'],
+        ['tests/domain/relocation-status.test.ts', '未进单先执行标签与主状态并存：记录「是否批复」boolean 事实，主状态保持待进单'],
         ['tests/domain/lifecycle.test.ts', '未进单先执行标签存在时主状态保持待进单（TBD-08）'],
       ],
     },
@@ -218,7 +234,7 @@ export const scenarioMap = {
     },
     '批复后优先安排上门': {
       evidence: [
-        ['tests/domain/relocation-status.test.ts', '未进单先执行标签与主状态并存：记录批复/原因/缺失项，主状态保持待进单'],
+        ['tests/domain/relocation-status.test.ts', '未进单先执行标签与主状态并存：记录「是否批复」boolean 事实，主状态保持待进单'],
         ['tests/integration/critical-paths.sqlite.test.ts', '1. 未进单先执行全链路'],
       ],
     },
@@ -308,7 +324,7 @@ export const scenarioMap = {
     },
     '区域为自由文本': {
       evidence: [
-        ['tests/domain/relocation-fields.test.ts', '区域为自由文本：去除首尾空白后精确分组'],
+        ['tests/domain/relocation-fields.test.ts', '非枚举区域值被拒并提示（含存量 legacy 自由文本，绝不静默写入）'],
       ],
     },
     '区域修改后报表实时重算': {
@@ -326,6 +342,20 @@ export const scenarioMap = {
 
   // ────────────────────────── relocation-execution ────────────────────────
   'relocation-execution': {
+    '搬迁范围记录暂存地址': { evidence: [['tests/domain/relocation-fields.test.ts', '暂存地址/是否暂存为手工维护执行事实：修改不影响主状态']] },
+    '执行准备记录是否暂存': { evidence: [['tests/domain/relocation-fields.test.ts', '暂存地址/是否暂存为手工维护执行事实：修改不影响主状态']] },
+    '暂存信息不触发状态流转': { evidence: [['tests/domain/relocation-fields.test.ts', '暂存地址/是否暂存为手工维护执行事实：修改不影响主状态']] },
+    '记录计划装机日期': { evidence: [['tests/main/workbench-v2-ipc.test.ts', 'update_project 经 IPC：0810 标量（备注/暂存/是否批复/暂定数量/计划装机日期）保存并经 detail 回显']] },
+    '计划装机日期不触发状态流转': { evidence: [['tests/integration/new-batch-behaviors.sqlite.test.ts', '计划装机完成日期：可随新建/补齐/更新写入，且不触发生命周期']] },
+    '建档时填写暂定搬迁范围并持久化': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过'], ['tests/renderer/app.test.tsx', '待进单通过公共建档 payload 显式提交暂定范围未填写三态且不登记仪器']] },
+    '暂定搬迁范围允许留空后补': { evidence: [['tests/renderer/app.test.tsx', '编辑项目资料预填、补录、调整及清空暂定范围，保存后 refetch 回显且不登记仪器']] },
+    'UPS 未填写区别于否': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过']] },
+    '暂定搬迁范围不建仪器不改既有事实': { evidence: [['tests/domain/relocation-execution.test.ts', '项目暂定仪器范围（v16：只更新项目标量，不建仪器、不触发主状态）']] },
+    '仪器数量允许建档后补充': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
+    '编辑项目资料查看并留空暂定数量': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
+    '编辑项目资料补录暂定数量并保存最新值': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
+    '编辑项目资料调整暂定数量不改变既有仪器事实': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
+    '调整暂定数量不触发状态流转': { evidence: [['tests/domain/relocation-execution.test.ts', '项目暂定仪器范围（v16：只更新项目标量，不建仪器、不触发主状态）']] },
     '只记暂定数量不建仪器': {
       evidence: [
         ['tests/domain/relocation-execution.test.ts', '只记暂定数量不建仪器：保存数量信息且不创建任何仪器记录'],
@@ -483,6 +513,10 @@ export const scenarioMap = {
 
   // ───────────────────────── service-order-recording ──────────────────────
   'service-order-recording': {
+    '确认后删除且不再出现在详情与统计': { evidence: [['tests/domain/service-order-recording.test.ts', '确认后删除：开单记录从列表与开单量统计中消失，其他记录不受影响']] },
+    '未确认不删除': { evidence: [['tests/domain/service-order-recording.test.ts', '未确认（不存在）不删除：记录不存在时拒绝且无副作用']] },
+    '删除不影响关联项目': { evidence: [['tests/domain/service-order-recording.test.ts', '删除不影响关联项目：项目保留，主状态与进单状态不变']] },
+    '删除为原子操作': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', 'service_order 删除成功：行删除 + 来源审计保留并标记 + tombstone 原子写入 + invalidate 标签']] },
     '搬迁开单关联项目': {
       evidence: [
         ['tests/domain/service-order-recording.test.ts', '搬迁开单关联对应搬迁项目'],
@@ -585,6 +619,11 @@ export const scenarioMap = {
 
   // ─────────────────────────── ship-to-management ─────────────────────────
   'ship-to-management': {
+    '确认后删除且不再出现在详情与统计': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', '5.6 汇总：批次/仪器/开单/验收/Ship-to/损坏/序列号/二维码成功删除后从可观察读取表面消失，tombstone 保留']] },
+    '删除非退回或取消': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', 'ship_to_request：未完成且无 Account ID 直接删除；异常未完成已有 Account ID 保守拒绝']], status: 'pending', note: '存在记录级直接删除证据；未找到明确断言删除不被解释为退回或取消、且不影响其他申请流转的自动化测试标题。' },
+    '未完成申请直接删除': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', 'ship_to_request：未完成且无 Account ID 直接删除；异常未完成已有 Account ID 保守拒绝']] },
+    '已完成申请对应 Ship-to 被引用时拒绝删除': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', 'ship_to_request：completed 对应 Ship-to 仍被仪器引用时原子拒绝；legacy 无来源也拒绝']] },
+    '已完成申请对应 Ship-to 无引用时随申请清理': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', 'ship_to_request：completed 经 origin_request_id 证明来源，无引用随申请原子清理 Ship-to']] },
     '创建后不可修改': {
       evidence: [
         ['tests/domain/ship-to-management.test.ts', '创建后不可修改：服务不提供任何修改 Ship-to 的方法'],
@@ -660,6 +699,12 @@ export const scenarioMap = {
 
   // ────────────────────────── serial-address-update ───────────────────────
   'serial-address-update': {
+    '独立登记不关联项目或仪器': { evidence: [['tests/domain/serial-address-update.test.ts', 'instrumentId 可空：不传（null/undefined/空串）时独立保存，不关联搬迁仪器']] },
+    '独立登记仅校验序列号非空': { evidence: [['tests/domain/serial-address-update.test.ts', 'instrumentId 可空：不传（null/undefined/空串）时独立保存，不关联搬迁仪器']] },
+    '确认后删除且不再出现在详情与统计': { evidence: [['tests/domain/serial-address-update.test.ts', '确认后删除：更新事实从列表与按更新日期计数统计中消失']] },
+    '未确认不删除': { evidence: [['tests/domain/serial-address-update.test.ts', '未确认（不存在）不删除：记录不存在时拒绝且无副作用']] },
+    '删除不影响关联仪器与 Ship-to': { evidence: [['tests/domain/serial-address-update.test.ts', '删除更新事实不修改或删除关联仪器（与 Ship-to 主数据无关）']] },
+    '删除后实际关联以剩余最近更新事实为准': { evidence: [['tests/domain/serial-address-update.test.ts', '删除较新更新事实后，仪器实际关联新址回退到剩余最近更新事实']] },
     '逐台创建更新事实': {
       evidence: [
         ['tests/domain/serial-address-update.test.ts', '逐台创建更新事实：记录客户名称、新址地址、序列号、Account ID 与更新时间'],
@@ -729,6 +774,10 @@ export const scenarioMap = {
 
   // ─────────────────────────── damage-repair-tracking ─────────────────────
   'damage-repair-tracking': {
+    '确认后删除且不再出现在详情与统计': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', '5.6 汇总：批次/仪器/开单/验收/Ship-to/损坏/序列号/二维码成功删除后从可观察读取表面消失，tombstone 保留']] },
+    '未确认不删除': { evidence: [['tests/domain/damage-repair-tracking.test.ts', '未确认（不存在）不删除：记录不存在时拒绝且无副作用']] },
+    '删除时原子清理维修上门关联引用': { evidence: [['tests/domain/damage-repair-tracking.test.ts', '确认后删除：事项从 countItems 统计消失，且仅指向该事项的维修上门关联被清理']] },
+    '删除不影响关联仪器与项目': { evidence: [['tests/domain/damage-repair-tracking.test.ts', '删除不影响关联仪器与搬迁项目']] },
     '一次损坏一条事项': {
       evidence: [
         ['tests/domain/damage-repair-tracking.test.ts', '一次损坏一条事项并关联仪器'],
@@ -845,6 +894,10 @@ export const scenarioMap = {
 
   // ─────────────────────────── qr-request-tracking ────────────────────────
   'qr-request-tracking': {
+    '确认删除后不再保留': { evidence: [['tests/domain/qr-request-tracking.test.ts', '确认后删除：从申请历史与工作量统计中消失']] },
+    '确认后删除且不再出现在详情与统计': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', '5.6 汇总：批次/仪器/开单/验收/Ship-to/损坏/序列号/二维码成功删除后从可观察读取表面消失，tombstone 保留']] },
+    '未确认不删除': { evidence: [['tests/domain/qr-request-tracking.test.ts', '未确认（不存在）不删除：记录不存在时拒绝且无副作用']] },
+    '删除不影响仪器标记与项目': { evidence: [['tests/domain/qr-request-tracking.test.ts', '删除不影响仪器"二维码是否申请"手工标记']] },
     '保存申请人与申请日期': {
       evidence: [
         ['tests/domain/qr-request-tracking.test.ts', '保存申请人与申请时间并选择申请类型'],
@@ -900,6 +953,16 @@ export const scenarioMap = {
 
   // ───────────────────────────── workbench-todos ──────────────────────────
   'workbench-todos': {
+    '查看全部跳转完整提醒视图': { evidence: [['tests/renderer/app.test.tsx', '查看全部进入完整提醒页，默认日期降序，切换升序立即首页重读并稳定翻页']] },
+    '默认按提醒日期最近优先': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.3：完整提醒视图默认按提醒日期降序（最近日期优先），含到期分类，仅备注项目也计入']] },
+    '可选择升序或降序排列': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.3：切换升序立即生效；asc/desc 与泳道（7.6）排序独立']] },
+    '同一提醒日期归入同一泳道列': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.6：同日归列、非连续日期只取有提醒的日期、首批最多 7 个日期、全量不足不制造空列']] },
+    '最多选取 7 个非连续提醒日期': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.6：首批不足 7 个不同日期继续向未来补列；超过 7 个时只取最早 7 个']] },
+    '首批不足时继续向未来补列': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.6：首批不足 7 个不同日期继续向未来补列；超过 7 个时只取最早 7 个']] },
+    '全量不足时不制造空列': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.6：同日归列、非连续日期只取有提醒的日期、首批最多 7 个日期、全量不足不制造空列']] },
+    '每列内项目顺序稳定': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.6：列内 id 稳定 tie-breaker；按列分页携带 selectedDates 锁定日期集合、不重算不重读']] },
+    '1024px 下泳道内部横向滚动且键盘可达': { evidence: [['tests/interface/layout.test.ts', '提醒泳道在 1024 与 1440 保持可读最小列宽并只在容器内部横滚'], ['tests/interface/layout.test.ts', '泳道和全部可聚焦目标有清晰 focus-visible，reduced motion 不移除静态反馈']] },
+    '完整提醒视图保持独立默认排序': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.3：切换升序立即生效；asc/desc 与泳道（7.6）排序独立']] },
     '手工创建项目提醒': {
       evidence: [
         ['tests/domain/workbench-todos.test.ts', '手工创建项目提醒：保存当前提醒并显示在项目上'],
@@ -977,6 +1040,7 @@ export const scenarioMap = {
 
   // ─────────────────────────── operational-reporting ──────────────────────
   'operational-reporting': {
+    '存量非标准区域不被静默转换': { evidence: [['tests/domain/operational-reporting.test.ts', '存量非标准区域原值保留并归入「待调整」独立分组（不猜测、不置空、不丢弃）']] },
     '按进单月份与区域汇总进单金额': {
       evidence: [
         ['tests/domain/operational-reporting.test.ts', '按进单月份与区域汇总进单金额，每个项目只计一次，不因合同变更改变'],
@@ -1175,6 +1239,13 @@ export const scenarioMap = {
 
   // ────────────────────────── project-financial-closure ───────────────────
   'project-financial-closure': {
+    '无任何项目时待掉票金额为 0': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '零项目为 0：仅孤立/脏财务事实（无任何项目）时 pendingAmount 必为 0']] },
+    '孤立财务事实不污染指标': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '孤立排除：引用不存在项目的掉票/合同事实不计入指标']] },
+    '仍存在项目的有效财务事实计入指标': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '已完成余额纳入：已完成项目仍有有效待掉票余额时按 final − 有效掉票计入']] },
+    '诊断清理与防复发': { evidence: [['tests/integration/financial-integrity.sqlite.test.ts', '治理后待掉票金额指标保持正常（现有 repository 读取验证，不改其代码）'], ['tests/integration/financial-integrity.sqlite.test.ts', '防复发：正常 foreign_keys=ON 下写入无项目合同/掉票被拒；治理不产生新孤立行']] },
+    '治理不改变掉票撤销终态与不可物理删除': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', 'invoice 删除映射为撤销：必填撤销日期/原因，行不物理删除']] },
+    '活跃孤立掉票治理撤销保留原行': { evidence: [['tests/integration/financial-integrity.sqlite.test.ts', '治理成功：仅活跃孤立掉票经既有撤销语义进入撤销终态并保留原行；已撤销保持；审计仅计数；token 消费']] },
+    '结构性外键违规持续报告且不宣称归零': { evidence: [['tests/integration/financial-integrity.sqlite.test.ts', '治理成功：仅活跃孤立掉票经既有撤销语义进入撤销终态并保留原行；已撤销保持；审计仅计数；token 消费']] },
     '手工录入合同含税金额': {
       evidence: [
         ['tests/domain/financial-closure.test.ts', '手工录入合同含税金额：保存手工值，不根据净值税率自动计算或改写'],
@@ -1584,6 +1655,15 @@ export const scenarioMap = {
     },
   },
   'local-data-persistence': {
+    '追加迁移不修改已发布迁移': { evidence: [['tests/persistence/migration-v15.test.ts', '全新库引导到最新版本：迁移序列 1..16、user_version=16、v15 四列已建立、审计表/索引/FK 已建、可写入最小审计事实']] },
+    '旧库升级保留既有数据并初始化新字段': { evidence: [['tests/persistence/migration-v15.test.ts', 'v14 存量库升级到 v15：业务数据完整保留、legacy region 原文不变、新列空初始化、legacy origin/deleted marker 保持 null']] },
+    '新增字段与受控区域值持久化': { evidence: [['tests/main/workbench-v2-ipc.test.ts', 'update_project 经 IPC：0810 标量（备注/暂存/是否批复/暂定数量/计划装机日期）保存并经 detail 回显']], status: 'pending', note: '现有标题证明标量保存与回显；未找到关闭重开后同时验证全部 v15 字段与受控区域的自动化标题。' },
+    '迁移诊断并清理孤立财务事实': { evidence: [['tests/integration/financial-integrity.sqlite.test.ts', 'v14 存量库升级：结构违规不静默删、不阻断迁移，输出固定计数与治理提示，存量数据保留']] },
+    '结构性外键违规持续报告且不阻断迁移': { evidence: [['tests/integration/financial-integrity.sqlite.test.ts', 'v14 存量库升级：结构违规不静默删、不阻断迁移，输出固定计数与治理提示，存量数据保留']] },
+    'v15 已发布库追加 v16 不修改既有迁移': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过']] },
+    'v15 库升级保留数据并初始化暂定范围列': { evidence: [['tests/persistence/migration-v16.test.ts', 'v15 存量库升级到 v16：业务数据完整保留、legacy region 原文不变、v15 字段原样保留、新列 null 初始化']] },
+    '暂定搬迁范围字段持久化保留': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过']] },
+    'v16 迁移失败保留可恢复状态': { evidence: [['tests/persistence/migration-v16.test.ts', '注入失败保留迁移前数据与可恢复状态：整体回滚、版本仍为 15、全部 v16 结构回滚、迁移前备份可恢复']] },
     '离线启动并完成核心操作': {
       evidence: [
         ['tests/persistence/runtime-boundary.test.ts', '离线可用：无任何远程服务时本机 SQLite 全流程（写入→备份→关闭→重开）正常'],
@@ -1687,6 +1767,30 @@ export const scenarioMap = {
 
   // ─────────────────────────── workbench-interface ────────────────────────
   'workbench-interface': {
+    '待掉票金额仅计入有效关联事实': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '孤立排除：引用不存在项目的掉票/合同事实不计入指标']] },
+    '无项目时指标显示 0': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '零项目为 0：仅孤立/脏财务事实（无任何项目）时 pendingAmount 必为 0']] },
+    '保持有效项目财务口径': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '已完成余额纳入：已完成项目仍有有效待掉票余额时按 final − 有效掉票计入'], ['tests/integration/financial-closure.sqlite.test.ts', '已取消排除：仅已取消项目存在时 pendingAmount 为 0（口径不改动为仅活跃项目）']] },
+    '登记记录删除需确认': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', '5.6 汇总：批次/仪器/开单/验收/Ship-to/损坏/序列号/二维码成功删除后从可观察读取表面消失，tombstone 保留']], status: 'pending', note: '删除成功有集成证据；未找到界面确认交互的自动化测试标题。' },
+    '各类登记记录均提供删除入口': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', '5.6 汇总：批次/仪器/开单/验收/Ship-to/损坏/序列号/二维码成功删除后从可观察读取表面消失，tombstone 保留']], status: 'pending', note: '八类删除后可观察读取消失有集成证据；未找到逐类界面删除入口的自动化测试标题。' },
+    '搬迁项目维持取消语义': { evidence: [['tests/renderer/app.test.tsx', '项目仅有取消入口且无物理删除，掉票只提供撤销并在终态禁编辑和重复撤销']] },
+    '掉票记录维持撤销语义': { evidence: [['tests/renderer/app.test.tsx', '项目仅有取消入口且无物理删除，掉票只提供撤销并在终态禁编辑和重复撤销']] },
+    '顶栏入口跳转完整记录视图': { evidence: [['tests/renderer/app.test.tsx', '统一历史入口按日期真正跨项目读取，展示项目上下文并受保护删除']] },
+    '按业务日期倒序排列': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.2：各类型业务日期倒序 + id 稳定 tie-breaker，keyset 重复加载不改变顺序']] },
+    '相同业务日期稳定排序': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.2：各类型业务日期倒序 + id 稳定 tie-breaker，keyset 重复加载不改变顺序']] },
+    '按客户名称或编号搜索': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.4：关键词覆盖客户/ECC/临时编号；区域仅五枚举（runtime 非枚举拒绝）；query+region AND']] },
+    '区域筛选为固定枚举': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.4：关键词覆盖客户/ECC/临时编号；区域仅五枚举（runtime 非枚举拒绝）；query+region AND']] },
+    '搜索与区域筛选组合': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.4：关键词覆盖客户/ECC/临时编号；区域仅五枚举（runtime 非枚举拒绝）；query+region AND']] },
+    '查看已有暂定仪器数量': { evidence: [['tests/renderer/app.test.tsx', '编辑项目资料预填、补录、调整及清空暂定范围，保存后 refetch 回显且不登记仪器']], status: 'pending', note: '该 renderer 标题覆盖暂定范围回显；未找到以暂定数量查看为标题的实际自动化测试。' },
+    '暂定仪器数量允许留空': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
+    '补录或调整后回显最新值': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
+    '每页固定展示 20 个项目': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.5：固定每页 20（renderer 任意 limit 忽略）、翻页无重复无遗漏、游标稳定、total 正确']] },
+    '筛选或搜索后重算总数与分页': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.5：过滤后 total 重算、cursor 与筛选状态绑定（筛选变化丢弃旧 cursor）、末页少于 20']] },
+    '翻页时页内顺序稳定': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.5：固定每页 20（renderer 任意 limit 忽略）、翻页无重复无遗漏、游标稳定、total 正确']] },
+    '最后一页允许少于 20 个项目': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.5：过滤后 total 重算、cursor 与筛选状态绑定（筛选变化丢弃旧 cursor）、末页少于 20']] },
+    '不展示错误的每页数量文案': { evidence: [['tests/main/workbench-v2-ipc.test.ts', 'v2ProjectPage 经 IPC：固定每页 20（任意 limit 忽略），DTO 返回 pageSize=20']], status: 'pending', note: 'IPC 契约已证明固定 pageSize=20；未找到明确断言界面不展示“每页最多50项”冲突文案的自动化测试标题。' },
+    '滚动时头部整体固定': { evidence: [['tests/interface/layout.test.ts', '单一页面滚动根下 topbar 与 command 按真实导航高度协同固定并保留滚动补偿']] },
+    '固定头部不遮挡内容': { evidence: [['tests/interface/layout.test.ts', '单一页面滚动根下 topbar 与 command 按真实导航高度协同固定并保留滚动补偿']] },
+    '不拦截键盘焦点': { evidence: [['tests/interface/layout.test.ts', '泳道和全部可聚焦目标有清晰 focus-visible，reduced motion 不移除静态反馈']], status: 'pending', note: '存在静态焦点样式证据；未找到滚动状态下固定头部不拦截表单焦点的交互测试标题。' },
     '进入工作台先处理项目提醒': {
       evidence: [
         ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
@@ -1782,12 +1886,12 @@ export const scenarioMap = {
     '单页分组呈现与对应字段': {
       evidence: [
         ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
-        ['tests/renderer/app.test.tsx', '新建搬迁项目改为单页四分组，范围只填写仪器数量'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签'],
       ],
     },
     '搬迁范围分组字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建搬迁项目改为单页四分组，范围只填写仪器数量'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签'],
       ],
     },
     '执行准备分组字段': {

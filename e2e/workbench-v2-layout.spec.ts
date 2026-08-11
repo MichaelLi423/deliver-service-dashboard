@@ -40,6 +40,9 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: 
     const command = document.querySelector<HTMLElement>('.command');
     const lanes = document.querySelector<HTMLElement>('.reminder-lane-scroll');
     return {
+      scrollingElement: document.scrollingElement?.tagName ?? '',
+      htmlOverflowY: getComputedStyle(document.documentElement).overflowY,
+      bodyOverflowY: getComputedStyle(document.body).overflowY,
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       queueOverflow: queue ? getComputedStyle(queue).overflowX : '',
       filtersOverflow: filters ? filters.scrollWidth - filters.clientWidth : 999,
@@ -54,6 +57,9 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: 
       laneCount: lanes?.querySelectorAll('.reminder-lane').length ?? 0,
     };
   });
+  expect(layout.scrollingElement).toBe('HTML');
+  expect(layout.htmlOverflowY).toBe('visible');
+  expect(layout.bodyOverflowY).toBe('visible');
   expect(layout.pageOverflow).toBeLessThanOrEqual(1);
   expect(layout.queueOverflow).toMatch(/auto|scroll/);
   expect(layout.filtersOverflow).toBeLessThanOrEqual(1);
@@ -61,9 +67,18 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: 
   expect(layout.topbarTop).toBeGreaterThanOrEqual(-1);
   expect(layout.commandPosition).toBe('sticky');
   expect(layout.commandTop).toBeGreaterThanOrEqual(layout.topbarHeight - 1);
+  expect(layout.commandTop).toBeLessThanOrEqual(layout.topbarHeight + 1);
   expect(layout.laneOverflow).toMatch(/auto|scroll/);
   expect(layout.laneCount).toBe(7);
   if (width === 1024) expect(layout.laneScrollWidth).toBeGreaterThan(layout.laneClientWidth);
+  if (layout.laneScrollWidth > layout.laneClientWidth) {
+    const laneScroll = await page.locator('.reminder-lane-scroll').evaluate((node) => {
+      node.scrollLeft = node.scrollWidth;
+      return { laneLeft: node.scrollLeft, pageLeft: document.scrollingElement?.scrollLeft ?? -1 };
+    });
+    expect(laneScroll.laneLeft).toBeGreaterThan(0);
+    expect(laneScroll.pageLeft).toBe(0);
+  }
   const firstLane = page.locator('.reminder-lane').first();
   await firstLane.focus();
   await expect(firstLane).toBeFocused();
@@ -71,14 +86,29 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: 
   await expect(page.locator('.reminder-card').first()).toBeFocused();
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   const sticky = await page.evaluate(() => ({
+    windowScrollY: window.scrollY,
+    rootScrollTop: document.scrollingElement?.scrollTop ?? -1,
+    bodyScrollTop: document.body.scrollTop,
     topbar: document.querySelector<HTMLElement>('.topbar')?.getBoundingClientRect().top ?? 999,
     command: document.querySelector<HTMLElement>('.command')?.getBoundingClientRect().top ?? 999,
     topbarHeight: document.querySelector<HTMLElement>('.topbar')?.getBoundingClientRect().height ?? 0,
   }));
+  expect(sticky.windowScrollY).toBeGreaterThan(0);
+  expect(sticky.rootScrollTop).toBe(sticky.windowScrollY);
+  expect(sticky.bodyScrollTop).toBe(0);
   expect(sticky.topbar).toBeGreaterThanOrEqual(-1);
   expect(sticky.command).toBeGreaterThanOrEqual(sticky.topbarHeight - 1);
+  expect(sticky.command).toBeLessThanOrEqual(sticky.topbarHeight + 1);
+  await page.getByRole('button', { name: '项目队列' }).click();
+  const queue = page.getByRole('region', { name: /高密项目队列/ });
+  await expect(queue).toBeFocused();
+  const focusSeam = await queue.evaluate((node) => ({
+    targetTop: node.getBoundingClientRect().top,
+    commandBottom: document.querySelector<HTMLElement>('.command')?.getBoundingClientRect().bottom ?? 999,
+  }));
+  expect(focusSeam.targetTop).toBeGreaterThanOrEqual(focusSeam.commandBottom - 1);
   await expect(page.getByRole('heading', { name: /高密项目队列/ })).toBeVisible();
-  await expect(page.getByText(/第 0–0 项 \/ 共 0 项/)).toBeVisible();
+  await expect(page.getByText(/第 1–7 项 \/ 共 7 项/)).toBeVisible();
   await page.screenshot({ path: screenshot, fullPage: true });
 }
 

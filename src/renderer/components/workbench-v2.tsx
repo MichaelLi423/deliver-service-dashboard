@@ -85,6 +85,14 @@ const STAGES: AdjustableProjectStatus[] = [
   "pending_invoice",
   "completed",
 ];
+
+function focusWorkbenchSection(id: "reminders" | "project-queue"): void {
+  const target = document.getElementById(id);
+  if (!target) return;
+  target.focus({ preventScroll: true });
+  target.scrollIntoView?.({ block: "start" });
+}
+
 const TABS = [
   "项目总览",
   "搬迁仪器",
@@ -768,11 +776,11 @@ export function WorkbenchV2({
           <span>搬迁服务工作台</span>
         </a>
         <nav aria-label="主导航">
-          <button onClick={() => document.getElementById("reminders")?.focus()}>
+          <button onClick={() => focusWorkbenchSection("reminders")}>
             项目提醒
           </button>
           <button
-            onClick={() => document.getElementById("project-queue")?.focus()}
+            onClick={() => focusWorkbenchSection("project-queue")}
           >
             项目队列
           </button>
