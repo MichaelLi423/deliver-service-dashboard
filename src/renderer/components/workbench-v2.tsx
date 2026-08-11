@@ -916,6 +916,11 @@ export function WorkbenchV2({
           aria-label="关键运营指标"
           aria-busy={loading.overview}
         >
+          {loading.overview && !overview && (
+            <div className="metrics-loading" role="status">
+              正在读取工作台概况…
+            </div>
+          )}
           {metrics.map(([label, value, meta]) => (
             <div className="metric" key={label}>
               <span>{label}</span>
@@ -996,60 +1001,6 @@ export function WorkbenchV2({
           </div>
           <ReminderLanes refreshToken={reminderRefresh} onSelect={selectReminder} />
         </section>
-        <section className="project-workspace" aria-label="项目工作区">
-          <ProjectContext
-            project={selected}
-            detail={detail}
-            loading={loading.detail}
-            onQuick={() => setLayer({ kind: "quick" })}
-            onReminder={() => setLayer({ kind: "reminder" })}
-            onCancel={() => setLayer({ kind: "cancel" })}
-            onStatus={(status) => void mutate(
-              { op: "adjust_status", projectId: selectedId, status },
-              "项目主状态已通过生命周期校验并更新",
-            )}
-          />
-          <ProjectDetails
-            project={selected}
-            detail={detail}
-            tab={tab}
-            section={sectionPage}
-            loading={loading.detail || loading.section}
-            error={detailError}
-            pageIndex={currentSectionIndex}
-            onTab={setTab}
-            onRetry={() => {
-              if (!selectedId) return;
-              const kind = TAB_SECTION[tab];
-              if (kind) void loadSection(selectedId, kind, sectionCursors.at(-1) ?? null);
-              else void loadDetail(selectedId);
-            }}
-            onAction={(action) => setLayer({ kind: "action", action })}
-            onEditProject={() => setLayer({ kind: "edit-project" })}
-            onCorrectEntry={() => setLayer({ kind: "correct-entry" })}
-            onCompleteEntry={() => setLayer({ kind: "action", action: "core" })}
-            onNext={() => {
-              if (!sectionPage?.nextCursor || !selectedId) return;
-              const next = [...sectionCursors, sectionPage.nextCursor];
-              setSectionCursors(next);
-              void loadSection(selectedId, TAB_SECTION[tab]!, sectionPage.nextCursor);
-            }}
-            onPrevious={() => {
-              if (sectionCursors.length <= 1 || !selectedId) return;
-              const next = sectionCursors.slice(0, -1);
-              setSectionCursors(next);
-              void loadSection(selectedId, TAB_SECTION[tab]!, next.at(-1) ?? null);
-            }}
-            onInvoiceEdit={(invoice) => setLayer({ kind: "invoice-edit", invoice })}
-            onInvoiceRevoke={(invoice) => setLayer({ kind: "invoice-revoke", invoice })}
-            onBatchEdit={(batch) => setLayer({ kind: "batch-edit", batch })}
-            onDamageUpdate={(damage) => setLayer({ kind: "damage-update", damage })}
-            onDelete={(kind, id) => {
-              if (!window.confirm("删除后无法恢复，确认删除这条记录？")) return;
-              void deleteRecord({ kind, id } as DeleteInput, "记录已删除").catch((cause) => setDetailError(messageOf(cause)));
-            }}
-          />
-        </section>
         <section
           id="project-queue"
           tabIndex={-1}
@@ -1058,8 +1009,8 @@ export function WorkbenchV2({
         >
           <div className="panel-head queue-heading">
             <div>
-              <h2 id="queue-title">高密项目队列 {projectPage?.total ?? 0}</h2>
-              <p>固定每页 20 个项目，筛选后从第一页开始</p>
+              <h2 id="queue-title">项目队列 {projectPage?.total ?? 0}</h2>
+              <p>选择项目后，下方工作区会显示对应资料与记录</p>
             </div>
             <span className="queue-range" aria-live="polite">
               {notice}
@@ -1256,6 +1207,60 @@ export function WorkbenchV2({
             </button>
           </div>
         </section>
+        <section className="project-workspace" aria-label="项目工作区">
+          <ProjectContext
+            project={selected}
+            detail={detail}
+            loading={loading.detail}
+            onQuick={() => setLayer({ kind: "quick" })}
+            onReminder={() => setLayer({ kind: "reminder" })}
+            onCancel={() => setLayer({ kind: "cancel" })}
+            onStatus={(status) => void mutate(
+              { op: "adjust_status", projectId: selectedId, status },
+              "项目主状态已通过生命周期校验并更新",
+            )}
+          />
+          <ProjectDetails
+            project={selected}
+            detail={detail}
+            tab={tab}
+            section={sectionPage}
+            loading={loading.detail || loading.section}
+            error={detailError}
+            pageIndex={currentSectionIndex}
+            onTab={setTab}
+            onRetry={() => {
+              if (!selectedId) return;
+              const kind = TAB_SECTION[tab];
+              if (kind) void loadSection(selectedId, kind, sectionCursors.at(-1) ?? null);
+              else void loadDetail(selectedId);
+            }}
+            onAction={(action) => setLayer({ kind: "action", action })}
+            onEditProject={() => setLayer({ kind: "edit-project" })}
+            onCorrectEntry={() => setLayer({ kind: "correct-entry" })}
+            onCompleteEntry={() => setLayer({ kind: "action", action: "core" })}
+            onNext={() => {
+              if (!sectionPage?.nextCursor || !selectedId) return;
+              const next = [...sectionCursors, sectionPage.nextCursor];
+              setSectionCursors(next);
+              void loadSection(selectedId, TAB_SECTION[tab]!, sectionPage.nextCursor);
+            }}
+            onPrevious={() => {
+              if (sectionCursors.length <= 1 || !selectedId) return;
+              const next = sectionCursors.slice(0, -1);
+              setSectionCursors(next);
+              void loadSection(selectedId, TAB_SECTION[tab]!, next.at(-1) ?? null);
+            }}
+            onInvoiceEdit={(invoice) => setLayer({ kind: "invoice-edit", invoice })}
+            onInvoiceRevoke={(invoice) => setLayer({ kind: "invoice-revoke", invoice })}
+            onBatchEdit={(batch) => setLayer({ kind: "batch-edit", batch })}
+            onDamageUpdate={(damage) => setLayer({ kind: "damage-update", damage })}
+            onDelete={(kind, id) => {
+              if (!window.confirm("删除后无法恢复，确认删除这条记录？")) return;
+              void deleteRecord({ kind, id } as DeleteInput, "记录已删除").catch((cause) => setDetailError(messageOf(cause)));
+            }}
+          />
+        </section>
       </main>
       {toast && <div className="toast success" role="status">{toast}</div>}
       {layer && (
@@ -1263,6 +1268,8 @@ export function WorkbenchV2({
           title={layerTitle(layer)}
           description={layerDescription(layer, selected)}
           side={layer.kind === "independent" || layer.kind === "report" || layer.kind === "history" || layer.kind === "reminder-all" || layer.kind === "tags"}
+          protectDirty={layerRequiresDirtyProtection(layer)}
+          resetDirtyKey={layer.kind === "tags" ? tagCatalog : undefined}
           onClose={() => setLayer(null)}
         >
           {layer.kind === "new" ? (
@@ -1570,6 +1577,13 @@ function ProjectContext({
   onCancel: () => void;
   onStatus: (status: AdjustableProjectStatus) => void;
 }): JSX.Element {
+  const [draftStatus, setDraftStatus] = useState<AdjustableProjectStatus>(
+    project?.status === "cancelled" ? "completed" : project?.status ?? "pending_entry",
+  );
+  useEffect(() => {
+    if (!project || project.status === "cancelled") return;
+    setDraftStatus(project.status);
+  }, [project?.id, project?.status]);
   if (!project)
     return (
       <aside className="panel context">
@@ -1618,29 +1632,30 @@ function ProjectContext({
           )}
         </div>
         <GroupedTags groups={detail?.groupedTags ?? project.groupedTags} />
-        <div className="status-adjust">
-          <label htmlFor="context-status-v2">人工调整主状态</label>
-          <select id="context-status-v2" defaultValue={project.status}>
-            {STAGES.map((status) => (
-              <option value={status} key={status}>
-                {STATUS_LABEL[status]}
-              </option>
-            ))}
-          </select>
-          <button
-            className="button small"
-            onClick={(event) =>
-              onStatus(
-                (
-                  event.currentTarget
-                    .previousElementSibling as HTMLSelectElement
-                ).value as AdjustableProjectStatus,
-              )
-            }
-          >
-            提交校验
-          </button>
-        </div>
+        {project.status !== "cancelled" && (
+          <div className="status-adjust">
+            <label htmlFor="context-status-v2">人工调整主状态</label>
+            <select
+              id="context-status-v2"
+              value={draftStatus}
+              onChange={(event) =>
+                setDraftStatus(event.target.value as AdjustableProjectStatus)
+              }
+            >
+              {STAGES.map((status) => (
+                <option value={status} key={status}>
+                  {STATUS_LABEL[status]}
+                </option>
+              ))}
+            </select>
+            <button
+              className="button small"
+              onClick={() => onStatus(draftStatus)}
+            >
+              提交校验
+            </button>
+          </div>
+        )}
         {project.status !== "cancelled" && (
           <div className="cancel-entry">
             <button className="button danger small" onClick={onCancel}>
@@ -4053,7 +4068,14 @@ function HistoryBrowserV2({ onDelete, onRevision }: {
     catch (cause) { setError(messageOf(cause)); return false; }
   }
   return <div className="history-browser">
-    <div className="history-kind-list" role="tablist" aria-label="记录类型">{HISTORY_KINDS.map(([value,label]) => <button key={value} role="tab" aria-selected={kind === value} onClick={() => setKind(value)}>{label}</button>)}</div>
+    <div className="history-kind-list" role="tablist" aria-label="记录类型">{HISTORY_KINDS.map(([value,label], index) => <button key={value} role="tab" aria-selected={kind === value} tabIndex={kind === value ? 0 : -1} onClick={() => setKind(value)} onKeyDown={(event) => {
+      if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? HISTORY_KINDS.length - 1 : event.key === "ArrowDown" || event.key === "ArrowRight" ? (index + 1) % HISTORY_KINDS.length : (index - 1 + HISTORY_KINDS.length) % HISTORY_KINDS.length;
+      setKind(HISTORY_KINDS[next]![0]);
+      const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+      window.setTimeout(() => tabs?.[next]?.focus(), 0);
+    }}>{label}</button>)}</div>
     <section className="history-content">
       <form className="history-filters" onSubmit={(event) => { event.preventDefault(); setStack([null]); void load(null); }}>
         <div className="history-scope"><strong>{independent ? "独立登记" : "全部项目"}</strong><span>{independent ? "按登记业务日期汇总" : "跨项目汇总并保留项目上下文"}</span></div>
@@ -4276,29 +4298,73 @@ function reportCellText(key: string, value: string | number | boolean | null): s
   return text;
 }
 
+function layerRequiresDirtyProtection(layer: LayerState): boolean {
+  return [
+    "new",
+    "edit-project",
+    "correct-entry",
+    "action",
+    "reminder",
+    "cancel",
+    "independent",
+    "invoice-edit",
+    "invoice-revoke",
+    "batch-edit",
+    "damage-update",
+    "tags",
+  ].includes(layer.kind);
+}
+
 function Layer({
   title,
   description,
   side = false,
+  protectDirty = false,
+  resetDirtyKey,
   onClose,
   children,
 }: {
   title: string;
   description: string;
   side?: boolean;
+  protectDirty?: boolean;
+  resetDirtyKey?: unknown;
   onClose: () => void;
   children: ReactNode;
 }): JSX.Element {
   const panel = useRef<HTMLElement>(null);
+  const discardPanel = useRef<HTMLElement>(null);
+  const discardTrigger = useRef<HTMLElement | null>(null);
+  const dirty = useRef(false);
+  const discardOpenRef = useRef(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(
     document.activeElement as HTMLElement,
   );
   useEffect(() => {
+    dirty.current = false;
+  }, [resetDirtyKey]);
+  function closeDiscard(): void {
+    discardOpenRef.current = false;
+    setDiscardOpen(false);
+    window.setTimeout(() => discardTrigger.current?.focus(), 0);
+  }
+  function requestClose(trigger?: HTMLElement | null): void {
+    if (!protectDirty || !dirty.current) {
+      onClose();
+      return;
+    }
+    discardTrigger.current = trigger ?? (document.activeElement as HTMLElement | null);
+    discardOpenRef.current = true;
+    setDiscardOpen(true);
+    window.setTimeout(() => discardPanel.current?.querySelector<HTMLElement>("button")?.focus(), 0);
+  }
+  useEffect(() => {
     const root = panel.current;
     if (!root) return;
-    const focusables = () =>
+    const focusables = (scope: HTMLElement = root) =>
       Array.from(
-        root.querySelectorAll<HTMLElement>(
+        scope.querySelectorAll<HTMLElement>(
           'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])',
         ),
       );
@@ -4311,11 +4377,14 @@ function Layer({
     function key(event: globalThis.KeyboardEvent): void {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        if (discardOpenRef.current) closeDiscard();
+        else requestClose(document.activeElement as HTMLElement | null);
         return;
       }
       if (event.key === "Tab") {
-        const items = focusables();
+        const scope = discardOpenRef.current ? discardPanel.current : root;
+        if (!scope) return;
+        const items = focusables(scope);
         if (!items.length) return;
         const first = items[0],
           last = items.at(-1)!;
@@ -4333,12 +4402,13 @@ function Layer({
       document.removeEventListener("keydown", key);
       opener.current?.focus();
     };
-  }, [onClose]);
+  }, [onClose, protectDirty]);
   return (
     <div
       className={`overlay ${side ? "side" : ""}`}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget)
+          requestClose(event.currentTarget as HTMLElement);
       }}
     >
       <section
@@ -4347,18 +4417,58 @@ function Layer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="layer-title-v2"
+        aria-hidden={discardOpen || undefined}
+        onInputCapture={() => {
+          if (protectDirty) dirty.current = true;
+        }}
+        onChangeCapture={() => {
+          if (protectDirty) dirty.current = true;
+        }}
       >
         <header className="layer-head">
           <div>
             <h2 id="layer-title-v2">{title}</h2>
             <p>{description}</p>
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="关闭">
+          <button
+            className="icon-button"
+            onClick={(event) => requestClose(event.currentTarget)}
+            aria-label="关闭"
+          >
             ×
           </button>
         </header>
         <div className="layer-body">{children}</div>
       </section>
+      {discardOpen && (
+        <div
+          className="discard-guard"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeDiscard();
+          }}
+        >
+          <section
+            ref={discardPanel}
+            className="discard-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="discard-title"
+            aria-describedby="discard-description"
+          >
+            <p className="overline">尚未保存</p>
+            <h2 id="discard-title">放弃本次修改？</h2>
+            <p id="discard-description">关闭后，当前填写内容不会保留。</p>
+            <div className="discard-actions">
+              <button className="button primary" onClick={closeDiscard}>
+                继续编辑
+              </button>
+              <button className="button danger" onClick={onClose}>
+                放弃修改
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

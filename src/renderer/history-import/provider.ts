@@ -182,7 +182,7 @@ export interface HistoryImportWizardProvider {
 }
 
 export class HistoryImportSessionExpiredError extends Error {
-  constructor(message = '登录状态已失效，请重新登录') {
+  constructor(message = '本地访问会话已失效，请返回工作台后重新打开历史数据导入') {
     super(message);
     this.name = 'HistoryImportSessionExpiredError';
   }

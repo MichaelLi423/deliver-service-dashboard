@@ -20,7 +20,7 @@ describe('history import 1024/1440 renderer layout and accessibility contracts',
   it('全窗口和内部网格各自约束横向滚动，不使用会制造页面横溢的 100vw', () => {
     expect(wizardCss).toContain('.hiw-workspace,.hiw-home,.hiw-interrupted-result{width:100%;max-width:100%;overflow-x:hidden}');
     expect(wizardCss).toMatch(/grid-template-columns:260px minmax\(580px,1fr\) 320px/);
-    expect(wizardCss).toMatch(/@media\(max-width:1100px\).*grid-template-columns:220px minmax\(560px,1fr\)/s);
+    expect(wizardCss).toMatch(/@media\(max-width:1100px\).*grid-template-columns:220px minmax\(0,1fr\)/s);
     expect(gridCss).toMatch(/\.history-grid-viewport\{[^}]*overflow:auto/);
     expect(`${wizardCss}${gridCss}`).not.toContain('100vw');
   });
@@ -30,9 +30,9 @@ describe('history import 1024/1440 renderer layout and accessibility contracts',
     expect(wizardCss).toContain('.hiw-step-state,.hiw-sheet-state,.hiw-match,.hiw-issue-kind{font-size:11px}');
     expect(contrast('#245f56', '#ffffff')).toBeGreaterThanOrEqual(4.5);
     expect(contrast('#596964', '#ffffff')).toBeGreaterThanOrEqual(4.5);
-    expect(contrast('#92362f', '#f8e6e3')).toBeGreaterThanOrEqual(4.5);
-    expect(contrast('#80520b', '#f9edcf')).toBeGreaterThanOrEqual(4.5);
-    expect(contrast('#315f80', '#e4edf4')).toBeGreaterThanOrEqual(4.5);
+    expect(contrast('#9a4039', '#f8e5e2')).toBeGreaterThanOrEqual(4.5);
+    expect(contrast('#8a5b14', '#faedcf')).toBeGreaterThanOrEqual(4.5);
+    expect(contrast('#345f80', '#e4edf4')).toBeGreaterThanOrEqual(4.5);
   });
 
   it('错误、冲突、警告和提交恢复状态始终带文字，不以颜色作为唯一反馈', () => {
@@ -41,5 +41,15 @@ describe('history import 1024/1440 renderer layout and accessibility contracts',
     expect(wizardSource).toContain('整批导入已完整成功');
     expect(wizardSource).toContain('aria-label="键盘操作说明"');
     expect(wizardSource).toContain('role="status"');
+    expect(wizardSource).toContain('本地访问会话已失效');
+    expect(wizardSource).not.toContain('重新登录');
+  });
+
+  it('导入类别标签支持方向键并与主工作台共用系统字体和圆角 token', () => {
+    expect(wizardSource).toContain("['ArrowLeft', 'ArrowRight', 'Home', 'End']");
+    expect(wizardSource).toContain('tabIndex={category === id ? 0 : -1}');
+    expect(wizardCss).toContain('"Microsoft YaHei UI","PingFang SC"');
+    expect(wizardCss).toContain('--hiw-control-radius:6px');
+    expect(gridCss).toContain('--hig-radius:6px');
   });
 });

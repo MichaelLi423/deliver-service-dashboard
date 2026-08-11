@@ -166,7 +166,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('100k total 只渲染当前固定 20 项', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    expect(await screen.findByRole('heading', { name: '高密项目队列 100000' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '项目队列 100000' })).toBeInTheDocument();
     expect(screen.getAllByRole('row')).toHaveLength(21);
     expect(screen.getByText('固定每页20 · 第 1–20 项 / 共 100000 项')).toBeInTheDocument();
     expect(screen.queryByText(/每页最多50项/)).not.toBeInTheDocument();
@@ -175,7 +175,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('最新布局：顶部主导航直接显示标签管理并打开全局标签库', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     const navigation = screen.getByRole('navigation', { name: '主导航' });
     const tagManagement = within(navigation).getByRole('button', { name: '标签管理' });
     expect(tagManagement).toBeVisible();
@@ -192,23 +192,23 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('新建项目按组键盘可达地同组与跨组多选，并提交全局自定义 tagIds', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
+    await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' }); fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '标签客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
     for (const name of ['搬迁', 'PM', '重点跟进']) { const checkbox = within(dialog).getByRole('checkbox', { name }); checkbox.focus(); expect(checkbox).toHaveFocus(); fireEvent.click(checkbox); }
     fireEvent.click(within(dialog).getByRole('button', { name: '保存为待进单' }));
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'create_project', payload: expect.objectContaining({ tagIds: ['tag-move', 'tag-pm', 'tag-custom'] }) })));
   });
 
-  it('最新布局：提醒后是单一项目工作区，内部上下文先于详情，再接高密项目队列并保持联动', async () => {
+  it('最新布局：提醒后先选择项目，再在下方工作区查看上下文与详情', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    const queue = await screen.findByRole('region', { name: /高密项目队列/ });
+    const queue = await screen.findByRole('region', { name: /项目队列/ });
     const reminders = screen.getByRole('region', { name: /项目提醒快速处理/ });
     const workspace = screen.getByRole('region', { name: '项目工作区' });
     const context = within(workspace).getByRole('complementary', { name: '当前上下文' });
     const detailTabs = within(workspace).getByRole('tablist', { name: '项目详情' });
     const detail = within(workspace).getByRole('region', { name: '客户 1' });
-    expect(reminders.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(workspace.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(reminders.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(queue.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(context.compareDocumentPosition(detailTabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     for (const region of [queue, detail, context]) { expect(within(region).getByLabelText('项目分类标签')).toHaveTextContent('项目类型'); expect(within(region).getByLabelText('项目分类标签')).toHaveTextContent('ICPMS'); }
     fireEvent.click(within(detail).getByRole('button', { name: '编辑项目资料' })); const dialog = screen.getByRole('dialog', { name: '编辑项目资料' }); fireEvent.click(within(dialog).getByRole('checkbox', { name: '搬迁' })); fireEvent.click(within(dialog).getByRole('checkbox', { name: '重点跟进' })); fireEvent.click(within(dialog).getByRole('button', { name: '保存项目资料' }));
@@ -218,6 +218,16 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(workspace).toHaveTextContent('客户 1'));
     fireEvent.click(screen.getByRole('button', { name: /执行中.*20000.*平均 5 天/ }));
     await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'executing' })));
+  });
+
+  it('切换项目后人工状态控件同步为当前项目状态', async () => {
+    render(<App />);
+    const queue = await screen.findByRole('region', { name: /项目队列/ });
+    const status = await screen.findByLabelText('人工调整主状态');
+    expect(status).toHaveValue('executing');
+    fireEvent.change(status, { target: { value: 'pending_invoice' } });
+    fireEvent.click(within(queue).getByRole('row', { name: /^客户 2 / }));
+    await waitFor(() => expect(screen.getByLabelText('人工调整主状态')).toHaveValue('pending_entry'));
   });
 
   it('编辑项目无任何变化时不发送空更新并给出正常反馈', async () => {
@@ -295,7 +305,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: label }));
     const dialog = screen.getByRole('dialog', { name: label });
     fireEvent.click(await within(dialog).findByRole('button', { name: '删除' }));
@@ -327,7 +337,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' }));
     const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' });
     fireEvent.click(within(dialog).getByRole('tab', { name: label }));
@@ -361,13 +371,13 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('详情 tab 按需加载，项目总览不读取 section', async () => {
-    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledWith('p-1')); expect(api.v2SectionPage).not.toHaveBeenCalled();
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledWith('p-1')); expect(api.v2SectionPage).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('tab', { name: '搬迁仪器' })); await waitFor(() => expect(api.v2SectionPage).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p-1', kind: 'instruments', limit: 50 })));
   });
 
   it('开单记录 tab 读取 orders，并只展示四个服务单字段', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('tab', { name: '开单记录' }));
     await waitFor(() => expect(api.v2SectionPage).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p-1', kind: 'orders' })));
     const table = screen.getByRole('columnheader', { name: '开单日期' }).closest('table')!;
@@ -377,7 +387,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('费用与掉票在列表前展示金额事实，并显示掉票最后修改时间', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('tab', { name: '费用与掉票' }));
     const facts = await screen.findByLabelText('金额摘要');
     expect(facts).toHaveTextContent('合同金额USD 110,000.00');
@@ -389,14 +399,14 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('项目总览展示六类关联登记数量，并说明独立模块按需加载', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     const facts = await screen.findByLabelText('关联登记事实');
     for (const label of ['物流费用登记1 条', '搬迁仪器1 台', '上门活动1 条', '开单记录1 条', '损坏/维修事项0 条', '掉票记录1 条']) expect(facts).toHaveTextContent(label);
     expect(screen.getByText(/序列号地址更新与二维码申请在独立模块按需加载/)).toBeInTheDocument();
   });
 
   it('仪器列表展示厂商和服务级别，便于核对导入结果', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('tab', { name: '搬迁仪器' }));
     const table = (await screen.findByRole('columnheader', { name: '仪器产商' })).closest('table')!;
     expect(within(table).getByRole('columnheader', { name: '服务级别' })).toBeInTheDocument();
@@ -415,7 +425,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('mutation 仅走 v2Mutate，并按 tags 局部刷新', async () => {
-    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); const beforeOverview = vi.mocked(api.v2Overview!).mock.calls.length; const beforeProjects = vi.mocked(api.v2ProjectPage!).mock.calls.length;
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); const beforeOverview = vi.mocked(api.v2Overview!).mock.calls.length; const beforeProjects = vi.mocked(api.v2ProjectPage!).mock.calls.length;
     fireEvent.click(screen.getByRole('button', { name: '维护提醒' })); fireEvent.change(screen.getByLabelText('备注内容'), { target: { value: '局部刷新' } }); fireEvent.click(screen.getByRole('button', { name: '保存当前提醒' }));
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'set_reminder', projectId: 'p-1', reminderNote: '局部刷新' }))); await waitFor(() => expect(vi.mocked(api.v2Overview!).mock.calls.length).toBeGreaterThan(beforeOverview)); expect(vi.mocked(api.v2ProjectPage!).mock.calls.length).toBeGreaterThan(beforeProjects);
   });
@@ -429,16 +439,16 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('动作选项只加载当前项目有界 section 页', async () => {
-    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getAllByRole('button', { name: '快速记录' })[0]); fireEvent.click(within(screen.getByRole('dialog')).getByText('损坏/维修事项', { selector: 'strong' }).closest('button')!);
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getAllByRole('button', { name: '快速记录' })[0]); fireEvent.click(within(screen.getByRole('dialog')).getByText('损坏/维修事项', { selector: 'strong' }).closest('button')!);
     await waitFor(() => expect(api.v2SectionPage).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p-1', kind: 'instruments', limit: 25 }))); expect(within(screen.getByRole('dialog')).getByLabelText(/搬迁仪器/).querySelectorAll('option').length).toBeLessThanOrEqual(26);
   });
 
   it('项目队列支持 roving focus 与方向/Home/End/Enter/Space/PageDown', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); const rows = screen.getAllByRole('row').slice(1); rows[0]!.focus(); fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' }); expect(rows[1]).toHaveFocus(); fireEvent.keyDown(rows[1]!, { key: 'Enter' }); expect(rows[1]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[1]!, { key: 'End' }); expect(rows.at(-1)).toHaveFocus(); fireEvent.keyDown(rows.at(-1)!, { key: 'Home' }); expect(rows[0]).toHaveFocus(); fireEvent.keyDown(rows[0]!, { key: ' ' }); expect(rows[0]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[0]!, { key: 'PageDown' }); expect(await screen.findByText('客户 21')).toBeInTheDocument();
+    render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); const rows = screen.getAllByRole('row').slice(1); rows[0]!.focus(); fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' }); expect(rows[1]).toHaveFocus(); fireEvent.keyDown(rows[1]!, { key: 'Enter' }); expect(rows[1]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[1]!, { key: 'End' }); expect(rows.at(-1)).toHaveFocus(); fireEvent.keyDown(rows.at(-1)!, { key: 'Home' }); expect(rows[0]).toHaveFocus(); fireEvent.keyDown(rows[0]!, { key: ' ' }); expect(rows[0]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[0]!, { key: 'PageDown' }); expect(await screen.findByText('客户 21')).toBeInTheDocument();
   });
 
   it('历史导入返回后刷新 overview 与项目首页并恢复入口焦点', async () => {
-    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByText('数据管理')); const entry = screen.getByRole('button', { name: '历史数据导入' }); fireEvent.click(entry); expect(await screen.findByRole('heading', { name: '把旧数据整理成一份可核对的导入计划' })).toBeInTheDocument(); const before = vi.mocked(api.v2Overview!).mock.calls.length; fireEvent.click(screen.getByRole('button', { name: /返回数据管理/ })); await waitFor(() => expect(vi.mocked(api.v2Overview!).mock.calls.length).toBeGreaterThan(before)); await waitFor(() => expect(screen.getByRole('button', { name: '历史数据导入' })).toHaveFocus()); expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null }));
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByText('数据管理')); const entry = screen.getByRole('button', { name: '历史数据导入' }); fireEvent.click(entry); expect(await screen.findByRole('heading', { name: '把旧数据整理成一份可核对的导入计划' })).toBeInTheDocument(); const before = vi.mocked(api.v2Overview!).mock.calls.length; fireEvent.click(screen.getByRole('button', { name: /返回数据管理/ })); await waitFor(() => expect(vi.mocked(api.v2Overview!).mock.calls.length).toBeGreaterThan(before)); await waitFor(() => expect(screen.getByRole('button', { name: '历史数据导入' })).toHaveFocus()); expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null }));
   });
 
   it('任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色', async () => {
@@ -473,11 +483,11 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(within(context).getByLabelText('金额闭环')).toHaveTextContent('待掉票USD 60,000.00');
     fireEvent.click(within(screen.getByRole('region', { name: /项目提醒快速处理/ })).getByRole('button', { name: /客户 1/ }));
     await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ reminder: 'any', query: 'ECC-000001' })));
-    expect(screen.getByRole('region', { name: /高密项目队列/ })).toHaveFocus();
+    expect(screen.getByRole('region', { name: /项目队列/ })).toHaveFocus();
   });
 
-  it('新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+  it('新建项目未修改时可直接关闭，修改后 Escape 先确认是否放弃', async () => {
+    render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     const customer = within(dialog).getByRole('textbox', { name: /客户名称.*必填/ });
@@ -490,12 +500,19 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(entryAt).toHaveAccessibleDescription(/仅正式进单时可填写.*切换为正式进单后启用/);
     expect(within(dialog).queryByRole('spinbutton', { name: /合同 USD 含税金额/ })).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/最终可确认金额/)).not.toBeInTheDocument();
+    fireEvent.change(customer, { target: { value: '尚未保存的客户' } });
     fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    const guard = screen.getByRole('alertdialog', { name: '放弃本次修改？' });
+    await waitFor(() => expect(within(guard).getByRole('button', { name: '继续编辑' })).toHaveFocus());
+    fireEvent.click(within(guard).getByRole('button', { name: '继续编辑' }));
+    await waitFor(() => expect(customer).toHaveFocus());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '放弃修改' }));
+    expect(screen.queryByRole('dialog', { name: '新建搬迁项目' })).not.toBeInTheDocument();
   });
 
   it('新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     for (const name of ['项目与进单', '搬迁范围（均可后补）', '执行准备', '保存意图']) expect(within(dialog).getByRole('group', { name })).toBeInTheDocument();
@@ -513,7 +530,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('保存意图分组实时展示摘要，并在正式进单合同金额为零时提示', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     const summary = within(dialog).getByLabelText('保存摘要');
@@ -534,7 +551,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('进单日期常显但仅正式进单可编辑，切换意图保留输入并进入正式进单 payload', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
+    await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '意图切换客户' } });
     fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
@@ -558,7 +575,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('正式进单可保留空进单日期，使后端按当天日期默认处理', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
+    await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '默认日期客户' } });
     fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
@@ -570,7 +587,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('新建项目由明确意图提交正式进单且不夹带服务单等已移除字段', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
 
@@ -606,7 +623,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('待进单通过公共建档 payload 显式提交暂定范围未填写三态且不登记仪器', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
+    await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '待进单范围客户' } });
     fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'South' } });
@@ -622,7 +639,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('待进单保留可空进单日期，不渲染其余正式字段，未进单先执行只记录是否批复 boolean', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
+    await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '待进单客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
     expect(within(dialog).queryByRole('textbox', { name: /^ECC/ })).not.toBeInTheDocument();
@@ -643,7 +660,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('新建契约拒绝只展示稳定中文，不暴露技术错误码', async () => {
     const api = mockApi({ v2Mutate: vi.fn().mockRejectedValue(new Error('WIZARD_CONTRACT_AMOUNT_ONLY_FORMAL: invalid payload')) });
-    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' }); fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '错误客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } }); fireEvent.click(within(dialog).getByRole('button', { name: '保存为待进单' }));
     const alert = await within(dialog).findByRole('alert'); expect(alert).toHaveTextContent('合同金额仅可在正式进单时提交'); expect(alert).not.toHaveTextContent('WIZARD_');
   });
@@ -778,7 +795,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('队列行、上下文和详情 Tab 都提供绑定当前项目的就近录入入口', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '为客户 2快速记录' }));
     expect(screen.getByRole('dialog', { name: '快速记录' })).toHaveTextContent('八类项目动作');
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -837,7 +854,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
       buildReport: vi.fn().mockResolvedValue({ range: { from: '2026-07', to: '2026-08' }, filters: {}, generatedAt: '', sections: [{ key: 'account', label: 'Ship-to 申请', rows: [] }] }),
       exportReport: vi.fn().mockImplementation((format: string) => format === 'png' ? Promise.reject(new Error('磁盘不可写')) : Promise.resolve({ saved: true })),
     });
-    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '运营报表' })); const dialog = screen.getByRole('dialog', { name: '运营报表' });
     fireEvent.change(within(dialog).getByLabelText(/起始月份/), { target: { value: '2026-07' } }); fireEvent.change(within(dialog).getByLabelText(/截止月份/), { target: { value: '2026-08' } }); fireEvent.click(within(dialog).getByRole('button', { name: '实时计算报表' }));
     expect(await within(dialog).findByRole('button', { name: '导出 Excel' })).toBeInTheDocument();
@@ -861,7 +878,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '运营报表' }));
     const dialog = screen.getByRole('dialog', { name: '运营报表' });
     fireEvent.change(within(dialog).getByLabelText(/起始月份/), { target: { value: '2026-07' } });
@@ -899,7 +916,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('报表标签多选将 tagIds 保留到构建、下钻和导出，清空后等价不限制', async () => {
     const api = mockApi({ buildReport: vi.fn().mockResolvedValue({ range: { from: '2026-07', to: '2026-08' }, filters: {}, generatedAt: '', sections: [{ key: 'monthly_invoice', label: '月度掉票', rows: [] }] }) });
-    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '运营报表' }));
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '运营报表' }));
     const dialog = screen.getByRole('dialog', { name: '运营报表' }); fireEvent.change(within(dialog).getByLabelText(/起始月份/), { target: { value: '2026-07' } }); fireEvent.change(within(dialog).getByLabelText(/截止月份/), { target: { value: '2026-08' } }); fireEvent.click(within(dialog).getByRole('checkbox', { name: '搬迁' })); fireEvent.click(within(dialog).getByRole('checkbox', { name: 'ICPMS' })); fireEvent.click(within(dialog).getByRole('button', { name: '实时计算报表' }));
     const selectedFilter = { monthFrom: '2026-07', monthTo: '2026-08', region: null, orderType: null, transportCompany: null, engineer: null, tagIds: ['tag-move', 'tag-icpms'] };
     await waitFor(() => expect(api.buildReport).toHaveBeenCalledWith(selectedFilter));
@@ -910,7 +927,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('独立导航打开序列号地址更新与二维码申请，二维码支持九类多选并实时预览去重计数', async () => {
-    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '序列号地址更新' })); let dialog = screen.getByRole('dialog', { name: '序列号地址更新' });
     expect(within(dialog).getByRole('combobox', { name: '搬迁仪器' })).not.toBeRequired(); expect(within(dialog).getByRole('textbox', { name: /序列号.*必填/ })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: '保存记录' })).not.toBeDisabled();
@@ -939,7 +956,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('二维码申请不选任何类型时阻止提交并就地提示', async () => {
-    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '二维码申请' }));
     const dialog = screen.getByRole('dialog', { name: '二维码申请' });
     const group = within(dialog).getByRole('group', { name: /申请类型/ });
@@ -958,7 +975,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
       { kind: 'qr_request', id: 'qr-2', applicant: '负责人乙', requestedAt: '2026-08-02', types: ['precise_instrument_packing_only', 'oem_equipment', 'temporary_label'], workload: 3, createdAt: '2026-08-02T10:00:00+08:00' },
     ];
     const api = mockApi({ v2IndependentPage: vi.fn().mockResolvedValue({ businessRevision: 1, kind: 'qr_request', rows, total: 2, nextCursor: null, limit: 50 }) });
-    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '二维码申请' }));
     const dialog = screen.getByRole('dialog', { name: '二维码申请' });
     expect(within(dialog).getByRole('heading', { name: '申请记录' })).toBeInTheDocument();
@@ -984,7 +1001,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' }));
     const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' });
     expect(within(dialog).getByText('全部项目')).toBeInTheDocument();
@@ -1004,7 +1021,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const api = mockApi();
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' }));
     const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' });
     for (const label of ['物流费用', '搬迁仪器', '开单记录', '验收记录', 'Account ID 申请', '损坏维修', '序列号地址更新', '二维码申请']) {
@@ -1020,7 +1037,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' }));
     const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' });
     fireEvent.click(await within(dialog).findByRole('button', { name: '删除' }));
@@ -1034,7 +1051,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<App />); await screen.findByRole('heading', { name: /高密项目队列/ });
+    render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' }));
     const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' });
     fireEvent.click(within(dialog).getByRole('tab', { name: '验收记录' }));
@@ -1057,7 +1074,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('清理全部业务数据先展示计数，再要求固定文本并调用两阶段契约', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByText('数据管理'));
     fireEvent.click(screen.getByRole('button', { name: '清理全部业务数据' }));
     const dialog = screen.getByRole('dialog', { name: '清理全部业务数据' });
@@ -1073,7 +1090,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   it('清理确认过期后清空旧计数并提供重新检查路径', async () => {
     const api = mockApi({ cleanConfirm: vi.fn().mockRejectedValue(new Error('CLEAN_TOKEN_EXPIRED: token expired')) });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByText('数据管理')); fireEvent.click(screen.getByRole('button', { name: '清理全部业务数据' }));
+    await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByText('数据管理')); fireEvent.click(screen.getByRole('button', { name: '清理全部业务数据' }));
     const dialog = screen.getByRole('dialog', { name: '清理全部业务数据' }); fireEvent.click(within(dialog).getByRole('button', { name: '先检查将清理的数据' }));
     await within(dialog).findByText('将清理 4 行业务数据'); fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: '清理全部业务数据' } }); fireEvent.click(within(dialog).getByRole('button', { name: '创建安全备份并清理' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('已过期，请重新检查数据');
@@ -1271,7 +1288,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
 
     fireEvent.click(within(screen.getByRole('region', { name: /项目提醒快速处理/ })).getByRole('button', { name: /跨页客户/ }));
 
@@ -1311,7 +1328,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
 
     // 先设置会隐藏新项目的查询筛选。
     fireEvent.change(screen.getByLabelText('查找项目'), { target: { value: '隐藏条件' } });
@@ -1382,7 +1399,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('查看全部进入完整提醒页，默认日期降序，切换升序立即首页重读并稳定翻页', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ });
+    await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '查看全部' }));
     const dialog = screen.getByRole('dialog', { name: '全部项目提醒' });
     await waitFor(() => expect(api.v2ReminderPage).toHaveBeenCalledWith({ sort: 'desc', cursor: null, limit: 50 }));

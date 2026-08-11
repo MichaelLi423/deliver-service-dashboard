@@ -188,8 +188,13 @@ describe('准备数据、业务网格与问题处理', () => {
       fireEvent.click(within(screen.getByRole('navigation', { name: '导入步骤' })).getByRole('button', { name: new RegExp(step) }));
       expect(await screen.findByRole('columnheader', { name: column })).toBeInTheDocument();
     }
-    fireEvent.click(screen.getByRole('tab', { name: /Account ID 申请/ }));
+    const accountTab = screen.getByRole('tab', { name: /Account ID 申请/ });
+    fireEvent.click(accountTab);
     expect(screen.getByText('本次不导入Account ID 申请')).toBeInTheDocument();
+    fireEvent.keyDown(accountTab, { key: 'ArrowLeft' });
+    await waitFor(() => expect(screen.getByRole('tab', { name: /二维码申请/ })).toHaveFocus());
+    fireEvent.keyDown(screen.getByRole('tab', { name: /二维码申请/ }), { key: 'ArrowRight' });
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Account ID 申请/ })).toHaveFocus());
     fireEvent.click(screen.getByRole('button', { name: '有数据' }));
     expect(await screen.findByRole('columnheader', { name: 'Account ID' })).toBeInTheDocument();
     expect(provider.getGridProvider).toHaveBeenCalled();
@@ -281,6 +286,8 @@ describe('最终校验、会话与单一提交', () => {
     fireEvent.click(await screen.findByRole('button', { name: '选择一个或多个文件' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('最后一次成功保存的草稿仍会保留');
     expect(screen.getByRole('alert')).toHaveTextContent('重新完整校验');
+    expect(screen.getByRole('alert')).toHaveTextContent('返回工作台并重新打开历史数据导入');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('重新登录');
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
   });
 });

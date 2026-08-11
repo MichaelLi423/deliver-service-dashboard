@@ -2,24 +2,108 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-describe('workbench-interface 桌面布局静态约束',()=>{
-  const css=readFileSync(join(process.cwd(),'src/renderer/styles.css'),'utf8');
-  const renderer=readFileSync(join(process.cwd(),'src/renderer/components/workbench-v2.tsx'),'utf8');
-  it('正文与表格保持 14px 基线，辅助信息保持 12px',()=>{expect(css).toContain('font-size:14px');expect(css).toContain('font-size:12px');expect(css).toContain('.queue table,.data-table');});
-  it('1024 附近不产生页面级横向溢出，宽表格在容器内滚动',()=>{expect(css).toContain('body{margin:0;min-width:0');expect(css).toContain('overflow-x:clip');expect(css).toContain('.table-scroll{max-width:100%;overflow-x:auto}');expect(css).toContain('@media(max-width:1030px)');});
-  it('1440 为主布局基准且上下文不遮挡队列',()=>{expect(css).toContain('max-width:1600px');expect(css).toContain('grid-template-columns:minmax(0,1fr) 330px');expect(css).toContain('.context{position:sticky');});
-  it('提供 reduced motion 降级',()=>{expect(css).toContain('@media(prefers-reduced-motion:reduce)');});
-  it('生命周期阶段使用原型的分层交互样式而不是浏览器默认按钮',()=>{expect(css).toContain('.workbench-v2 .stage[aria-pressed="true"]');expect(css).toContain('.workbench-v2 .stage.not-entered[aria-pressed="true"]');});
-  it('独立模块抽屉给记录区稳定宽度，并在较窄桌面改为单列',()=>{expect(css).toContain('.wide-drawer{width:min(1120px,calc(100vw - 24px))');expect(css).toContain('grid-template-columns:minmax(340px,.78fr) minmax(460px,1.22fr)');expect(css).toContain('@media(max-width:900px)');expect(css).toContain('.wide-drawer .module-layout{grid-template-columns:minmax(0,1fr)}');});
-  it('数据管理入口与主导航共用高度、选中反馈和下拉层级',()=>{expect(css).toContain('.data-menu{height:100%;display:flex;align-items:stretch}');expect(css).toContain('.data-menu summary:hover,.data-menu[open] summary');expect(css).toContain('min-width:176px');});
-  it('顶部导航锁定且窄屏允许导航自身滚动',()=>{expect(css).toContain('.workbench-v2 .topbar{position:sticky;top:0;z-index:12');expect(css).toContain('.workbench-v2 .topbar nav{min-width:0;overflow-x:auto');});
-  it('历史、报表和危险操作形成独立响应式层级',()=>{expect(css).toContain('.history-browser{display:grid');expect(css).toContain('.report-metric-grid{display:grid');expect(css).toContain('.danger-zone{');expect(css).toContain('@media(max-width:650px)');});
-  it('跨项目历史上下文与 intent 专属资料具有独立视觉层级',()=>{expect(css).toContain('.history-scope{grid-column:1/-1');expect(css).toContain('.history-table td:first-child strong');expect(css).toContain('.formal-intent-fields,.approval-fields');expect(css).toContain('.clean-recheck-error');});
-  it('单一页面滚动根下 topbar 与 command 按真实导航高度协同固定并保留滚动补偿',()=>{expect(css).toContain(':root{--topbar-height:60px;--sticky-command-height:116px;scroll-padding-top:calc(');expect(css).toContain('html{overflow-x:clip}');expect(css).toContain('.workbench-v2{min-width:0;overflow:visible}');expect(css).toContain('.workbench-v2 .command{position:sticky;top:var(--topbar-height);z-index:11');expect(css).toContain('scroll-margin-top:calc(var(--topbar-height) + var(--sticky-command-height) + 18px)');expect(css).toContain(':root{--topbar-height:106px;--sticky-command-height:150px}');});
-  it('1024 固定操作区允许换行且页面无横溢，1440 保持完整固定层级',()=>{expect(css).toContain('.workbench-v2 .command .row-actions{flex-wrap:wrap');expect(css).toContain('@media(max-width:1030px)');expect(css).toContain('.workbench-v2 .command .row-actions{max-width:280px}');expect(css).toContain('html{overflow-x:clip}');});
-  it('提醒泳道由日期列头和同日纵向卡片组成，最多七列且列内独立加载',()=>{expect(renderer).toContain('data.dates.map((date) =>');expect(renderer).toContain('<time id={`lane-${date}`}');expect(renderer).toContain('className="reminder-lane-stack"');expect(renderer).toContain('selectedDates: data.dates');expect(renderer).toContain('加载本列更多');});
-  it('提醒泳道在 1024 与 1440 保持可读最小列宽并只在容器内部横滚',()=>{expect(css).toContain('.reminder-lane-scroll{max-width:100%;overflow-x:auto');expect(css).toContain('grid-template-columns:repeat(var(--lane-count),minmax(176px,1fr))');expect(css).toContain('grid-template-columns:repeat(var(--lane-count),minmax(190px,190px))');expect(css).toContain('overscroll-behavior-x:contain');});
-  it('泳道和全部可聚焦目标有清晰 focus-visible，reduced motion 不移除静态反馈',()=>{expect(css).toContain('.workbench-v2 :focus-visible{outline:2px solid var(--brand);outline-offset:3px}');expect(renderer).toContain('aria-label="提醒日期泳道" tabIndex={0}');expect(renderer).toContain('className="reminder-lane"');expect(css).toContain('@media(prefers-reduced-motion:reduce)');});
-  it('暂定范围新控件保留在建档与编辑分组内，1024 下沿用零最小宽度和单列收束',()=>{const createScope=renderer.slice(renderer.indexOf('<legend>搬迁范围（均可后补）</legend>'),renderer.indexOf('<legend>执行准备</legend>',renderer.indexOf('<legend>搬迁范围（均可后补）</legend>')));const editScope=renderer.slice(renderer.indexOf('<legend>暂定范围</legend>'),renderer.indexOf('<legend>执行准备</legend>',renderer.indexOf('<legend>暂定范围</legend>')));for(const scope of [createScope,editScope]){expect(scope).toContain('name="temporaryInstrumentName"');expect(scope).toContain('name="temporaryInstrumentModel"');expect(scope).toContain('name="temporaryHasUps"');}expect(css).toContain('.edit-form-section{min-width:0');expect(css).toContain('.edit-form-section .form-grid{grid-template-columns:minmax(0,1fr)}');expect(css).toContain('body{margin:0;min-width:0');});
-  it('项目队列明确固定每页20且不存在旧的每页最多50项文案',()=>{expect(renderer).toContain('固定每页20');expect(renderer).not.toContain('每页最多50项');});
+describe('workbench-interface 桌面布局静态约束', () => {
+  const css = readFileSync(join(process.cwd(), 'src/renderer/styles.css'), 'utf8');
+  const renderer = readFileSync(join(process.cwd(), 'src/renderer/components/workbench-v2.tsx'), 'utf8');
+
+  it('正文、数据和控件使用统一的系统字体与 4px 间距基线', () => {
+    expect(css).toContain('font-size:14px');
+    expect(css).toContain('font-size:12px');
+    expect(css).toContain('"Microsoft YaHei UI","PingFang SC"');
+    expect(css).toContain('--radius-control:6px');
+    expect(css).toContain('--radius-dialog:12px');
+  });
+
+  it('1024 附近不产生页面级横向溢出，宽表格在容器内滚动', () => {
+    expect(css).toContain('body{margin:0;min-width:0');
+    expect(css).toContain('overflow-x:clip');
+    expect(css).toContain('.table-scroll{max-width:100%;overflow-x:auto}');
+    expect(css).toContain('@media(max-width:1100px)');
+  });
+
+  it('纵向主流程先提供项目队列，再显示项目上下文与详情', () => {
+    const queue = renderer.indexOf('id="project-queue"');
+    const workspace = renderer.indexOf('className="project-workspace"');
+    expect(queue).toBeGreaterThan(0);
+    expect(workspace).toBeGreaterThan(queue);
+    expect(css).not.toContain('.workspace{display:grid;grid-template-columns:minmax(0,1fr) 330px');
+    expect(css).not.toContain('.context{position:sticky');
+  });
+
+  it('只固定顶部导航，任务区保持紧凑并随页面滚动', () => {
+    expect(css).toContain('.workbench-v2 .topbar{position:sticky;top:0;z-index:12');
+    expect(css).toContain('.workbench-v2 .command{position:static;min-height:0');
+    expect(css).not.toContain('sticky-command-height');
+    expect(css).toContain('scroll-margin-top:calc(var(--topbar-height) + 16px)');
+  });
+
+  it('生命周期七个入口保持完整状态层级', () => {
+    expect(css).toContain('grid-template-columns:repeat(7,minmax(136px,1fr))');
+    expect(css).toContain('.status-pending_execution');
+    expect(css).toContain('.status-pending_acceptance');
+    expect(css).toContain('.workbench-v2 .stage[aria-pressed="true"]');
+  });
+
+  it('独立模块抽屉在 1024 保持可用宽度，并保留更窄窗口单列容错', () => {
+    expect(css).toContain('.wide-drawer{width:min(1120px,calc(100vw - 24px))');
+    expect(css).toContain('grid-template-columns:minmax(340px,.78fr) minmax(460px,1.22fr)');
+    expect(css).toContain('.wide-drawer{width:min(1000px,calc(100vw - 16px))}');
+    expect(css).toContain('.wide-drawer .module-layout{grid-template-columns:minmax(0,1fr)}');
+  });
+
+  it('数据管理入口与主导航共用高度、选中反馈和下拉层级', () => {
+    expect(css).toContain('.data-menu{height:100%;display:flex;align-items:stretch}');
+    expect(css).toContain('.data-menu summary:hover,.data-menu[open] summary');
+    expect(css).toContain('min-width:176px');
+  });
+
+  it('1024 使用双层顶部导航且导航自身可横向滚动', () => {
+    expect(css).toContain('.workbench-v2 .topbar nav{min-width:0;overflow-x:auto');
+    expect(css).toMatch(/@media\(max-width:1100px\).*--topbar-height:106px.*grid-template-rows:59px 46px/s);
+  });
+
+  it('提醒泳道保留日期列头、列内加载和容器内横向滚动', () => {
+    expect(renderer).toContain('data.dates.map((date) =>');
+    expect(renderer).toContain('<time id={`lane-${date}`}');
+    expect(renderer).toContain('className="reminder-lane-stack"');
+    expect(renderer).toContain('selectedDates: data.dates');
+    expect(renderer).toContain('加载本列更多');
+    expect(css).toContain('.reminder-lane-scroll{max-width:100%;overflow-x:auto');
+    expect(css).toContain('minmax(168px,1fr)');
+    expect(css).toContain('minmax(176px,176px)');
+  });
+
+  it('项目切换时主状态控件与当前项目同步', () => {
+    expect(renderer).toContain('value={draftStatus}');
+    expect(renderer).toContain('[project?.id, project?.status]');
+    expect(renderer).not.toContain('defaultValue={project.status}');
+  });
+
+  it('可编辑弹层拦截遮罩、Escape 与关闭按钮造成的未保存退出', () => {
+    expect(renderer).toContain('protectDirty={layerRequiresDirtyProtection(layer)}');
+    expect(renderer).toContain('role="alertdialog"');
+    expect(renderer).toContain('放弃本次修改？');
+    expect(renderer).toContain('if (discardOpenRef.current) closeDiscard()');
+    expect(css).toContain('.discard-guard{position:fixed');
+  });
+
+  it('主要加载区提供可见反馈且保留 reduced motion 降级', () => {
+    expect(renderer).toContain('正在读取工作台概况…');
+    expect(css).toContain('.queue-table-wrap[aria-busy="true"]:before');
+    expect(css).toContain('@media(prefers-reduced-motion:reduce)');
+  });
+
+  it('历史、报表、危险操作与项目编辑表单保留响应式层级', () => {
+    expect(css).toContain('.history-browser{display:grid');
+    expect(css).toContain('.report-metric-grid{display:grid');
+    expect(css).toContain('.danger-zone{');
+    expect(css).toContain('.formal-intent-fields,.approval-fields');
+    expect(css).toContain('.edit-form-section .form-grid{grid-template-columns:minmax(0,1fr)}');
+  });
+
+  it('项目队列明确固定每页20且不存在旧文案', () => {
+    expect(renderer).toContain('固定每页20');
+    expect(renderer).not.toContain('每页最多50项');
+    expect(renderer).not.toContain('高密项目队列');
+  });
 });

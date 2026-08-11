@@ -1,9 +1,9 @@
 .history-grid-shell{
   --hig-bg:#eef1f1;--hig-surface:#fff;--hig-soft:#f3f5f4;--hig-line:#cfd7d5;--hig-line-strong:#aab7b3;
   --hig-ink:#172522;--hig-muted:#53635f;--hig-brand:#245f56;--hig-brand-soft:#dcebe7;
-  --hig-error:#8f332d;--hig-error-soft:#f8e5e2;--hig-conflict:#345f80;--hig-conflict-soft:#e4edf4;
-  --hig-warning:#7b500d;--hig-warning-soft:#faedcf;
-  min-width:0;color:var(--hig-ink);font:14px/1.45 "Aptos","Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif;
+  --hig-error:#9a4039;--hig-error-soft:#f8e5e2;--hig-conflict:#345f80;--hig-conflict-soft:#e4edf4;
+  --hig-warning:#8a5b14;--hig-warning-soft:#faedcf;--hig-radius:6px;
+  min-width:0;color:var(--hig-ink);font:14px/1.5 "Microsoft YaHei UI","PingFang SC","Noto Sans CJK SC","Source Han Sans SC","Segoe UI",sans-serif;
 }
 .history-grid-shell *{box-sizing:border-box}.history-grid-shell button,.history-grid-shell input,.history-grid-shell select{font:inherit;color:inherit}
 .history-grid-toolbar{display:grid;grid-template-columns:minmax(220px,1.4fr) minmax(150px,.8fr) minmax(130px,.7fr) minmax(140px,.7fr) auto;gap:10px;align-items:end;padding:12px;border:1px solid var(--hig-line);border-bottom:0;background:var(--hig-soft)}
@@ -17,3 +17,4 @@
 .history-grid-editor{position:absolute;z-index:10;margin:0;padding:0 7px;border:2px solid var(--hig-brand);border-radius:0;background:#fff;box-shadow:0 4px 12px rgba(23,72,63,.18);font:inherit}.history-grid-help{margin:0;padding:8px 12px;border:1px solid var(--hig-line);border-top:0;background:var(--hig-soft);color:var(--hig-muted);font-size:12px}.history-grid-announcer{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media(max-width:900px){.history-grid-toolbar{grid-template-columns:1fr 1fr}.history-grid-next-issue{width:max-content}.history-grid-statusline{flex-wrap:wrap;gap:6px 14px}}
 @media(prefers-reduced-motion:reduce){.history-grid-shell *{scroll-behavior:auto!important;transition:none!important}}
+.history-grid-toolbar{border-radius:8px 8px 0 0}.history-grid-toolbar input,.history-grid-toolbar select,.history-grid-toolbar button{border-radius:var(--hig-radius)}.history-grid-inline-control input{border-radius:var(--hig-radius) 0 0 var(--hig-radius)}.history-grid-inline-control button{border-radius:0 var(--hig-radius) var(--hig-radius) 0}.history-grid-help{border-radius:0 0 8px 8px}
