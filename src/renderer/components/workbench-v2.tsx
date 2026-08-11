@@ -1816,7 +1816,10 @@ function ProjectDetails({
               ["计划装机日期", detail?.detail?.plannedInstallAt || "待补"],
               ["实际装机完成日期", detail?.detail?.actualInstallDoneAt || "待补"],
               ["项目备注", detail?.detail?.projectNote || "无"],
+              ["暂定仪器名称", detail?.detail?.temporaryInstrumentName || "待补"],
               ["暂定仪器数量", detail?.detail?.temporaryInstrumentCount === null || detail?.detail?.temporaryInstrumentCount === undefined ? "待补" : `${detail.detail.temporaryInstrumentCount} 台`],
+              ["暂定型号", detail?.detail?.temporaryInstrumentModel || "待补"],
+              ["UPS", detail?.detail?.temporaryHasUps === null || detail?.detail?.temporaryHasUps === undefined ? "未填写" : detail.detail.temporaryHasUps ? "是" : "否"],
               ["合同开始日期", detail?.detail?.contractStartDate || "待补"],
               ["合同截止日期", detail?.detail?.contractEndDate || "待补"],
               ["物流费用登记", `${project.counts.batches} 条`],
@@ -3392,6 +3395,9 @@ function ProjectEditForm({
           temporaryStorageAddress: nullable(data, "temporaryStorageAddress"),
           isTemporaryStorage: data.get("isTemporaryStorage") === "" ? null : data.get("isTemporaryStorage") === "true",
           temporaryInstrumentCount: nullable(data, "temporaryInstrumentCount") === null ? null : Number(nullable(data, "temporaryInstrumentCount")),
+          temporaryInstrumentName: nullable(data, "temporaryInstrumentName"),
+          temporaryInstrumentModel: nullable(data, "temporaryInstrumentModel"),
+          temporaryHasUps: data.get("temporaryHasUps") === "" ? null : data.get("temporaryHasUps") === "true",
         });
       } else {
         await onSave({
@@ -3440,7 +3446,7 @@ function ProjectEditForm({
   }
   return (
     <form className="project-edit-form" onSubmit={(event) => void submit(event)}>
-      <p className="notice">维护项目级资料；留空的可选字段会按空值提交。仪器、序列号和服务单请在各自业务入口维护。</p>
+      <p className="notice">维护项目级资料；暂定范围不会生成仪器记录，可后补。逐台仪器、序列号和服务单请在各自业务入口维护。</p>
       <div className="edit-form-sections">
         <fieldset className="edit-form-section">
           <legend>基本信息</legend>
@@ -3462,12 +3468,20 @@ function ProjectEditForm({
           </div>
         </fieldset>
         <fieldset className="edit-form-section">
+          <legend>暂定范围</legend>
+          <div className="form-grid">
+            <Field name="temporaryInstrumentName" label="暂定仪器名称" defaultValue={detail?.temporaryInstrumentName ?? ""} optional />
+            <Field name="temporaryInstrumentCount" label="暂定仪器数量" type="number" min="0" step="1" defaultValue={detail?.temporaryInstrumentCount ?? ""} optional />
+            <Field name="temporaryInstrumentModel" label="暂定型号" defaultValue={detail?.temporaryInstrumentModel ?? ""} optional />
+            <Select name="temporaryHasUps" label="UPS" defaultValue={detail?.temporaryHasUps === null || detail?.temporaryHasUps === undefined ? "" : String(detail.temporaryHasUps)} options={[["", "未填写"], ["true", "是"], ["false", "否"]]} help="仅记录项目暂定范围，不代表逐台仪器事实。" />
+          </div>
+        </fieldset>
+        <fieldset className="edit-form-section">
           <legend>执行准备</legend>
           <div className="form-grid">
             <Field name="plannedVisitAt" label="计划上门日期" type="date" defaultValue={businessDate(detail?.planVisitAt)} optional />
             <Field name="plannedTransportAt" label="计划运输日期" type="date" defaultValue={businessDate(detail?.planTransportAt)} optional />
             <Field name="plannedInstallAt" label="计划装机日期" type="date" defaultValue={businessDate(detail?.plannedInstallAt)} optional />
-            <Field name="temporaryInstrumentCount" label="暂定仪器数量" type="number" min="0" step="1" defaultValue={detail?.temporaryInstrumentCount ?? ""} optional help="可留空、补录或调整；不会生成仪器记录。" />
             <Select name="isTemporaryStorage" label="是否暂存" defaultValue={detail?.isTemporaryStorage === null || detail?.isTemporaryStorage === undefined ? "" : String(detail.isTemporaryStorage)} options={[["", "未填写"], ["false", "否"], ["true", "是"]]} />
             <Field name="temporaryStorageAddress" label="暂存地址" defaultValue={detail?.temporaryStorageAddress ?? ""} optional />
             <label className="confirm-check full">
@@ -3505,6 +3519,9 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
         oldSiteAddress: value("oldSiteAddress") || null,
         newSiteAddress: value("newSiteAddress") || null, oldSiteContact: value("oldSiteContact"), newSiteContact: value("newSiteContact"),
         instrumentCount: value("instrumentCount") ? Number(value("instrumentCount")) : null,
+        temporaryInstrumentName: value("temporaryInstrumentName") || null,
+        temporaryInstrumentModel: value("temporaryInstrumentModel") || null,
+        temporaryHasUps: value("temporaryHasUps") === "" ? null : value("temporaryHasUps") === "true",
         projectNote: value("projectNote") || null,
         temporaryStorageAddress: value("temporaryStorageAddress") || null,
         isTemporaryStorage: value("isTemporaryStorage") === "" ? null : value("isTemporaryStorage") === "true",
@@ -3520,7 +3537,7 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
     ["formal", "正式进单", "明确使用 ECC 和进单日期完成进单"],
   ];
   return <form className="project-create-form" onSubmit={(event) => void submit(event)}>
-    <p className="notice">先明确保存意图。旧址、新址和仪器数量均可后补，不影响建立项目。</p>
+    <p className="notice">先明确保存意图。旧址、新址和暂定范围均可后补，不影响建立项目。</p>
     <div className="create-form-sections">
       <fieldset className="edit-form-section"><legend>项目与进单</legend><div className="form-grid">
         <Field name="customerName" label="客户名称" required autoFocus /><ProjectRegionSelect value={region} onChange={setRegion} />
@@ -3531,9 +3548,11 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>搬迁范围（均可后补）</legend><div className="form-grid">
         <Field name="oldSiteAddress" label="旧址地址" optional /><Field name="newSiteAddress" label="新址地址" optional />
-        <Field name="instrumentCount" label="仪器数量" type="number" min="1" step="1" optional />
+        <Field name="temporaryInstrumentName" label="暂定仪器名称" optional /><Field name="instrumentCount" label="暂定仪器数量" type="number" min="1" step="1" optional />
+        <Field name="temporaryInstrumentModel" label="暂定型号" optional />
+        <Select name="temporaryHasUps" label="UPS" defaultValue="" options={[["", "未填写"], ["true", "是"], ["false", "否"]]} help="仅记录项目暂定范围，不代表逐台仪器事实。" />
         <Field name="temporaryStorageAddress" label="暂存地址" optional />
-        <p className="notice full">仪器名称、型号和 UPS 请在项目创建后通过“搬迁仪器”记录保存；当前建档契约尚不能保存这三项。</p>
+        <p className="notice full">暂定范围不会生成仪器记录，可后补。</p>
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>执行准备</legend><div className="form-grid">
         <Field name="planVisitAt" label="计划上门日期" type="date" optional /><Field name="planTransportAt" label="计划运输日期" type="date" optional />
