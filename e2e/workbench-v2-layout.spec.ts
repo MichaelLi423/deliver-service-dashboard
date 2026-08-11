@@ -31,7 +31,7 @@ async function seedReminderLanes(page: Page): Promise<void> {
   await expect(page.getByRole('region', { name: '提醒日期泳道' })).toBeVisible();
 }
 
-async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: string): Promise<void> {
+async function assertViewport(page: Page, width: 820 | 1024 | 1170 | 1190 | 1440, screenshot: string): Promise<void> {
   await page.setViewportSize({ width, height: width === 1440 ? 900 : 768 });
   const layout = await page.evaluate(() => {
     const queue = document.querySelector<HTMLElement>('.queue-table-wrap');
@@ -39,6 +39,12 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: 
     const topbar = document.querySelector<HTMLElement>('.topbar');
     const command = document.querySelector<HTMLElement>('.command');
     const lanes = document.querySelector<HTMLElement>('.reminder-lane-scroll');
+    const reminders = document.querySelector<HTMLElement>('.reminder-panel');
+    const detail = document.querySelector<HTMLElement>('.detail');
+    const projectQueue = document.querySelector<HTMLElement>('#project-queue');
+    const context = document.querySelector<HTMLElement>('.context');
+    const workbenchGrid = document.querySelector<HTMLElement>('.workbench-grid');
+    const rect = (node: HTMLElement | null) => node ? { top: node.getBoundingClientRect().top, bottom: node.getBoundingClientRect().bottom, left: node.getBoundingClientRect().left } : null;
     return {
       scrollingElement: document.scrollingElement?.tagName ?? '',
       htmlOverflowY: getComputedStyle(document.documentElement).overflowY,
@@ -55,6 +61,14 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: 
       laneScrollWidth: lanes?.scrollWidth ?? 0,
       laneClientWidth: lanes?.clientWidth ?? 0,
       laneCount: lanes?.querySelectorAll('.reminder-lane').length ?? 0,
+      domOrder: Boolean(reminders && detail && projectQueue && context
+        && (reminders.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && (detail.compareDocumentPosition(projectQueue) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && (projectQueue.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      reminders: rect(reminders), detail: rect(detail), projectQueue: rect(projectQueue), context: rect(context),
+      viewportWidth: window.innerWidth,
+      workbenchGridDisplay: workbenchGrid ? getComputedStyle(workbenchGrid).display : '',
+      workbenchGridColumns: workbenchGrid ? getComputedStyle(workbenchGrid).gridTemplateColumns : '',
     };
   });
   expect(layout.scrollingElement).toBe('HTML');
@@ -70,6 +84,18 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1440, screenshot: 
   expect(layout.commandTop).toBeLessThanOrEqual(layout.topbarHeight + 1);
   expect(layout.laneOverflow).toMatch(/auto|scroll/);
   expect(layout.laneCount).toBe(7);
+  expect(layout.domOrder).toBe(true);
+  expect(layout.detail).not.toBeNull();
+  expect(layout.projectQueue).not.toBeNull();
+  expect(layout.context).not.toBeNull();
+  expect(layout.detail!.bottom).toBeLessThanOrEqual(layout.projectQueue!.top + 1);
+  expect(layout.projectQueue!.bottom).toBeLessThanOrEqual(layout.context!.top + 1);
+  if (width > 1180) {
+    expect(layout.reminders!.left, JSON.stringify({ width, viewportWidth: layout.viewportWidth, display: layout.workbenchGridDisplay, columns: layout.workbenchGridColumns })).toBeLessThan(layout.detail!.left);
+    expect(Math.abs(layout.reminders!.top - layout.detail!.top)).toBeLessThanOrEqual(2);
+  } else {
+    expect(layout.reminders!.bottom).toBeLessThanOrEqual(layout.detail!.top + 1);
+  }
   if (width === 1024) expect(layout.laneScrollWidth).toBeGreaterThan(layout.laneClientWidth);
   if (layout.laneScrollWidth > layout.laneClientWidth) {
     const laneScroll = await page.locator('.reminder-lane-scroll').evaluate((node) => {
@@ -160,6 +186,8 @@ async function assertDeepFormFocusBelowSticky(app: ElectronApplication, page: Pa
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await page.getByRole('button', { name: '编辑项目资料' }).click();
   const dialog = page.getByRole('dialog', { name: '编辑项目资料' });
+  // 等弹层的预设首焦点落定，再验证深层控件，避免与 Layer 的 0ms autofocus 竞争。
+  await expect(dialog.getByLabel(/客户名称/)).toBeFocused();
   const deepControl = dialog.getByLabel(/暂存地址/);
   await deepControl.focus();
   await expect(deepControl).toBeFocused();
@@ -196,6 +224,8 @@ test('Oracle #10 任务指挥台布局、150% 文本缩放与 sticky 深层表�
     await initialize(page);
     await seedReminderLanes(page);
     await assertViewport(page, 1024, testInfo.outputPath('workbench-v2-1024.png'));
+    await assertViewport(page, 1170, testInfo.outputPath('workbench-v2-1170.png'));
+    await assertViewport(page, 1190, testInfo.outputPath('workbench-v2-1190.png'));
     await assertViewport(page, 1440, testInfo.outputPath('workbench-v2-1440.png'));
     await assertViewport(page, 820, testInfo.outputPath('workbench-v2-820.png'));
     await assertIndependentDrawer(page, 1024, testInfo.outputPath('serial-address-drawer-1024.png'));

@@ -27,6 +27,10 @@ export const IPC_CHANNELS = {
   workbenchV2ReminderPage: 'workbench:v2:reminder-page',
   /** 提醒泳道（tasks 7.6）：先选日期列、再按列读取项目（列可带独立 cursor，不重算日期集合）。 */
   workbenchV2ReminderLanes: 'workbench:v2:reminder-lanes',
+  /** 项目分类标签目录读取（仅返回稳定排序的语义化目录，不暴露持久化表）。 */
+  workbenchV2TagCatalog: 'workbench:v2:tag-catalog',
+  /** 项目分类标签受控写入：创建分组、创建组内标签、replace-set 项目标签。 */
+  workbenchV2TagMutate: 'workbench:v2:tag-mutate',
   workbenchV2Mutate: 'workbench:v2:mutate',
   /** 受保护登记记录删除（判别联合 + 预期业务修订防并发）。 */
   workbenchV2Delete: 'workbench:v2:delete',
@@ -421,6 +425,10 @@ export interface WorkbenchProjectRow {
   /** invoices 包含已撤销的掉票历史，供关联事实浏览。 */
   counts: { batches: number; instruments: number; activities: number; orders: number; repairs: number; invoices: number };
   nonBlocking: { pendingShipTo: number; qrUnmarked: number; repairs: number };
+  /** 项目分类标签 ID；缺省表示由旧实现返回，空数组表示项目未关联分类标签。 */
+  tagIds?: readonly string[];
+  /** 项目分类标签的轻量按组摘要；顺序与标签目录一致，不包含目录中未选标签。 */
+  groupedTags?: readonly ProjectTagGroupSummaryDto[];
   /** 审计/技术更新时间（精确 ISO）。 */
   updatedAt: string;
 }
@@ -434,6 +442,108 @@ export type WorkbenchReminderDueClass = 'upcoming' | 'today' | 'overdue';
 // - 金额一律十进制字符串（主进程分整数精确格式化，禁止 Number 参与金额运算）；
 // - 读取全部为有界分页（keyset id 游标 + total），禁止全量快照与 JS P×C。
 // ---------------------------------------------------------------------------
+
+/** 全局标签分组定义；catalog 中 groups 按 sortOrder、id 稳定排序。 */
+export interface ProjectTagGroupDto {
+  id: string;
+  name: string;
+  sortOrder: number;
+  /** 组内 tags 按 sortOrder、id 稳定排序。 */
+  tags: readonly ProjectTagDto[];
+}
+
+/** 全局可复用的组内标签定义。 */
+export interface ProjectTagDto {
+  id: string;
+  groupId: string;
+  name: string;
+  sortOrder: number;
+}
+
+/** 项目已关联标签的轻量按组展示摘要；不携带目录排序或未选标签。 */
+export interface ProjectTagGroupSummaryDto {
+  groupId: string;
+  groupName: string;
+  tagIds: readonly string[];
+  tagNames: readonly string[];
+}
+
+/** 标签目录读取；提供 projectId 时同时返回该项目当前的选中 tagIds。 */
+export interface ProjectTagCatalogRequestDto {
+  projectId?: string | null;
+}
+
+/** 标签目录读取结果；groups 与其 tags 均为稳定顺序。 */
+export interface ProjectTagCatalogDto {
+  businessRevision: number;
+  groups: readonly ProjectTagGroupDto[];
+  /** projectId 未提供时为空数组；提供时为该项目已关联标签的稳定排序 ID 集合。 */
+  selectedTagIds: readonly string[];
+}
+
+/** 创建全局标签分组（名称由主进程 trim 后校验；未指定排序时追加到末尾）。 */
+export interface CreateProjectTagGroupRequestDto {
+  name: string;
+  sortOrder?: number;
+}
+
+/** 在指定全局分组中创建标签（名称由主进程 trim 后校验；未指定排序时追加到末尾）。 */
+export interface CreateProjectTagRequestDto {
+  groupId: string;
+  name: string;
+  sortOrder?: number;
+}
+
+/** replace-set 项目标签：最终关联严格等于去重、验证后的 tagIds 集合。 */
+export interface ReplaceProjectTagSetRequestDto {
+  projectId: string;
+  tagIds: readonly string[];
+}
+
+/** 标签写入命令；不提供表级 CRUD、删除、重命名或重排命令。 */
+export type ProjectTagMutationRequestDto =
+  | { command: 'create_group'; payload: CreateProjectTagGroupRequestDto }
+  | { command: 'create_tag'; payload: CreateProjectTagRequestDto }
+  | { command: 'replace_project_tags'; payload: ReplaceProjectTagSetRequestDto };
+
+/** 创建全局标签分组后的结果。 */
+export interface CreateProjectTagGroupResultDto {
+  businessRevision: number;
+  group: ProjectTagGroupDto;
+}
+
+/** 创建组内标签后的结果。 */
+export interface CreateProjectTagResultDto {
+  businessRevision: number;
+  group: ProjectTagGroupDto;
+  tag: ProjectTagDto;
+}
+
+/** replace-set 后的规范化项目标签视图，供队列、详情和当前上下文刷新。 */
+export interface ReplaceProjectTagSetResultDto {
+  businessRevision: number;
+  projectId: string;
+  tagIds: readonly string[];
+  groupedTags: readonly ProjectTagGroupSummaryDto[];
+}
+
+export type ProjectTagMutationResultDto =
+  | CreateProjectTagGroupResultDto
+  | CreateProjectTagResultDto
+  | ReplaceProjectTagSetResultDto;
+
+/** 项目分类标签写入失败稳定错误码；IPC 通过 IpcEnvelope 序列化。 */
+export const PROJECT_TAG_REJECTION_CODES = {
+  GROUP_NAME_EMPTY: 'PROJECT_TAG_GROUP_NAME_EMPTY',
+  GROUP_NAME_DUPLICATE: 'PROJECT_TAG_GROUP_NAME_DUPLICATE',
+  TAG_NAME_EMPTY: 'PROJECT_TAG_NAME_EMPTY',
+  TAG_NAME_DUPLICATE: 'PROJECT_TAG_NAME_DUPLICATE',
+  UNKNOWN_GROUP: 'PROJECT_TAG_UNKNOWN_GROUP',
+  UNKNOWN_TAG: 'PROJECT_TAG_UNKNOWN_TAG',
+  UNKNOWN_PROJECT: 'PROJECT_TAG_UNKNOWN_PROJECT',
+} as const;
+
+export type ProjectTagRejectionCode = (typeof PROJECT_TAG_REJECTION_CODES)[keyof typeof PROJECT_TAG_REJECTION_CODES];
 
 /** v2 分页请求公共字段：默认 50，最大 100。 */
 export interface WorkbenchV2PageRequest {
@@ -513,6 +623,9 @@ export interface WorkbenchV2OverviewDto {
 export interface WorkbenchV2ProjectDetailDto {
   businessRevision: number;
   project: WorkbenchProjectRow | null;
+  /** 详情/当前上下文的规范化标签视图；兼容旧返回时可从 project 同名字段读取。 */
+  tagIds?: readonly string[];
+  groupedTags?: readonly ProjectTagGroupSummaryDto[];
   detail: {
     managerApprovalReason: string | null;
     managerApprovalMissing: string | null;
@@ -959,6 +1072,9 @@ export interface WorkbenchV2ReminderPageRow {
   reminderAt: string | null;
   reminderNote: string | null;
   reminderDueClass: WorkbenchReminderDueClass | null;
+  /** 当前上下文候选项目的轻量项目分类标签摘要。 */
+  tagIds?: readonly string[];
+  groupedTags?: readonly ProjectTagGroupSummaryDto[];
 }
 
 export interface WorkbenchV2ReminderPageDto {
@@ -996,6 +1112,9 @@ export interface WorkbenchV2ReminderLaneRow {
   reminderAt: string;
   reminderNote: string | null;
   reminderDueClass: WorkbenchReminderDueClass | null;
+  /** 当前上下文候选项目的轻量项目分类标签摘要。 */
+  tagIds?: readonly string[];
+  groupedTags?: readonly ProjectTagGroupSummaryDto[];
 }
 
 export interface WorkbenchV2ReminderLane {
@@ -1102,6 +1221,8 @@ export type IpcEnvelope<T> =
 export type WorkbenchV2DeleteEnvelope = IpcEnvelope<WorkbenchV2DeleteResult>;
 export type DataCleanPrepareEnvelope = IpcEnvelope<DataCleanPrepareDto>;
 export type DataCleanConfirmEnvelope = IpcEnvelope<DataCleanConfirmResultDto>;
+/** 项目分类标签目录写入在线上使用的可序列化错误信封。 */
+export type ProjectTagMutationEnvelope = IpcEnvelope<ProjectTagMutationResultDto>;
 
 // ---------------------------------------------------------------------------
 // 「清理全部业务数据」两阶段 API（prepare → confirm）
@@ -1211,6 +1332,7 @@ export type WorkbenchV2InvalidateTag =
   | 'overview'
   | 'projects'
   | 'reminders'
+  | 'tag_catalog'
   | `project:${string}`
   | `sections:${string}`
   | 'independent:serial_address'
@@ -1379,6 +1501,8 @@ export interface ProjectWizardPayload {
    * managerApproved 替代原批复原因/缺失资料；不再收集原因与缺失项。
    */
   managerApproved?: boolean | null;
+  /** 可选项目分类标签；创建项目时与项目事实在同一原子保存中关联。 */
+  tagIds?: readonly string[];
 }
 
 /**
@@ -1456,6 +1580,8 @@ export interface ProjectUpdatePayload {
   /** 已正式进单项目更正：最终可确认金额（十进制字符串，必须 > 0 且不低于累计有效掉票；
    *  空串/null = 0，由领域校验拒绝非法清空）。 */
   finalConfirmableAmount?: string | null;
+  /** 可选项目分类标签 replace-set；undefined 保持现有关联，空数组清空全部关联。 */
+  tagIds?: readonly string[];
 }
 
 /**
@@ -1592,11 +1718,16 @@ export interface ReportFilterDto {
   orderType?: 'relocation' | 'certification' | 'parts_by_mail' | 'pm' | null;
   transportCompany?: string | null;
   engineer?: string | null;
+  /** 可选项目分类标签多选：undefined 或空数组不限制；非空按任一标签（OR）匹配。 */
+  tagIds?: readonly string[];
 }
+
+/** 报表已应用筛选的可序列化形状（含项目分类标签）。 */
+export type ReportFiltersDto = Record<string, string | null | readonly string[]>;
 
 export interface ReportDto {
   range: { from: string; to: string };
-  filters: Record<string, string | null>;
+  filters: ReportFiltersDto;
   /** 审计/技术生成时间（精确 ISO）。 */
   generatedAt: string;
   sections: Array<{ key: string; label: string; rows: Array<Record<string, string | number | boolean | null>> }>;
@@ -1620,6 +1751,10 @@ export interface WorkbenchApi {
   v2ReminderPage(request: WorkbenchV2ReminderPageRequest): Promise<WorkbenchV2ReminderPageDto>;
   /** 提醒泳道（tasks 7.6）：先按日期选列、再按列读取项目；列可带独立 cursor，推进列不重算日期集合。 */
   v2ReminderLanes(request: WorkbenchV2ReminderLanesRequest): Promise<WorkbenchV2ReminderLanesDto>;
+  /** 读取稳定排序的全局项目分类标签目录，可选携带项目当前选中标签。 */
+  v2TagCatalog(request?: ProjectTagCatalogRequestDto): Promise<ProjectTagCatalogDto>;
+  /** 标签语义化写入；preload 将失败信封适配为含稳定 code 的 Error。 */
+  v2TagMutate(request: ProjectTagMutationRequestDto): Promise<ProjectTagMutationResultDto>;
   /** 有界 mutation：复用现有写逻辑，返回 businessRevision + invalidate tags（不含快照）。 */
   v2Mutate(request: WorkbenchV2MutationRequest): Promise<WorkbenchV2MutationResult>;
   /**

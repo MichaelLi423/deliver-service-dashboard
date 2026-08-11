@@ -7,10 +7,8 @@ import {
 } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
 import { closeDatabase, openDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { Migration, MigrationError, runMigrations } from '../../src/domain/capabilities/local-data-persistence/migration';
-import {
-  LATEST_SCHEMA_VERSION,
-  TEMPORARY_INSTRUMENT_FIELDS_MIGRATION_VERSION,
-} from '../../src/domain/capabilities/local-data-persistence/schema-v16';
+import { TEMPORARY_INSTRUMENT_FIELDS_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v17';
 import { RELOCATION_WORKBENCH_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 
@@ -27,12 +25,11 @@ import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
  */
 
 describe('schema v16：项目暂定仪器范围字段', () => {
-  it('全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过', () => {
+  it('全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过', () => {
     const dir = makeTempDir();
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
       expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
-      expect(readSchemaVersion(db)).toBe(TEMPORARY_INSTRUMENT_FIELDS_MIGRATION_VERSION);
       expect(MIGRATIONS.map((m) => m.version)).toEqual(
         Array.from({ length: LATEST_SCHEMA_VERSION }, (_, i) => i + 1),
       );

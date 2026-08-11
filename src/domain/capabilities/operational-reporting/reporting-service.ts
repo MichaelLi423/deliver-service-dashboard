@@ -198,6 +198,7 @@ export interface ReportModel {
     transportCompany: string | null;
     engineer: string | null;
     operator: string | null;
+    tagIds: readonly string[];
   };
   /** 报表生成时间（带偏移 ISO，注入时钟）。 */
   generatedAt: string;
@@ -245,8 +246,8 @@ export class ReportingService {
 
   buildReport(filter: ReportFilter): ReportModel {
     this.assertFilter(filter);
-    const f = this.normalizeFilter(filter);
     const all = this.facts;
+    const f = this.scopedFilter(all, filter);
 
     const invoices = this.filterInvoiceDetails(all, f);
     const orders = this.filterOrderDetails(all, f);
@@ -263,6 +264,7 @@ export class ReportingService {
         transportCompany: f.transportCompany ?? null,
         engineer: f.engineer ?? null,
         operator: f.operator ?? null,
+        tagIds: f.tagIds,
       },
       generatedAt: this.now(),
       pipeline: this.pipelineRows(all, f),
@@ -283,8 +285,8 @@ export class ReportingService {
   /** 下钻明细：与指标计算口径一致（同一谓词、同一事实源、实时读取）。 */
   getMetricDetails(metricKey: ReportMetricKey, filter: ReportFilter): MetricDetailRow[] {
     this.assertFilter(filter);
-    const f = this.normalizeFilter(filter);
     const all = this.facts;
+    const f = this.scopedFilter(all, filter);
     switch (metricKey) {
       case 'project_pipeline':
         return this.pipelineRows(all, f);
@@ -320,6 +322,7 @@ export class ReportingService {
     for (const project of all.listProjects()) {
       if (project.entryAt === null) continue; // 未正式进单不计
       if (project.status === 'cancelled') continue; // 已取消排除（7.9）
+      if (!this.projectInScope(project.id, f)) continue;
       if (!this.regionMatch(project, f)) continue;
       const month = toMonthKey(project.entryAt);
       if (!this.inRange(month, f)) continue;
@@ -352,6 +355,7 @@ export class ReportingService {
       .filter((inv) => inv.revokedAt === null) // 已撤销不计
       .map((inv) => ({ inv, project: projectsById.get(inv.projectId) }))
       .filter((x): x is { inv: (typeof x)['inv']; project: Project } => x.project !== undefined)
+      .filter((x) => this.projectInScope(x.project.id, f))
       .filter((x) => x.project.status !== 'cancelled') // 已取消项目排除（7.9）
       .filter((x) => this.regionMatch(x.project, f))
       .filter((x) => this.inRange(toMonthKey(x.inv.invoicedAt), f))
@@ -380,6 +384,7 @@ export class ReportingService {
       .filter((o) => this.inRange(toMonthKey(o.orderedAt), f))
       .filter((o) => f.orderType === null || o.orderType === f.orderType)
       .filter((o) => f.engineer === null || o.engineer.includes(f.engineer))
+      .filter((o) => o.projectId === null ? !this.tagFiltering(f) : this.projectInScope(o.projectId, f))
       .filter((o) => {
         if (f.region === null) return true;
         if (o.projectId === null) return false; // 区域筛选下无项目关联的开单不计
@@ -410,6 +415,7 @@ export class ReportingService {
       .listDamageItems()
       .map((item) => ({ item, project: projectsById.get(item.projectId) }))
       .filter((x): x is { item: (typeof x)['item']; project: Project } => x.project !== undefined)
+      .filter((x) => this.projectInScope(x.project.id, f))
       .filter((x) => this.regionMatch(x.project, f))
       .filter((x) => this.inRange(toMonthKey(x.item.registeredAt), f))
       .filter((x) => this.operatorMatch(x.item.operatorUsername, f))
@@ -475,6 +481,7 @@ export class ReportingService {
       .filter((x): x is { fee: (typeof x)['fee']; batch: NonNullable<(typeof x)['batch']>; project: Project } =>
         x.batch !== undefined && x.project !== undefined,
       )
+      .filter((x) => this.projectInScope(x.project.id, f))
       .filter((x) => this.regionMatch(x.project, f))
       .filter((x) => f.transportCompany === null || (x.batch.transportCompany?.trim() ?? '') === f.transportCompany.trim())
       .filter((x) => this.inRange(toMonthKey(x.fee.appliedAt), f))
@@ -544,6 +551,7 @@ export class ReportingService {
       .map((b) => ({ batch: b, project: projectsById.get(b.projectId) }))
       .filter((x): x is { batch: (typeof x)['batch']; project: Project } => x.project !== undefined)
       .filter((x) => x.project.status !== 'cancelled') // 已取消项目排除（不进入清单）
+      .filter((x) => this.projectInScope(x.project.id, f))
       .filter((x) => this.regionMatch(x.project, f))
       .filter(
         (x) =>
@@ -563,6 +571,7 @@ export class ReportingService {
   // ---- 7.7 工作量：Ship-to 申请 / 二维码申请 / 序列号地址更新 ----
 
   private shipToWorkloadRows(all: ReportingFactReader, f: NormalizedFilter): ShipToWorkloadRow[] {
+    if (this.tagFiltering(f)) return [];
     const counts = new Map<string, number>();
     for (const request of all.listShipToRequests()) {
       if (request.submittedAt === null) continue; // 待提交草稿不计
@@ -585,6 +594,7 @@ export class ReportingService {
   }
 
   private shipToDetailRows(all: ReportingFactReader, f: NormalizedFilter): MetricDetailRow[] {
+    if (this.tagFiltering(f)) return [];
     return all
       .listShipToRequests()
       .filter((r) => r.submittedAt !== null)
@@ -601,6 +611,7 @@ export class ReportingService {
   }
 
   private qrWorkloadRows(all: ReportingFactReader, f: NormalizedFilter): QrWorkloadRow[] {
+    if (this.tagFiltering(f)) return [];
     const counts = new Map<string, number>();
     for (const request of all.listQrRequests()) {
       if (!this.inRange(toMonthKey(request.requestedAt), f)) continue;
@@ -625,6 +636,7 @@ export class ReportingService {
   }
 
   private qrDetailRows(all: ReportingFactReader, f: NormalizedFilter): MetricDetailRow[] {
+    if (this.tagFiltering(f)) return [];
     return all
       .listQrRequests()
       .filter((r) => this.inRange(toMonthKey(r.requestedAt), f))
@@ -645,6 +657,7 @@ export class ReportingService {
   }
 
   private serialUpdateRows(all: ReportingFactReader, f: NormalizedFilter): SerialAddressUpdateRow[] {
+    if (this.tagFiltering(f)) return [];
     const counts = new Map<string, number>();
     for (const update of all.listSerialAddressUpdates()) {
       if (!this.inRange(toMonthKey(update.updatedAt), f)) continue;
@@ -667,6 +680,7 @@ export class ReportingService {
   }
 
   private serialDetailRows(all: ReportingFactReader, f: NormalizedFilter): MetricDetailRow[] {
+    if (this.tagFiltering(f)) return [];
     return all
       .listSerialAddressUpdates()
       .filter((u) => this.inRange(toMonthKey(u.updatedAt), f))
@@ -688,6 +702,7 @@ export class ReportingService {
     const counts = new Map<ProjectStatusOrCancelled, number>();
     for (const project of all.listProjects()) {
       if (project.status === 'cancelled') continue; // 已取消排除（7.9）
+      if (!this.projectInScope(project.id, f)) continue;
       if (!this.regionMatch(project, f)) continue;
       counts.set(project.status, (counts.get(project.status) ?? 0) + 1);
     }
@@ -725,7 +740,35 @@ export class ReportingService {
           : null,
       engineer: filter.engineer && filter.engineer.trim() !== '' ? filter.engineer.trim() : null,
       operator: filter.operator && filter.operator.trim() !== '' ? filter.operator.trim() : null,
+      tagIds: [...new Set(filter.tagIds ?? [])],
+      matchingProjectIds: null,
     };
+  }
+
+  /** 一次读取关联构造唯一项目范围，避免多标签项目在任一事实聚合中重复计数。 */
+  private scopedFilter(all: ReportingFactReader, filter: ReportFilter): NormalizedFilter {
+    const f = this.normalizeFilter(filter);
+    if (!this.tagFiltering(f)) return f;
+    const assignments = all.listProjectTagAssignments?.() ?? [];
+    const known = new Set(all.listProjectTagIds?.() ?? assignments.map((assignment) => assignment.tagId));
+    for (const tagId of f.tagIds) {
+      if (!known.has(tagId)) {
+        throw new ValidationError('UNKNOWN_PROJECT_TAG_ID', `UNKNOWN_PROJECT_TAG_ID: ${tagId}`);
+      }
+    }
+    const selected = new Set(f.tagIds);
+    f.matchingProjectIds = new Set(
+      assignments.filter((assignment) => selected.has(assignment.tagId)).map((assignment) => assignment.projectId),
+    );
+    return f;
+  }
+
+  private tagFiltering(f: NormalizedFilter): boolean {
+    return f.tagIds.length > 0;
+  }
+
+  private projectInScope(projectId: string, f: NormalizedFilter): boolean {
+    return f.matchingProjectIds === null || f.matchingProjectIds.has(projectId);
   }
 
   /**
@@ -908,6 +951,8 @@ interface NormalizedFilter {
   transportCompany: string | null;
   engineer: string | null;
   operator: string | null;
+  tagIds: readonly string[];
+  matchingProjectIds: Set<string> | null;
 }
 
 /** 责任人分组键：账号内部 ID + 用户名快照（空值归一为空串以便分组排序）。 */

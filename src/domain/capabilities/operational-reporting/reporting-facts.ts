@@ -25,4 +25,8 @@ export interface ReportingFactReader {
   listShipToRequests(): ShipToRequest[];
   listQrRequests(): QrRequest[];
   listSerialAddressUpdates(): SerialAddressUpdate[];
+  /** 项目分类标签关联；报表仅用其构造一次唯一项目范围，绝不 JOIN 到聚合事实。 */
+  listProjectTagAssignments?(): readonly { projectId: string; tagId: string }[];
+  /** 标签目录 ID，用于对报表筛选中的未知 ID 给出稳定校验失败。 */
+  listProjectTagIds?(): readonly string[];
 }

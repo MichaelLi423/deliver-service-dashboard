@@ -244,6 +244,12 @@ export function registerIpcHandlers(bus: IpcBus, deps: IpcHandlerDeps): void {
   bus.handle(IPC_CHANNELS.workbenchV2ReminderLanes, (event, request) =>
     facadeFor(event).v2ReminderLanes(request),
   );
+  bus.handle(IPC_CHANNELS.workbenchV2TagCatalog, (event, request) =>
+    facadeFor(event).v2TagCatalog(request),
+  );
+  bus.handle(IPC_CHANNELS.workbenchV2TagMutate, (event, request) =>
+    runEnveloped(() => facadeFor(event).v2TagMutate(request)),
+  );
   bus.handle(IPC_CHANNELS.workbenchV2Mutate, (event, request) =>
     facadeFor(event).v2Mutate(request),
   );

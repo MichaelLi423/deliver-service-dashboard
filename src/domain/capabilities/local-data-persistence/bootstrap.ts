@@ -71,6 +71,10 @@ import {
   TEMPORARY_INSTRUMENT_FIELDS_MIGRATION_VERSION,
 } from './schema-v16';
 import {
+  applyProjectTagMigration,
+  PROJECT_TAG_MIGRATION_VERSION,
+} from './schema-v17';
+import {
   buildFinancialIntegrityHint,
   hasAnyFinancialIntegrityIssue,
   readFinancialIntegrityCounts,
@@ -189,6 +193,13 @@ export const TEMPORARY_INSTRUMENT_FIELDS_MIGRATION: Migration = {
   up: (db) => applyTemporaryInstrumentFieldsMigration(db),
 };
 
+/** v17 迁移：全局项目分类标签分组、定义及项目多对多关联。 */
+export const PROJECT_TAG_MIGRATION: Migration = {
+  version: PROJECT_TAG_MIGRATION_VERSION,
+  name: 'project-tags',
+  up: (db) => applyProjectTagMigration(db),
+};
+
 /** 当前迁移序列（后续 schema 升级追加新 Migration，不修改已发布迁移）。 */
 export const MIGRATIONS: readonly Migration[] = [
   INITIAL_MIGRATION,
@@ -207,6 +218,7 @@ export const MIGRATIONS: readonly Migration[] = [
   SUPPLEMENT_FIELDS_MIGRATION,
   RELOCATION_WORKBENCH_MIGRATION,
   TEMPORARY_INSTRUMENT_FIELDS_MIGRATION,
+  PROJECT_TAG_MIGRATION,
 ];
 
 export interface BootstrapOptions {

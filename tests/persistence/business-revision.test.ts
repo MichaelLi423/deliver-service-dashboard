@@ -12,7 +12,7 @@ import {
 import {
   RELOCATION_WORKBENCH_NON_BUSINESS_TABLES,
 } from '../../src/domain/capabilities/local-data-persistence/schema-v15';
-import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
+import { LATEST_SCHEMA_VERSION, PROJECT_TAG_BUSINESS_TABLES, projectTagBusinessRevisionTriggerName } from '../../src/domain/capabilities/local-data-persistence/schema-v17';
 import {
   readBusinessRevision,
   readDatabaseIdentity,
@@ -200,7 +200,7 @@ describe('schema v10：触发器覆盖（design D25 / R9 防漏报）', () => {
       )
         .map((r) => r.name)
         .sort();
-      expect(allTables).toEqual([...BUSINESS_TABLES, ...ALL_NON_BUSINESS_TABLES].sort());
+      expect(allTables).toEqual([...BUSINESS_TABLES, ...PROJECT_TAG_BUSINESS_TABLES, ...ALL_NON_BUSINESS_TABLES].sort());
 
       // 每张业务表恰好有 insert/update/delete 三个触发器
       for (const table of BUSINESS_TABLES) {
@@ -216,6 +216,19 @@ describe('schema v10：触发器覆盖（design D25 / R9 防漏报）', () => {
         );
       }
 
+      for (const table of PROJECT_TAG_BUSINESS_TABLES) {
+        const triggers = (
+          db
+            .prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name = ?")
+            .all(table) as { name: string }[]
+        ).map((r) => r.name);
+        expect(triggers.sort(), `标签业务表 ${table} 触发器`).toEqual(
+          (['insert', 'update', 'delete'] as const)
+            .map((event) => projectTagBusinessRevisionTriggerName(table, event))
+            .sort(),
+        );
+      }
+
       // 非业务表（账号/审计/meta）零触发器
       for (const table of ALL_NON_BUSINESS_TABLES) {
         const triggers = db
@@ -224,11 +237,11 @@ describe('schema v10：触发器覆盖（design D25 / R9 防漏报）', () => {
         expect(triggers, `非业务表 ${table} 不应有触发器`).toEqual([]);
       }
 
-      // 触发器总数：19 业务表 × 3 事件 = 57
+      // 触发器总数：既有业务表与 v17 标签业务表各有 3 个单事件触发器。
       const total = db
         .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger'")
         .get() as { n: number };
-      expect(total.n).toBe(BUSINESS_TABLES.length * 3);
+      expect(total.n).toBe((BUSINESS_TABLES.length + PROJECT_TAG_BUSINESS_TABLES.length) * 3);
       closeDatabase(db);
     } finally {
       cleanupTempDir(dir);

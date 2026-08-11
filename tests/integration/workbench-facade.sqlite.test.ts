@@ -72,6 +72,43 @@ async function makeFacade(): Promise<{ facade: WorkbenchFacade; db: import('node
 }
 
 describe('工作台 application facade → 领域服务 → SQLite（v2 有界 API）', () => {
+  it('同次 create/supplement 先保存未进单先执行标签，再以到期计划上门日期经 lifecycle 推进并审计', async () => {
+    const { facade, db } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({
+        intent: 'pre_entry_execution',
+        customerName: '同次新建先执行客户',
+        managerApproved: true,
+        planVisitAt: '2000-01-01',
+      }),
+    });
+    const createdId = projectIdOf(created);
+    expect(facade.v2ProjectDetail(createdId).project).toMatchObject({
+      status: 'executing', preEntryExecution: true,
+    });
+
+    const draft = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'draft', customerName: '同次补齐先执行客户' }),
+    });
+    const supplementedId = projectIdOf(draft);
+    facade.v2Mutate({
+      op: 'supplement_project',
+      payload: { projectId: supplementedId, managerApproved: true, plannedVisitAt: '2000-01-01' },
+    });
+    expect(facade.v2ProjectDetail(supplementedId).project).toMatchObject({
+      status: 'executing', preEntryExecution: true,
+    });
+    const audits = db.prepare(
+      "SELECT project_id, reason, source FROM project_status_transition_audit WHERE reason = 'plan_visit_due' ORDER BY project_id",
+    ).all() as Array<{ project_id: string; reason: string; source: string }>;
+    expect(audits).toEqual(expect.arrayContaining([
+      { project_id: createdId, reason: 'plan_visit_due', source: 'system' },
+      { project_id: supplementedId, reason: 'plan_visit_due', source: 'system' },
+    ]));
+  });
+
   it('二维码类型写入失败：外层 BEGIN IMMEDIATE 整体回滚，不留下申请或类型行', async () => {
     const dir = makeTempDir('workbench-qr-atomic-');
     dirs.push(dir);

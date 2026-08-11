@@ -1010,3 +1010,58 @@ describe('所有权边界（design D10 / tasks 7.11）', () => {
     expect(readerKeys.length).toBe(0);
   });
 });
+
+describe('项目分类标签筛选（add-project-tags reporting lane）', () => {
+  it('多选标签按 OR 匹配、去重且不重复放大项目派生金额、次数或下钻', () => {
+    const { facts, service } = setup();
+    facts.projects = [
+      makeProject({ id: 'p1', tempNo: 'TP-1' }),
+      makeProject({ id: 'p2', tempNo: 'TP-2' }),
+      makeProject({ id: 'p3', tempNo: 'TP-3' }),
+    ];
+    facts.invoices = [
+      makeInvoice({ id: 'i1', projectId: 'p1', amountCents: 100n }),
+      makeInvoice({ id: 'i2', projectId: 'p2', amountCents: 200n }),
+      makeInvoice({ id: 'i3', projectId: 'p3', amountCents: 300n }),
+    ];
+    Object.assign(facts, {
+      listProjectTagAssignments: () => [
+        { projectId: 'p1', tagId: 'tag-a' },
+        { projectId: 'p1', tagId: 'tag-b' },
+        { projectId: 'p2', tagId: 'tag-b' },
+      ],
+      listProjectTagIds: () => ['tag-a', 'tag-b'],
+    });
+
+    const filter = { ...JULY, tagIds: ['tag-a', 'tag-b', 'tag-a'] };
+    const report = service.buildReport(filter);
+    expect(report.filters.tagIds).toEqual(['tag-a', 'tag-b']);
+    expect(report.pipeline.reduce((sum, row) => sum + row.projectCount, 0)).toBe(2);
+    expect(report.monthlyInvoices).toEqual([{ month: '2026-07', amountCents: 300n, count: 2 }]);
+    expect(service.getMetricDetails('monthly_invoice_amount', filter)).toHaveLength(2);
+  });
+
+  it('未选标签不限制；标签筛选启用时排除无项目的独立工作量与 projectId 为 null 的服务单', () => {
+    const { facts, service } = setup();
+    facts.projects = [makeProject({ id: 'p1' })];
+    facts.serviceOrders = [
+      makeOrder({ id: 'project-order', projectId: 'p1', serviceOrderNo: 'P-1' }),
+      makeOrder({ id: 'independent-order', projectId: null, serviceOrderNo: 'I-1' }),
+    ];
+    facts.shipToRequests = [makeShipToRequest({ status: 'processing', submittedAt: '2026-07-05' })];
+    facts.qrRequests = [makeQrRequest()];
+    facts.serialAddressUpdates = [makeSerialUpdate()];
+    Object.assign(facts, {
+      listProjectTagAssignments: () => [{ projectId: 'p1', tagId: 'tag-a' }],
+      listProjectTagIds: () => ['tag-a'],
+    });
+
+    expect(service.buildReport(JULY).monthlyServiceOrders[0].count).toBe(2);
+    expect(service.buildReport({ ...JULY, tagIds: [] }).monthlyServiceOrders[0].count).toBe(2);
+    const filtered = service.buildReport({ ...JULY, tagIds: ['tag-a'] });
+    expect(filtered.monthlyServiceOrders[0].count).toBe(1);
+    expect(filtered.shipToWorkload).toEqual([]);
+    expect(filtered.qrWorkload).toEqual([]);
+    expect(filtered.serialAddressUpdates).toEqual([]);
+  });
+});

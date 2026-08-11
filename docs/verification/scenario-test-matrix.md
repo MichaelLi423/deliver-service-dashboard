@@ -41,7 +41,7 @@
 | 追加迁移保存新增字段与枚举并兼容旧库 | 迁移诊断并清理孤立财务事实 | ✅ | `tests/integration/financial-integrity.sqlite.test.ts`「v14 存量库升级：结构违规不静默删、不阻断迁移，输出固定计数与治理提示，存量数据保留」<br>`tests/integration/financial-integrity.sqlite.test.ts`「治理成功：仅活跃孤立掉票经既有撤销语义进入撤销终态并保留原行；已撤销保持；审计仅计数；token 消费」 |  |
 | 追加迁移保存新增字段与枚举并兼容旧库 | 结构性外键违规持续报告且不阻断迁移 | ✅ | `tests/integration/financial-integrity.sqlite.test.ts`「v14 存量库升级：结构违规不静默删、不阻断迁移，输出固定计数与治理提示，存量数据保留」 |  |
 | 追加迁移保存新增字段与枚举并兼容旧库 | 迁移失败保留可恢复状态 | ✅ | `tests/persistence/migration.test.ts`「迁移失败：注入失败迁移 → 整体回滚、保留原库与迁移前安全备份、返回明确恢复信息」 |  |
-| 追加迁移 v16 保存项目暂定搬迁范围字段 | v15 已发布库追加 v16 不修改既有迁移 | ✅ | `tests/persistence/migration-v16.test.ts`「全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过」 |  |
+| 追加迁移 v16 保存项目暂定搬迁范围字段 | v15 已发布库追加 v16 不修改既有迁移 | ✅ | `tests/persistence/migration-v16.test.ts`「全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过」 |  |
 | 追加迁移 v16 保存项目暂定搬迁范围字段 | v15 库升级保留数据并初始化暂定范围列 | ✅ | `tests/persistence/migration-v16.test.ts`「v15 存量库升级到 v16：业务数据完整保留、legacy region 原文不变、v15 字段原样保留、新列 null 初始化」 |  |
 | 追加迁移 v16 保存项目暂定搬迁范围字段 | 暂定搬迁范围字段持久化保留 | ✅ | `tests/integration/create-project-ecc-rules.sqlite.test.ts`「关闭重开持久化：建档/编辑的暂定仪器范围字段重开后保留」 |  |
 | 追加迁移 v16 保存项目暂定搬迁范围字段 | v16 迁移失败保留可恢复状态 | ✅ | `tests/persistence/migration-v16.test.ts`「注入失败保留迁移前数据与可恢复状态：整体回滚、版本仍为 15、全部 v16 结构回滚、迁移前备份可恢复」 |  |
@@ -61,7 +61,7 @@
 | --- | --- | --- | --- | --- |
 | 待掉票金额指标仅由仍存在项目的有效财务事实计算 | 无任何项目时待掉票金额为 0 | ✅ | `tests/integration/financial-closure.sqlite.test.ts`「零项目为 0：仅孤立/脏财务事实（无任何项目）时 pendingAmount 必为 0」 |  |
 | 待掉票金额指标仅由仍存在项目的有效财务事实计算 | 孤立财务事实不污染指标 | ✅ | `tests/integration/financial-closure.sqlite.test.ts`「孤立排除：引用不存在项目的掉票/合同事实不计入指标」 |  |
-| 待掉票金额指标仅由仍存在项目的有效财务事实计算 | 仍存在项目的有效财务事实计入指标 | ✅ | `tests/integration/financial-closure.sqlite.test.ts`「已完成余额纳入：已完成项目仍有有效待掉票余额时按 final − 有效掉票计入」 |  |
+| 待掉票金额指标仅由仍存在项目的有效财务事实计算 | 仍存在项目的有效财务事实计入指标 | ✅ | `tests/integration/financial-closure.sqlite.test.ts`「已完成余额纳入：已完成项目仍有有效待掉票余额时按 final − 有效掉票计入」<br>`tests/integration/workbench-read-v2.sqlite.test.ts`「任务4.1：totalProjects 与待掉票金额在同一修订一致快照内读取（单一聚合查询）」 |  |
 | 待掉票金额指标仅由仍存在项目的有效财务事实计算 | 诊断清理与防复发 | ✅ | `tests/integration/financial-integrity.sqlite.test.ts`「治理后待掉票金额指标保持正常（现有 repository 读取验证，不改其代码）」<br>`tests/integration/financial-integrity.sqlite.test.ts`「防复发：正常 foreign_keys=ON 下写入无项目合同/掉票被拒；治理不产生新孤立行」 |  |
 | 待掉票金额指标仅由仍存在项目的有效财务事实计算 | 治理不改变掉票撤销终态与不可物理删除 | ✅ | `tests/integration/workbench-delete.sqlite.test.ts`「invoice 删除映射为撤销：必填撤销日期/原因，行不物理删除」 |  |
 | 待掉票金额指标仅由仍存在项目的有效财务事实计算 | 活跃孤立掉票治理撤销保留原行 | ✅ | `tests/integration/financial-integrity.sqlite.test.ts`「治理成功：仅活跃孤立掉票经既有撤销语义进入撤销终态并保留原行；已撤销保持；审计仅计数；token 消费」 |  |
@@ -86,9 +86,9 @@
 | 暂存地址与是否暂存 | 暂存信息不触发状态流转 | ✅ | `tests/domain/relocation-fields.test.ts`「暂存地址/是否暂存为手工维护执行事实：修改不影响主状态」 |  |
 | 计划装机日期 | 记录计划装机日期 | ✅ | `tests/main/workbench-v2-ipc.test.ts`「update_project 经 IPC：0810 标量（备注/暂存/是否批复/暂定数量/计划装机日期）保存并经 detail 回显」 |  |
 | 计划装机日期 | 计划装机日期不触发状态流转 | ✅ | `tests/integration/new-batch-behaviors.sqlite.test.ts`「计划装机完成日期：可随新建/补齐/更新写入，且不触发生命周期」 |  |
-| 项目暂定搬迁范围字段 | 建档时填写暂定搬迁范围并持久化 | ✅ | `tests/persistence/migration-v16.test.ts`「全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过」<br>`tests/renderer/app.test.tsx`「待进单通过公共建档 payload 显式提交暂定范围未填写三态且不登记仪器」 |  |
+| 项目暂定搬迁范围字段 | 建档时填写暂定搬迁范围并持久化 | ✅ | `tests/persistence/migration-v16.test.ts`「全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过」<br>`tests/renderer/app.test.tsx`「待进单通过公共建档 payload 显式提交暂定范围未填写三态且不登记仪器」 |  |
 | 项目暂定搬迁范围字段 | 暂定搬迁范围允许留空后补 | ✅ | `tests/integration/create-project-ecc-rules.sqlite.test.ts`「编辑资料回显：update_project 填写/修改/清空范围字段，不建仪器、不改状态」 |  |
-| 项目暂定搬迁范围字段 | UPS 未填写区别于否 | ✅ | `tests/persistence/migration-v16.test.ts`「全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过」 |  |
+| 项目暂定搬迁范围字段 | UPS 未填写区别于否 | ✅ | `tests/persistence/migration-v16.test.ts`「全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过」 |  |
 | 项目暂定搬迁范围字段 | 暂定搬迁范围不建仪器不改既有事实 | ✅ | `tests/domain/relocation-execution.test.ts`「项目暂定仪器范围（v16：只更新项目标量，不建仪器、不触发主状态）」 |  |
 | 暂定数量登记 | 只记暂定数量不建仪器 | ✅ | `tests/domain/relocation-execution.test.ts`「只记暂定数量不建仪器：保存数量信息且不创建任何仪器记录」 |  |
 | 暂定数量登记 | 仪器数量允许建档后补充 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
@@ -108,17 +108,17 @@
 | 主状态人工调整与系统校验 | 实际装机完成日期自动进入待验收 | ✅ | `tests/domain/lifecycle.test.ts`「自动触发 1：实际装机完成时间自动置为待验收，且优先于人工选择」<br>`tests/domain/relocation-status.test.ts`「录入实际装机完成时间自动进入待验收（TBD-07）」 |  |
 | 主状态人工调整与系统校验 | 验收报告自动进入待掉票 | ✅ | `tests/domain/lifecycle.test.ts`「自动触发 2：标记验收报告并填写报告形成日期自动置为待掉票（不要求客户确认）」 |  |
 | 主状态人工调整与系统校验 | 金额闭环自动重算 | ✅ | `tests/domain/lifecycle.test.ts`「自动触发 3：金额闭环在待掉票/已完成之间自动重算（优先于人工值）」 |  |
-| 主状态人工调整与系统校验 | 计划上门日期到达自动进入执行中优先于人工状态值 | ✅ | `tests/domain/lifecycle.test.ts`「到期自动推进优先于人工目标值」 |  |
-| 正式进单 | 填写进单日期保持填写值 | ✅ | `tests/domain/relocation-entry.test.ts`「填写进单时间保持填写值，不以当前时间覆盖」 |  |
+| 主状态人工调整与系统校验 | 计划上门日期到达自动进入执行中优先于人工状态值 | ✅ | `tests/domain/lifecycle.test.ts`「到期自动推进优先于人工目标值」<br>`tests/integration/workbench-facade.sqlite.test.ts`「同次 create/supplement 先保存未进单先执行标签，再以到期计划上门日期经 lifecycle 推进并审计」 |  |
+| 正式进单 | 填写进单日期保持填写值 | ✅ | `tests/domain/relocation-entry.test.ts`「填写进单时间保持填写值，不以当前时间覆盖」<br>`tests/renderer/app.test.tsx`「进单日期常显但仅正式进单可编辑，切换意图保留输入并进入正式进单 payload」 |  |
 | 正式进单 | 进单日期默认当天且可补录 | ✅ | `tests/domain/relocation-entry.test.ts`「进单时间未填写默认取当前时间，并允许进单后补录或修正」 |  |
-| 正式进单 | 待进单进单日期可空 | ✅ | `tests/domain/relocation-entry.test.ts`「待进单阶段进单时间可空」 |  |
+| 正式进单 | 待进单进单日期可空 | ✅ | `tests/domain/relocation-entry.test.ts`「待进单阶段进单时间可空」<br>`tests/renderer/app.test.tsx`「待进单保留可空进单日期，不渲染其余正式字段，未进单先执行只记录是否批复 boolean」 |  |
 | 正式进单 | 核心信息缺失拒绝进单 | ✅ | `tests/domain/relocation-entry.test.ts`「核心信息缺失拒绝进单并就地提示缺失项」 |  |
 | 正式进单 | 缺合同拒绝进单 | ✅ | `tests/domain/relocation-entry.test.ts`「缺合同拒绝进单并提示先补齐合同」 |  |
 | 正式进单 | 建档移除字段不阻塞进单 | ✅ | `tests/renderer/app.test.tsx`「新建项目由明确意图提交正式进单且不夹带服务单等已移除字段」 |  |
 | 未进单先执行 | 批复后优先安排上门 | ✅ | `tests/domain/relocation-status.test.ts`「未进单先执行标签与主状态并存：记录「是否批复」boolean 事实，主状态保持待进单」<br>`tests/integration/critical-paths.sqlite.test.ts`「1. 未进单先执行全链路」 |  |
 | 未进单先执行 | 先执行后进单由负责人确定主状态 | ✅ | `tests/domain/relocation-status.test.ts`「先执行后进单：正式进单基线待执行（无自动触发时），主状态由负责人后续确定」<br>`tests/domain/lifecycle.test.ts`「标签清除后主状态由负责人人工确定，且明确自动触发仍生效」 |  |
 | 未进单先执行 | 先录入实际装机完成日期后进单自动待验收 | ✅ | `tests/domain/relocation-status.test.ts`「先录入实际装机完成时间后进单自动待验收（TBD-07）」<br>`tests/integration/relocation-project-lifecycle.sqlite.test.ts`「未进单先执行 → 正式进单在原项目上完成，自动触发待验收」 |  |
-| 未进单先执行 | 计划上门日期到期后待进单自动进入执行中 | ✅ | `tests/domain/lifecycle.test.ts`「待进单带"未进单先执行"标签到期自动进入执行中」 |  |
+| 未进单先执行 | 计划上门日期到期后待进单自动进入执行中 | ✅ | `tests/domain/lifecycle.test.ts`「待进单带"未进单先执行"标签到期自动进入执行中」<br>`tests/integration/workbench-facade.sqlite.test.ts`「同次 create/supplement 先保存未进单先执行标签，再以到期计划上门日期经 lifecycle 推进并审计」 |  |
 | 未进单先执行 | 已在执行中的项目正式进单不倒退 | ✅ | `tests/integration/relocation-project-lifecycle.sqlite.test.ts`「正式进单不倒退：已在执行中的项目进单后保持执行中，在原项目上完成」 |  |
 | 执行准备与待验收触发 | 计划上门日期与运输日期分开记录 | ✅ | `tests/domain/relocation-status.test.ts`「计划上门时间与计划运输时间分开记录」 |  |
 | 执行准备与待验收触发 | 场地确认不影响状态流转 | ✅ | `tests/domain/relocation-status.test.ts`「场地确认不影响状态流转」 |  |
@@ -183,7 +183,7 @@
 | 待掉票指标仅由有效关联财务事实计算 | 无项目时指标显示 0 | ✅ | `tests/integration/financial-closure.sqlite.test.ts`「零项目为 0：仅孤立/脏财务事实（无任何项目）时 pendingAmount 必为 0」 |  |
 | 待掉票指标仅由有效关联财务事实计算 | 保持有效项目财务口径 | ✅ | `tests/integration/financial-closure.sqlite.test.ts`「已完成余额纳入：已完成项目仍有有效待掉票余额时按 final − 有效掉票计入」<br>`tests/integration/financial-closure.sqlite.test.ts`「已取消排除：仅已取消项目存在时 pendingAmount 为 0（口径不改动为仅活跃项目）」 |  |
 | 登记记录带确认的删除入口与项目/掉票语义保持 | 登记记录删除需确认 | ✅ | `tests/renderer/app.test.tsx`「删除确认取消时通用保护阻止 v2Delete 调用」 |  |
-| 登记记录带确认的删除入口与项目/掉票语义保持 | 各类登记记录均提供删除入口 | ✅ | `tests/renderer/app.test.tsx`「历史抽屉明确列出八类删除记录并分别走关联与独立读取路由」 |  |
+| 登记记录带确认的删除入口与项目/掉票语义保持 | 各类登记记录均提供删除入口 | ✅ | `tests/renderer/app.test.tsx`「八类登记记录逐类提供删除入口并调用对应 v2Delete kind」 |  |
 | 登记记录带确认的删除入口与项目/掉票语义保持 | 搬迁项目维持取消语义 | ✅ | `tests/renderer/app.test.tsx`「项目仅有取消入口且无物理删除，掉票只提供撤销并在终态禁编辑和重复撤销」 |  |
 | 登记记录带确认的删除入口与项目/掉票语义保持 | 掉票记录维持撤销语义 | ✅ | `tests/renderer/app.test.tsx`「项目仅有取消入口且无物理删除，掉票只提供撤销并在终态禁编辑和重复撤销」 |  |
 | 顶栏浏览全部记录入口与业务日期倒序 | 顶栏入口跳转完整记录视图 | ✅ | `tests/renderer/app.test.tsx`「统一历史入口按日期真正跨项目读取，展示项目上下文并受保护删除」 |  |

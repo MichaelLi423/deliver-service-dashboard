@@ -27,6 +27,7 @@ import { SqliteShipToRequestRepository } from './ship-to-repositories';
  * 的唯一统计公式消费；不维护业务状态、不复制各模块的校验规则。
  */
 export class SqliteReportingFactReader implements ReportingFactReader {
+  private readonly db: DatabaseSync;
   private readonly projects: SqliteProjectRepository;
   private readonly contracts: SqliteContractRepository;
   private readonly invoices: SqliteInvoiceRepository;
@@ -39,6 +40,7 @@ export class SqliteReportingFactReader implements ReportingFactReader {
   private readonly serialUpdates: SqliteSerialAddressUpdateRepository;
 
   constructor(db: DatabaseSync) {
+    this.db = db;
     this.projects = new SqliteProjectRepository(db);
     this.contracts = new SqliteContractRepository(db);
     this.invoices = new SqliteInvoiceRepository(db);
@@ -89,5 +91,16 @@ export class SqliteReportingFactReader implements ReportingFactReader {
 
   listSerialAddressUpdates(): SerialAddressUpdate[] {
     return this.serialUpdates.listAll();
+  }
+
+  listProjectTagAssignments(): readonly { projectId: string; tagId: string }[] {
+    return (this.db.prepare('SELECT project_id, tag_id FROM project_tag_assignments').all() as Array<{
+      project_id: string;
+      tag_id: string;
+    }>).map((row) => ({ projectId: row.project_id, tagId: row.tag_id }));
+  }
+
+  listProjectTagIds(): readonly string[] {
+    return (this.db.prepare('SELECT id FROM project_tag_definitions').all() as Array<{ id: string }>).map((row) => row.id);
   }
 }

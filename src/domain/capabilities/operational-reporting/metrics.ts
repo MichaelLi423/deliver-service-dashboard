@@ -36,6 +36,7 @@ export const REPORT_FILTER_FIELDS = [
   'transportCompany', // 运输公司
   'engineer', // 参与工程师（开单量可选筛选）
   'operator', // 责任人（按动作记录持久化的用户名快照筛选，工作量指标可选筛选）
+  'tagIds', // 项目分类标签（多选 OR；启用时仅匹配关联项目事实）
 ] as const;
 export type ReportFilterField = (typeof REPORT_FILTER_FIELDS)[number];
 
@@ -55,6 +56,8 @@ export interface ReportFilter {
   engineer?: string | null;
   /** 责任人（按动作记录持久化的用户名快照 trim 后精确匹配；null = 全部责任人；仅工作量指标）。 */
   operator?: string | null;
+  /** 项目分类标签多选：undefined/空数组不限制；非空按任一标签 OR 匹配。 */
+  tagIds?: readonly string[];
 }
 
 /** 指标口径字典条目。 */
@@ -79,7 +82,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '项目管道',
     timeAttribution: '当前状态快照（不按月归属；已取消项目排除）',
     factSource: 'relocation-project-lifecycle 项目主状态（消费校验结果，不维护状态）',
-    filters: ['region'],
+    filters: ['region', 'tagIds'],
     hasDrillDown: true,
   },
   {
@@ -87,7 +90,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '各区域新项目进单金额',
     timeAttribution: '正式进单时保存的合同 USD 含税金额快照，按已记录进单时间所属月份归属',
     factSource: 'contracts.entry_amount_snapshot_cents（正式进单锁定）+ projects.entry_at / region',
-    filters: ['monthFrom', 'monthTo', 'region'],
+    filters: ['monthFrom', 'monthTo', 'region', 'tagIds'],
     hasDrillDown: true,
   },
   {
@@ -95,7 +98,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '月度掉票金额',
     timeAttribution: '掉票时间（invoiced_at）所属月份；已撤销不计',
     factSource: 'invoices（有效记录，revoked_at IS NULL）',
-    filters: ['monthFrom', 'monthTo', 'region'],
+    filters: ['monthFrom', 'monthTo', 'region', 'tagIds'],
     hasDrillDown: true,
   },
   {
@@ -103,7 +106,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '月度掉票次数',
     timeAttribution: '掉票时间（invoiced_at）所属月份；已撤销不计',
     factSource: 'invoices（有效记录计数）',
-    filters: ['monthFrom', 'monthTo', 'region'],
+    filters: ['monthFrom', 'monthTo', 'region', 'tagIds'],
     hasDrillDown: true,
   },
   {
@@ -111,7 +114,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '月度开单量',
     timeAttribution: '开单时间（ordered_at，未填默认当前时间）所属月份',
     factSource: 'service_orders（按唯一非空服务单号计一次，四类业务分组）',
-    filters: ['monthFrom', 'monthTo', 'region', 'orderType', 'engineer'],
+    filters: ['monthFrom', 'monthTo', 'region', 'orderType', 'engineer', 'tagIds'],
     hasDrillDown: true,
   },
   {
@@ -119,7 +122,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '损坏维修统计',
     timeAttribution: '事项登记时间（registered_at）所属月份',
     factSource: 'damage_repair_items（记录数量；仅已使用备件折算 USD 金额；最新合同 USD 含税金额占比；按登记时持久化的账号内部 ID 与用户名快照归属责任人）',
-    filters: ['monthFrom', 'monthTo', 'region', 'operator'],
+    filters: ['monthFrom', 'monthTo', 'region', 'operator', 'tagIds'],
     hasDrillDown: true,
   },
   {
@@ -127,7 +130,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '月度物流费用汇总',
     timeAttribution: '实际物流费用申请（登记）时间（applied_at）所属月份',
     factSource: 'logistics_fees（合同预算价/物流成交价；实际费用旧列与物流成交价同值，仅历史兼容）按 batches.transport_company 分组',
-    filters: ['monthFrom', 'monthTo', 'region', 'transportCompany'],
+    filters: ['monthFrom', 'monthTo', 'region', 'transportCompany', 'tagIds'],
     hasDrillDown: true,
   },
   {
@@ -135,7 +138,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '物流成交价合同占比',
     timeAttribution: '实际物流费用申请（登记）时间所属月份',
     factSource: 'logistics_fees 物流成交价（即最终实际费用）÷ 固定汇率 7.2 折算 USD ÷ 最新合同 USD 含税金额',
-    filters: ['monthFrom', 'monthTo', 'region'],
+    filters: ['monthFrom', 'monthTo', 'region', 'tagIds'],
     hasDrillDown: true,
   },
   {
@@ -143,7 +146,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '历史异常批次',
     timeAttribution: '不按月归属（当前清单）；已取消项目排除',
     factSource: 'batches（已有物流成交价 discounted_price_cents 且无 logistics_fees 记录；历史数据形态，仅展示不提供补录指引）',
-    filters: ['region', 'transportCompany'],
+    filters: ['region', 'transportCompany', 'tagIds'],
     hasDrillDown: false,
   },
   {
@@ -151,7 +154,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: 'Account ID 申请工作量',
     timeAttribution: '首次实际提交时间（submitted_at）所属月份；待提交草稿不计、状态更新不重复计数',
     factSource: 'ship_to_requests（首次提交记录；按提交时持久化的账号内部 ID 与用户名快照归属责任人）',
-    filters: ['monthFrom', 'monthTo', 'operator'],
+    filters: ['monthFrom', 'monthTo', 'operator', 'tagIds'],
     hasDrillDown: true,
   },
   {
@@ -159,7 +162,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '二维码申请工作量',
     timeAttribution: '申请时间（requested_at）所属月份',
     factSource: 'qr_requests × 去重后选中类型（不按仪器/项目计数；按申请时持久化的账号内部 ID 与用户名快照归属责任人）',
-    filters: ['monthFrom', 'monthTo', 'operator'],
+    filters: ['monthFrom', 'monthTo', 'operator', 'tagIds'],
     hasDrillDown: true,
   },
   {
@@ -167,7 +170,7 @@ export const REPORT_METRIC_DEFINITIONS: readonly ReportMetricDefinition[] = [
     label: '序列号地址更新记录数',
     timeAttribution: '更新时间（updated_at）所属月份',
     factSource: 'serial_address_updates（逐条记录计数，可按客户分组；按登记时持久化的账号内部 ID 与用户名快照归属责任人）',
-    filters: ['monthFrom', 'monthTo', 'operator'],
+    filters: ['monthFrom', 'monthTo', 'operator', 'tagIds'],
     hasDrillDown: true,
   },
 ];

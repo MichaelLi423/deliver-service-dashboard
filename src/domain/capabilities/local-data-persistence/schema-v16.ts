@@ -19,9 +19,6 @@ import type { DatabaseSync } from 'node:sqlite';
 
 export const TEMPORARY_INSTRUMENT_FIELDS_MIGRATION_VERSION = 16;
 
-/** 当前最新 schema 版本（完整 bootstrap / 测试「最新版本」期望统一使用本常量）。 */
-export const LATEST_SCHEMA_VERSION = TEMPORARY_INSTRUMENT_FIELDS_MIGRATION_VERSION;
-
 export function applyTemporaryInstrumentFieldsMigration(db: DatabaseSync): void {
   db.exec(`
     ALTER TABLE projects ADD COLUMN temporary_instrument_name TEXT;

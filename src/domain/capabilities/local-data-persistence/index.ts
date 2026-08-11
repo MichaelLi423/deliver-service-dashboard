@@ -33,6 +33,7 @@ export * from './qr-request-repositories';
 export * from './reminder-settings-repositories';
 export * from './reporting-fact-reader';
 export * from './workbench-read-repository';
+export * from './project-tag-repository';
 export * from './financial-repositories';
 export * from './data-cleanup';
 export * from './due-plan-visit-advancer';

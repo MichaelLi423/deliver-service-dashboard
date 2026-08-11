@@ -100,9 +100,9 @@ export const scenarioMap = {
   'relocation-project-lifecycle': {
     '建档时填写可选项目备注': { evidence: [['tests/domain/relocation-fields.test.ts', '项目备注可空：建档后补充/修改/清空，不触发主状态流转']] },
     '建档后补充或修改项目备注': { evidence: [['tests/domain/relocation-fields.test.ts', '项目备注可空：建档后补充/修改/清空，不触发主状态流转']] },
-    '计划上门日期到达自动进入执行中优先于人工状态值': { evidence: [['tests/domain/lifecycle.test.ts', '到期自动推进优先于人工目标值']] },
+    '计划上门日期到达自动进入执行中优先于人工状态值': { evidence: [['tests/domain/lifecycle.test.ts', '到期自动推进优先于人工目标值'], ['tests/integration/workbench-facade.sqlite.test.ts', '同次 create/supplement 先保存未进单先执行标签，再以到期计划上门日期经 lifecycle 推进并审计']] },
     '建档移除字段不阻塞进单': { evidence: [['tests/renderer/app.test.tsx', '新建项目由明确意图提交正式进单且不夹带服务单等已移除字段']] },
-    '计划上门日期到期后待进单自动进入执行中': { evidence: [['tests/domain/lifecycle.test.ts', '待进单带"未进单先执行"标签到期自动进入执行中']] },
+    '计划上门日期到期后待进单自动进入执行中': { evidence: [['tests/domain/lifecycle.test.ts', '待进单带"未进单先执行"标签到期自动进入执行中'], ['tests/integration/workbench-facade.sqlite.test.ts', '同次 create/supplement 先保存未进单先执行标签，再以到期计划上门日期经 lifecycle 推进并审计']] },
     '已在执行中的项目正式进单不倒退': { evidence: [['tests/integration/relocation-project-lifecycle.sqlite.test.ts', '正式进单不倒退：已在执行中的项目进单后保持执行中，在原项目上完成']] },
     '计划上门日期到达待执行项目自动进入执行中': { evidence: [['tests/domain/lifecycle.test.ts', '到期：待执行 → 执行中']] },
     '计划上门日期到期待进单项目自动进入执行中': { evidence: [['tests/domain/lifecycle.test.ts', '到期：待进单 → 执行中（reason plan_visit_due）']] },
@@ -210,6 +210,7 @@ export const scenarioMap = {
     '填写进单日期保持填写值': {
       evidence: [
         ['tests/domain/relocation-entry.test.ts', '填写进单时间保持填写值，不以当前时间覆盖'],
+        ['tests/renderer/app.test.tsx', '进单日期常显但仅正式进单可编辑，切换意图保留输入并进入正式进单 payload'],
       ],
     },
     '进单日期默认当天且可补录': {
@@ -220,6 +221,7 @@ export const scenarioMap = {
     '待进单进单日期可空': {
       evidence: [
         ['tests/domain/relocation-entry.test.ts', '待进单阶段进单时间可空'],
+        ['tests/renderer/app.test.tsx', '待进单保留可空进单日期，不渲染其余正式字段，未进单先执行只记录是否批复 boolean'],
       ],
     },
     '核心信息缺失拒绝进单': {
@@ -338,6 +340,23 @@ export const scenarioMap = {
         ['tests/domain/relocation-fields.test.ts', '提供已进单判定事实：正式进单后为已进单，待进单项目为未进单'],
       ],
     },
+    '项目跨组多选分类标签': {
+      evidence: [
+        ['tests/integration/project-tags.sqlite.test.ts', '目录稳定排序、trim 校验、replace-set 去重且不触发生命周期'],
+        ['tests/renderer/app.test.tsx', '新建项目按组键盘可达地同组与跨组多选，并提交全局自定义 tagIds'],
+      ],
+    },
+    '创建自定义标签分组与标签': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '全局标签库可创建分组和组内标签，成功后刷新目录'],
+        ['tests/integration/project-tags.sqlite.test.ts', '重开 SQLite 后保留自定义目录与项目关联'],
+      ],
+    },
+    '分类标签不改变主状态或触发生命周期': {
+      evidence: [
+        ['tests/integration/project-tags.sqlite.test.ts', '设置和清空标签不改变项目状态、提醒、执行事实或状态转换审计'],
+      ],
+    },
   },
 
   // ────────────────────────── relocation-execution ────────────────────────
@@ -347,9 +366,9 @@ export const scenarioMap = {
     '暂存信息不触发状态流转': { evidence: [['tests/domain/relocation-fields.test.ts', '暂存地址/是否暂存为手工维护执行事实：修改不影响主状态']] },
     '记录计划装机日期': { evidence: [['tests/main/workbench-v2-ipc.test.ts', 'update_project 经 IPC：0810 标量（备注/暂存/是否批复/暂定数量/计划装机日期）保存并经 detail 回显']] },
     '计划装机日期不触发状态流转': { evidence: [['tests/integration/new-batch-behaviors.sqlite.test.ts', '计划装机完成日期：可随新建/补齐/更新写入，且不触发生命周期']] },
-    '建档时填写暂定搬迁范围并持久化': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过'], ['tests/renderer/app.test.tsx', '待进单通过公共建档 payload 显式提交暂定范围未填写三态且不登记仪器']] },
+    '建档时填写暂定搬迁范围并持久化': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过'], ['tests/renderer/app.test.tsx', '待进单通过公共建档 payload 显式提交暂定范围未填写三态且不登记仪器']] },
     '暂定搬迁范围允许留空后补': { evidence: [['tests/integration/create-project-ecc-rules.sqlite.test.ts', '编辑资料回显：update_project 填写/修改/清空范围字段，不建仪器、不改状态']] },
-    'UPS 未填写区别于否': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过']] },
+    'UPS 未填写区别于否': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过']] },
     '暂定搬迁范围不建仪器不改既有事实': { evidence: [['tests/domain/relocation-execution.test.ts', '项目暂定仪器范围（v16：只更新项目标量，不建仪器、不触发主状态）']] },
     '仪器数量允许建档后补充': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
     '编辑项目资料查看并留空暂定数量': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
@@ -1235,13 +1254,35 @@ export const scenarioMap = {
         ['tests/integration/operational-reporting.sqlite.test.ts', '导出三种格式：magic header、内容与同次实时 report model 一致、PNG 含指标与筛选值'],
       ],
     },
+    '多选项目分类标签按 OR 匹配': {
+      evidence: [
+        ['tests/domain/operational-reporting.test.ts', '多选标签按 OR 匹配、去重且不重复放大项目派生金额、次数或下钻'],
+        ['tests/integration/operational-reporting.sqlite.test.ts', '标签筛选从唯一项目关联集合读取，OR 匹配且拒绝未知标签'],
+      ],
+    },
+    '未选择项目分类标签不限制结果': {
+      evidence: [
+        ['tests/domain/operational-reporting.test.ts', '未选标签不限制；标签筛选启用时排除无项目的独立工作量与 projectId 为 null 的服务单'],
+      ],
+    },
+    '标签筛选排除不关联项目的独立记录': {
+      evidence: [
+        ['tests/domain/operational-reporting.test.ts', '未选标签不限制；标签筛选启用时排除无项目的独立工作量与 projectId 为 null 的服务单'],
+      ],
+    },
+    '下钻与导出沿用标签筛选': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '报表标签多选将 tagIds 保留到构建、下钻和导出，清空后等价不限制'],
+        ['tests/domain/operational-reporting.test.ts', '多选标签按 OR 匹配、去重且不重复放大项目派生金额、次数或下钻'],
+      ],
+    },
   },
 
   // ────────────────────────── project-financial-closure ───────────────────
   'project-financial-closure': {
     '无任何项目时待掉票金额为 0': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '零项目为 0：仅孤立/脏财务事实（无任何项目）时 pendingAmount 必为 0']] },
     '孤立财务事实不污染指标': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '孤立排除：引用不存在项目的掉票/合同事实不计入指标']] },
-    '仍存在项目的有效财务事实计入指标': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '已完成余额纳入：已完成项目仍有有效待掉票余额时按 final − 有效掉票计入']] },
+    '仍存在项目的有效财务事实计入指标': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '已完成余额纳入：已完成项目仍有有效待掉票余额时按 final − 有效掉票计入'], ['tests/integration/workbench-read-v2.sqlite.test.ts', '任务4.1：totalProjects 与待掉票金额在同一修订一致快照内读取（单一聚合查询）']] },
     '诊断清理与防复发': { evidence: [['tests/integration/financial-integrity.sqlite.test.ts', '治理后待掉票金额指标保持正常（现有 repository 读取验证，不改其代码）'], ['tests/integration/financial-integrity.sqlite.test.ts', '防复发：正常 foreign_keys=ON 下写入无项目合同/掉票被拒；治理不产生新孤立行']] },
     '治理不改变掉票撤销终态与不可物理删除': { evidence: [['tests/integration/workbench-delete.sqlite.test.ts', 'invoice 删除映射为撤销：必填撤销日期/原因，行不物理删除']] },
     '活跃孤立掉票治理撤销保留原行': { evidence: [['tests/integration/financial-integrity.sqlite.test.ts', '治理成功：仅活跃孤立掉票经既有撤销语义进入撤销终态并保留原行；已撤销保持；审计仅计数；token 消费']] },
@@ -1298,6 +1339,7 @@ export const scenarioMap = {
       evidence: [
         ['tests/domain/financial-closure.test.ts', '合同金额为 0 时正式进单 final 保持 null（不再强制另行录入，进单后基线待执行）'],
         ['tests/domain/relocation-entry.test.ts', '合同金额为 0 时正式进单 final 保持 null，另行录入 > 0 才设值（TBD-11 更新）'],
+        ['tests/renderer/app.test.tsx', '保存意图分组实时展示摘要，并在正式进单合同金额为零时提示'],
       ],
     },
     '最终可确认金额不得低于累计有效掉票金额': {
@@ -1586,6 +1628,7 @@ export const scenarioMap = {
       evidence: [
         ["tests/integration/import-seven-category-flow.sqlite.test.ts", "主状态由导入事实确定性重建"],
         ["tests/domain/historical-data-import.test.ts", "项目状态由事实推导重建"],
+        ["tests/domain/historical-data-import.test.ts", "导入状态真实变化与项目写入同事务记录最小转换审计"],
       ],
       note: "主状态由导入事实确定性重建",
     },
@@ -1660,7 +1703,7 @@ export const scenarioMap = {
     '新增字段与受控区域值持久化': { evidence: [['tests/integration/create-project-ecc-rules.sqlite.test.ts', 'v15 新字段建档后更新并关闭重开：region 受控枚举及 null/false 语义均持久化']] },
     '迁移诊断并清理孤立财务事实': { evidence: [['tests/integration/financial-integrity.sqlite.test.ts', 'v14 存量库升级：结构违规不静默删、不阻断迁移，输出固定计数与治理提示，存量数据保留'], ['tests/integration/financial-integrity.sqlite.test.ts', '治理成功：仅活跃孤立掉票经既有撤销语义进入撤销终态并保留原行；已撤销保持；审计仅计数；token 消费']] },
     '结构性外键违规持续报告且不阻断迁移': { evidence: [['tests/integration/financial-integrity.sqlite.test.ts', 'v14 存量库升级：结构违规不静默删、不阻断迁移，输出固定计数与治理提示，存量数据保留']] },
-    'v15 已发布库追加 v16 不修改既有迁移': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列 1..16、user_version=16、三列已建立、三态写入与 foreign_key_check 通过']] },
+    'v15 已发布库追加 v16 不修改既有迁移': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过']] },
     'v15 库升级保留数据并初始化暂定范围列': { evidence: [['tests/persistence/migration-v16.test.ts', 'v15 存量库升级到 v16：业务数据完整保留、legacy region 原文不变、v15 字段原样保留、新列 null 初始化']] },
     '暂定搬迁范围字段持久化保留': { evidence: [['tests/integration/create-project-ecc-rules.sqlite.test.ts', '关闭重开持久化：建档/编辑的暂定仪器范围字段重开后保留']] },
     'v16 迁移失败保留可恢复状态': { evidence: [['tests/persistence/migration-v16.test.ts', '注入失败保留迁移前数据与可恢复状态：整体回滚、版本仍为 15、全部 v16 结构回滚、迁移前备份可恢复']] },
@@ -1763,6 +1806,22 @@ export const scenarioMap = {
         ['tests/persistence/migration.test.ts', '迁移失败：注入失败迁移 → 整体回滚、保留原库与迁移前安全备份、返回明确恢复信息'],
       ],
     },
+    '重启后保留标签库与项目关联': {
+      evidence: [
+        ['tests/integration/project-tags.sqlite.test.ts', '重开 SQLite 后保留自定义目录与项目关联'],
+      ],
+    },
+    '备份恢复后保留标签库与项目关联': {
+      evidence: [
+        ['tests/integration/project-tags.sqlite.test.ts', '真实手动备份与恢复保留自定义标签和项目关联'],
+      ],
+    },
+    '升级幂等初始化预设标签并保留既有数据': {
+      evidence: [
+        ['tests/persistence/migration-v17.test.ts', '空库引导到 v17：建立规范化三表、精确且稳定地 seed 三组七标签'],
+        ['tests/persistence/migration-v17.test.ts', 'v16 存量库升级并重复 bootstrap：保留项目且不重复 seed'],
+      ],
+    },
   },
 
   // ─────────────────────────── workbench-interface ────────────────────────
@@ -1771,7 +1830,7 @@ export const scenarioMap = {
     '无项目时指标显示 0': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '零项目为 0：仅孤立/脏财务事实（无任何项目）时 pendingAmount 必为 0']] },
     '保持有效项目财务口径': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '已完成余额纳入：已完成项目仍有有效待掉票余额时按 final − 有效掉票计入'], ['tests/integration/financial-closure.sqlite.test.ts', '已取消排除：仅已取消项目存在时 pendingAmount 为 0（口径不改动为仅活跃项目）']] },
     '登记记录删除需确认': { evidence: [['tests/renderer/app.test.tsx', '删除确认取消时通用保护阻止 v2Delete 调用']] },
-    '各类登记记录均提供删除入口': { evidence: [['tests/renderer/app.test.tsx', '历史抽屉明确列出八类删除记录并分别走关联与独立读取路由']] },
+    '各类登记记录均提供删除入口': { evidence: [['tests/renderer/app.test.tsx', '八类登记记录逐类提供删除入口并调用对应 v2Delete kind']] },
     '搬迁项目维持取消语义': { evidence: [['tests/renderer/app.test.tsx', '项目仅有取消入口且无物理删除，掉票只提供撤销并在终态禁编辑和重复撤销']] },
     '掉票记录维持撤销语义': { evidence: [['tests/renderer/app.test.tsx', '项目仅有取消入口且无物理删除，掉票只提供撤销并在终态禁编辑和重复撤销']] },
     '顶栏入口跳转完整记录视图': { evidence: [['tests/renderer/app.test.tsx', '统一历史入口按日期真正跨项目读取，展示项目上下文并受保护删除']] },
@@ -1866,6 +1925,11 @@ export const scenarioMap = {
     '展示非阻塞事项并标注不阻塞': {
       evidence: [
         ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目'],
+      ],
+    },
+    '展示项目分类标签': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '编辑可替换标签，队列、详情、上下文按组展示且 DOM 顺序真实交换'],
       ],
     },
     '点击项目选中并刷新上下文': {
@@ -2150,6 +2214,27 @@ export const scenarioMap = {
     '当前上下文不挤占主队列': {
       evidence: [
         ['tests/interface/layout.test.ts', '1440 为主布局基准且上下文不遮挡队列'],
+      ],
+    },
+    '维护全局标签库': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '全局标签库可创建分组和组内标签，成功后刷新目录'],
+      ],
+    },
+    '按组多选并展示项目分类标签': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '新建项目按组键盘可达地同组与跨组多选，并提交全局自定义 tagIds'],
+        ['tests/renderer/app.test.tsx', '编辑可替换标签，队列、详情、上下文按组展示且 DOM 顺序真实交换'],
+      ],
+    },
+    '交换后的区域位置保持内容与联动': {
+      evidence: [
+        ['tests/renderer/app.test.tsx', '编辑可替换标签，队列、详情、上下文按组展示且 DOM 顺序真实交换'],
+      ],
+    },
+    '1440px 与 1024px 下布局可用': {
+      evidence: [
+        ['e2e/workbench-v2-layout.spec.ts', 'Oracle #10 任务指挥台布局、150% 文本缩放与 sticky 深层表单焦点均不遮挡'],
       ],
     },
     '1024px 宽下核心区域可操作': {

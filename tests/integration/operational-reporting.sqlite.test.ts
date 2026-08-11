@@ -218,6 +218,27 @@ function extractPngTextChunk(pngBytes: Buffer, keyword: string): string {
 }
 
 describe('operational-reporting SQLite 集成（7.11）', () => {
+  it('标签筛选从唯一项目关联集合读取，OR 匹配且拒绝未知标签', () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      const p1 = seedEnteredProject(ctx, { region: 'East', entryAt: '2026-07-01', snapshot: '10000' });
+      const p2 = seedEnteredProject(ctx, { region: 'South', entryAt: '2026-07-02', snapshot: '20000' });
+      ctx.db.prepare('INSERT INTO project_tag_assignments (project_id, tag_id) VALUES (?, ?)').run(p1, 'project-tag-project-type-relocation');
+      ctx.db.prepare('INSERT INTO project_tag_assignments (project_id, tag_id) VALUES (?, ?)').run(p1, 'project-tag-service-type-storage');
+      ctx.db.prepare('INSERT INTO project_tag_assignments (project_id, tag_id) VALUES (?, ?)').run(p2, 'project-tag-service-type-storage');
+      ctx.financial.recordInvoice(p1, { amountCents: 100n, invoicedAt: '2026-07-15' }, ACTOR);
+      ctx.financial.recordInvoice(p2, { amountCents: 200n, invoicedAt: '2026-07-15' }, ACTOR);
+
+      const filter = { monthFrom: '2026-07', monthTo: '2026-07', tagIds: ['project-tag-project-type-relocation', 'project-tag-service-type-storage'] };
+      expect(ctx.reporting.buildReport(filter).monthlyInvoices).toEqual([{ month: '2026-07', amountCents: 300n, count: 2 }]);
+      expect(() => ctx.reporting.buildReport({ ...filter, tagIds: ['unknown-tag'] })).toThrow(/UNKNOWN_PROJECT_TAG_ID/);
+      closeDatabase(ctx.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
   it('进单快照/掉票/开单/损坏/物流/工作量全链路在真实 SQLite 上实时统计', () => {
     const dir = makeTempDir();
     try {
@@ -463,7 +484,7 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
       expect(pngText).toBeDefined();
       const meta = JSON.parse(pngText);
       expect(meta.range).toEqual({ from: '2026-07', to: '2026-07' });
-      expect(meta.filters).toEqual({ region: 'East', orderType: null, transportCompany: null, engineer: null, operator: null });
+      expect(meta.filters).toEqual({ region: 'East', orderType: null, transportCompany: null, engineer: null, operator: null, tagIds: [] });
       const invoiceSection = meta.sections.find((s: { key: string }) => s.key === 'monthly_invoice');
       expect(invoiceSection.rows).toContainEqual(['2026-07', '5000.00', '1']);
 
@@ -634,7 +655,7 @@ describe('operational-reporting SQLite 集成（7.11）', () => {
       const png = ctx.exporter.exportPng(model);
       const pngText = extractPngTextChunk(png, 'Report');
       const meta = JSON.parse(pngText);
-      expect(meta.filters).toEqual({ region: null, orderType: null, transportCompany: null, engineer: null, operator: null });
+      expect(meta.filters).toEqual({ region: null, orderType: null, transportCompany: null, engineer: null, operator: null, tagIds: [] });
       const shipToSection = meta.sections.find((s: { key: string }) => s.key === 'ship_to_request_workload');
       expect(shipToSection.header).toEqual(['月份', '责任人', '首次提交数']);
       expect(shipToSection.rows).toContainEqual(['2026-07', '负责人甲', '1']);
@@ -658,7 +679,7 @@ describe('PNG 导出条形图：超过 MAX_SAFE_INTEGER 金额的标签与比例
   function invoiceOnlyReport(amounts: bigint[]): ReportModel {
     return {
       range: { from: '2026-07', to: '2026-07' },
-      filters: { region: null, orderType: null, transportCompany: null, engineer: null, operator: null },
+      filters: { region: null, orderType: null, transportCompany: null, engineer: null, operator: null, tagIds: [] },
       generatedAt: '2026-07-31T00:00:00+08:00',
       pipeline: [],
       entryAmountByRegion: [],

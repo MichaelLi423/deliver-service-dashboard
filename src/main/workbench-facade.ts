@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
 import { Money, formatCents } from '../domain/core/money';
 import { ValidationError } from '../domain/core/errors';
 import { SystemClock, assertValidBusinessDate } from '../domain/core/time';
@@ -24,7 +25,7 @@ import {
   SqliteShipToRequestRepository, SqliteWorkFactRepository,
   DataCleanupService, type DataCleanupOptions,
   SqliteDuePlanVisitAdvancer, type DuePlanVisitAdvanceResult,
-  WorkbenchReadRepository,
+  WorkbenchReadRepository, SqliteProjectTagRepository,
 } from '../domain/capabilities/local-data-persistence';
 import { readBusinessRevision } from '../domain/capabilities/local-data-persistence/identity';
 import { WorkbenchDeletePolicies } from './workbench-delete';
@@ -40,7 +41,8 @@ import type {
   WorkbenchV2MutationResult, WorkbenchV2OverviewDto, WorkbenchV2ProjectDetailDto,
   WorkbenchV2ProjectPageDto, WorkbenchV2ProjectPageRequest, WorkbenchV2ReminderLanesDto,
   WorkbenchV2ReminderLanesRequest, WorkbenchV2ReminderPageDto, WorkbenchV2ReminderPageRequest,
-  WorkbenchV2SectionPageDto, WorkbenchV2SectionPageRequest,
+  WorkbenchV2SectionPageDto, WorkbenchV2SectionPageRequest, ProjectTagCatalogDto,
+  ProjectTagCatalogRequestDto, ProjectTagMutationRequestDto, ProjectTagMutationResultDto,
 } from '../shared/ipc';
 import type { ShipToRequest as ShipToRequestRecord } from '../domain/capabilities/ship-to-management/ship-to';
 
@@ -84,6 +86,25 @@ const businessDate = (v: unknown, fieldName: string): string | undefined => {
   return raw;
 };
 
+/** `update_project` 中除项目分类外会进入项目写模型的已提交字段。 */
+const hasProjectUpdateFields = (update: ProjectUpdatePayload): boolean => {
+  const legacy = update as ProjectUpdatePayload & {
+    contractStartAt?: string | null;
+    contractEndAt?: string | null;
+    enteredAt?: string | null;
+  };
+  return [
+    update.customerName, update.region,
+    update.contractStartDate, update.contractEndDate, legacy.contractStartAt, legacy.contractEndAt,
+    update.oldSiteContact, update.newSiteContact, update.oldSiteAddress, update.newSiteAddress,
+    update.plannedVisitAt, update.plannedTransportAt, update.plannedInstallAt, update.plannedInstallDoneAt,
+    update.siteConfirmed, update.projectNote, update.temporaryStorageAddress, update.isTemporaryStorage,
+    update.managerApproved, update.temporaryInstrumentCount, update.temporaryInstrumentName,
+    update.temporaryInstrumentModel, update.temporaryHasUps, update.ecc, update.entryAt,
+    legacy.enteredAt, update.contractUsdTaxAmount, update.finalConfirmableAmount,
+  ].some((value) => value !== undefined);
+};
+
 /** 仪器批量导入单批最大行数（合理上限，超出要求拆分分批导入）。 */
 export const INSTRUMENT_BULK_IMPORT_MAX_ROWS = 500;
 
@@ -101,6 +122,7 @@ export class WorkbenchFacade {
   private readonly shipRequests: SqliteShipToRequestRepository;
   private readonly serialUpdates: SqliteSerialAddressUpdateRepository;
   private readonly qrRequests: SqliteQrRequestRepository;
+  private readonly projectTags: SqliteProjectTagRepository;
 
   constructor(
     private readonly db: DatabaseSync,
@@ -129,6 +151,7 @@ export class WorkbenchFacade {
     this.shipRequests = new SqliteShipToRequestRepository(db);
     this.serialUpdates = new SqliteSerialAddressUpdateRepository(db);
     this.qrRequests = new SqliteQrRequestRepository(db);
+    this.projectTags = new SqliteProjectTagRepository(db);
   }
 
   // ---------------------------------------------------------------------------
@@ -195,6 +218,22 @@ export class WorkbenchFacade {
   /** 提醒泳道（tasks 7.6）：先按日期选列、再按列读取项目（列 cursor 不重算日期集合）。 */
   v2ReminderLanes(request: WorkbenchV2ReminderLanesRequest): WorkbenchV2ReminderLanesDto {
     return this.v2Reader().reminderLanes(request);
+  }
+
+  v2TagCatalog(request: ProjectTagCatalogRequestDto = {}): ProjectTagCatalogDto {
+    return this.projectTags.catalog(request.projectId);
+  }
+
+  v2TagMutate(request: ProjectTagMutationRequestDto): ProjectTagMutationResultDto {
+    let result!: ProjectTagMutationResultDto;
+    this.transaction(() => {
+      switch (request.command) {
+        case 'create_group': result = { businessRevision: 0, group: this.projectTags.createGroup(request.payload) }; break;
+        case 'create_tag': { const created = this.projectTags.createTag(request.payload); result = { businessRevision: 0, ...created }; break; }
+        case 'replace_project_tags': { const assigned = this.projectTags.replaceSet(request.payload.projectId, request.payload.tagIds); result = { businessRevision: 0, projectId: request.payload.projectId, ...assigned }; break; }
+      }
+    });
+    return { ...result, businessRevision: readBusinessRevision(this.db) } as ProjectTagMutationResultDto;
   }
 
   // ---------------------------------------------------------------------------
@@ -468,7 +507,12 @@ export class WorkbenchFacade {
       projectService.linkCustomer(project.id, customer.id);
       projectService.setRegion(project.id, input.region);
       projectService.updateBasicInfo(project.id, { oldSiteContact: input.oldSiteContact, newSiteContact: input.newSiteContact, oldSiteAddress: input.oldSiteAddress ?? null, newSiteAddress: input.newSiteAddress ?? null, contractStartDate: input.contractStartDate ?? null, contractEndDate: input.contractEndDate ?? null });
-      projectService.updateExecutionPreparation(project.id, {
+      // 先记录未进单先执行事实，再写可能已到期的计划上门日期。到期自动推进后
+      // 项目已是 executing，反过来再设置标签会被 LABEL_ONLY_PENDING 错误拒绝。
+      if (input.intent === 'pre_entry_execution') {
+        projectService.setPreEntryExecution(project.id, { approved: input.managerApproved });
+      }
+      this.updateExecutionPreparationWithDueAudit(project.id, {
         planVisitAt: input.planVisitAt ? businessDate(input.planVisitAt, '计划上门日期') ?? null : null,
         planTransportAt: input.planTransportAt ? businessDate(input.planTransportAt, '计划运输日期') ?? null : null,
         siteConfirmed: input.siteConfirmed ?? false,
@@ -530,13 +574,10 @@ export class WorkbenchFacade {
           ecc: text(input.ecc),
           entryAt: businessDate(input.entryAt, '进单日期'),
         });
-      } else if (input.intent === 'pre_entry_execution') {
-        // 0810：未进单先执行以「是否批复」boolean 事实为准（managerApproved），
-        // 不再收集批复原因/缺失资料（后端拒绝 wizard 的 approvalReason，见上方废弃字段检查）。
-        projectService.setPreEntryExecution(project.id, { approved: input.managerApproved });
       }
       // intent='draft'：仅待进单草稿（无合同、无 ECC、不正式进单）。
       if (input.actualInstallDoneAt) projectService.recordActualInstallDone(project.id, businessDate(input.actualInstallDoneAt, '实际装机完成日期') ?? '');
+      if (input.tagIds !== undefined) this.projectTags.replaceSet(project.id, input.tagIds);
     });
     return { projectId };
   }
@@ -546,7 +587,7 @@ export class WorkbenchFacade {
    * - 普通资料（客户重关联/区域/联系人/地址/合同起止/计划上门运输/现场确认）任何状态可更新；
    * - ECC / 进单时间 / 合同金额 / 最终可确认金额更正仅允许已正式进单项目（待进单项目必须走
    *   core/formalEntry 语义，update_project 不绕过正式进单校验，避免绕过财务闭环）；
-   * - 已取消项目禁止任何资料更新（终态）；
+   * - 已取消项目禁止资料更新（终态），但仅替换分类标签不进入项目写模型；
    * - 三态输入：undefined=未提交、null=显式清空（仅可空字段；ECC/进单时间 null 视为未提交，
    *   金额 null 解析为 0 交由领域校验决定是否接受）、有值=覆盖；布尔显式传 false。
    */
@@ -557,6 +598,15 @@ export class WorkbenchFacade {
       if (!project) {
         throw new ValidationError('PROJECT_NOT_FOUND', `项目不存在: ${projectId}`);
       }
+      const hasFields = hasProjectUpdateFields(update);
+      // 标签是独立分类关联：仅提交 tagIds 时只验证项目/标签并在本事务 replace-set，
+      // 不触发项目标量更新、lifecycle、提醒或状态转换审计；已取消项目亦可维护。
+      if (update.tagIds !== undefined && !hasFields) {
+        this.projectTags.replaceSet(projectId, update.tagIds);
+        return;
+      }
+      // 空 patch 仅完成项目存在性校验，不写入任何业务记录。
+      if (!hasFields) return;
       if (project.status === 'cancelled') {
         throw new ValidationError('CANCELLED_PROJECT', '已取消项目禁止修改项目资料');
       }
@@ -609,7 +659,7 @@ export class WorkbenchFacade {
         update.plannedInstallAt !== undefined || update.plannedInstallDoneAt !== undefined ||
         update.siteConfirmed !== undefined
       ) {
-        projectService.updateExecutionPreparation(projectId, {
+        this.updateExecutionPreparationWithDueAudit(projectId, {
           planVisitAt: update.plannedVisitAt === undefined ? undefined : update.plannedVisitAt === null ? null : businessDate(update.plannedVisitAt, '计划上门日期'),
           planTransportAt: update.plannedTransportAt === undefined ? undefined : update.plannedTransportAt === null ? null : businessDate(update.plannedTransportAt, '计划运输日期'),
           siteConfirmed: update.siteConfirmed,
@@ -685,6 +735,7 @@ export class WorkbenchFacade {
       // 空串/null 解析为 0，由领域校验拒绝非法清空。
       if (update.contractUsdTaxAmount !== undefined) this.financialService().setContractUsdTaxAmount(projectId, parseAmountInput(update.contractUsdTaxAmount));
       if (update.finalConfirmableAmount !== undefined) this.financialService().setFinalConfirmableAmount(projectId, parseAmountInput(update.finalConfirmableAmount));
+      if (update.tagIds !== undefined) this.projectTags.replaceSet(projectId, update.tagIds);
     });
     return { projectId };
   }
@@ -762,7 +813,15 @@ export class WorkbenchFacade {
         input.plannedVisitAt !== undefined || input.plannedTransportAt !== undefined ||
         input.siteConfirmed !== undefined
       ) {
-        projectService.updateExecutionPreparation(projectId, {
+        // 同 create：先记录标签，避免已到期日期把状态推进后标签无法再保存。
+        if (!isFormallyEntered(this.projects.findById(projectId)!)) {
+          if (input.managerApproved !== undefined) {
+            projectService.setPreEntryExecution(projectId, { approved: input.managerApproved });
+          } else if (input.approvalReason !== undefined && (input.approvalReason ?? '').trim() !== '') {
+            projectService.setPreEntryExecution(projectId, { approved: true });
+          }
+        }
+        this.updateExecutionPreparationWithDueAudit(projectId, {
           planVisitAt: input.plannedVisitAt === undefined ? undefined : input.plannedVisitAt === null ? null : businessDate(input.plannedVisitAt, '计划上门日期'),
           planTransportAt: input.plannedTransportAt === undefined ? undefined : input.plannedTransportAt === null ? null : businessDate(input.plannedTransportAt, '计划运输日期'),
           siteConfirmed: input.siteConfirmed,
@@ -840,7 +899,7 @@ export class WorkbenchFacade {
       // 0810：以「是否批复」boolean 事实为准（managerApproved 显式提供优先）；
       // 旧调用仅传 approvalReason（非空）视为已批复，不再收集批复原因/缺失资料。
       if (!isFormallyEntered(this.projects.findById(projectId)!)) {
-        if (input.managerApproved !== undefined) {
+        if (input.managerApproved !== undefined && !this.projects.findById(projectId)!.preEntryExecution) {
           projectService.setPreEntryExecution(projectId, { approved: input.managerApproved });
         } else if (input.approvalReason !== undefined && (input.approvalReason ?? '').trim() !== '') {
           projectService.setPreEntryExecution(projectId, { approved: true });
@@ -1141,6 +1200,24 @@ export class WorkbenchFacade {
   drillDown(metric:string,filter:ReportFilterDto):Array<Record<string,string|number|boolean|null>> { return serializeRows(new ReportingService(new SqliteReportingFactReader(this.db)).getMetricDetails(metric as ReportMetricKey,filter)); }
 
   private actor(){const s=this.session();return{accountId:s.accountId,username:s.username};}
+  /**
+   * 日期编辑/同次建档统一经 ProjectService 的 lifecycle 判定；仅 plan_visit_due 的真实
+   * 转换在同一外层事务追加系统审计，因此 projects 更新、business revision 与审计同生共灭。
+   */
+  private updateExecutionPreparationWithDueAudit(projectId: string, input: Parameters<ProjectService['updateExecutionPreparation']>[1]): void {
+    const before = this.projects.findById(projectId)!;
+    this.projectService().updateExecutionPreparation(projectId, input);
+    const after = this.projects.findById(projectId)!;
+    if (before.status === after.status) return;
+    const today = new SystemClock().today();
+    if (after.planVisitAt === null || after.planVisitAt > today) return;
+    this.db.prepare(
+      `INSERT INTO project_status_transition_audit (
+         id, project_id, from_status, to_status, reason,
+         effective_business_date, source, created_at
+       ) VALUES (?,?,?,?,?,?,?,?)`,
+    ).run(randomUUID(), projectId, before.status, after.status, 'plan_visit_due', today, 'system', new SystemClock().nowIso());
+  }
   private projectService(){return new ProjectService(this.projects,this.contracts,new SqliteInvoiceReadRepository(this.db));}
   private reminderService(){return new ReminderService(this.projects,new SqliteReminderSettingsRepository(this.db));}
   private executionService(){return new ExecutionService(this.batches,this.instruments,new SqliteBatchChangeHistoryRepository(this.db),this.activities,new SqliteActivityEngineerRepository(this.db),this.workFacts,this.fees,{onExecutionStarted:(id)=>{this.projectService().adjustStatus(id,'executing',{executionStarted:true});}});}

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { DatabaseSync } from 'node:sqlite';
 import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
-import { closeDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
-import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
+import { closeDatabase, openDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
+import { readBusinessRevision } from '../../src/domain/capabilities/local-data-persistence/identity';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v17';
 import {
   SqliteContractRepository,
   SqliteInvoiceReadRepository,
@@ -439,6 +440,54 @@ describe('完整提醒视图与提醒泳道读取模型（tasks 7.3 / 7.6）', (
       // 列内不重复：首页 + 推进页拼接无重复
       const ids = [...col.projects, ...nextCol.projects].map((p) => p.projectId);
       expect(new Set(ids).size).toBe(20);
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('reminderLanes：WAL 并发写入不会混合日期列、列 total 与 businessRevision', () => {
+    const dir = makeTempDir();
+    try {
+      const db = reminderDb(dir);
+      seed(db, 'snapshot-old', '2026-08-10', '旧快照');
+      const oldRevision = readBusinessRevision(db);
+      const writer = openDatabase({ path: `${dir}/workbench.db` });
+      const originalPrepare = db.prepare.bind(db);
+      let injected = false;
+
+      // 日期集合首次查询完成后才提交写入。若 reminderLanes 未包住整个 DTO，
+      // 随后的列查询/total/revision 将读到新修订，形成 dates 与 total/revision 混读。
+      (db as { prepare: typeof db.prepare }).prepare = ((sql: string) => {
+        const statement = originalPrepare(sql);
+        if (!sql.includes('SELECT DISTINCT substr(reminder_at, 1, 10) AS d')) return statement;
+        return new Proxy(statement, {
+          get(target, property, receiver) {
+            if (property !== 'all') return Reflect.get(target, property, receiver);
+            return (...args: Parameters<typeof target.all>) => {
+              const rows = target.all(...args);
+              writer.prepare(
+                `INSERT INTO projects (id, temp_no, status, region, reminder_at, reminder_note, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?)`,
+              ).run('snapshot-new', 'TP-snapshot-new', 'pending_execution', 'East', '2026-08-10', '并发新增', 't', 't');
+              injected = true;
+              return rows;
+            };
+          },
+        });
+      }) as typeof db.prepare;
+
+      try {
+        const lanes = repo(db).reminderLanes({});
+        expect(injected).toBe(true);
+        expect(lanes.dates).toEqual(['2026-08-10']);
+        expect(lanes.lanes[0]).toMatchObject({ total: 1, projects: [{ projectId: 'snapshot-old' }] });
+        expect(lanes.businessRevision).toBe(oldRevision);
+      } finally {
+        (db as { prepare: typeof db.prepare }).prepare = originalPrepare;
+        closeDatabase(writer);
+      }
+      expect(readBusinessRevision(db)).toBeGreaterThan(oldRevision);
       closeDatabase(db);
     } finally {
       cleanupTempDir(dir);

@@ -65,13 +65,13 @@ async function createFormalProject(
   page: Page,
   customerName: string,
   ecc: string,
-  region = '华东',
+  region = 'East',
   contractAmount?: string,
 ): Promise<void> {
   await page.getByRole('button', { name: '新建搬迁项目' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('客户名称').fill(customerName);
-  await dialog.getByLabel('区域').fill(region);
+  await dialog.getByLabel('区域').selectOption(region);
   await dialog.getByLabel('合同开始日期').fill('2026-08-01');
   await dialog.getByLabel('合同截止日期').fill('2027-07-31');
   // 保存意图选「正式进单」：ECC/进单日期/合同金额仅随正式进单提交
@@ -149,7 +149,7 @@ test.describe('真实打包 Electron UI 冒烟补充（WorkbenchV2 · 临时 use
 
       // 正式进单一个无任何掉票历史的项目（有掉票历史禁止取消）。
       // 合同金额为空时正式进单必须另行录入最终可确认金额 > 0（领域校验）。
-      await createFormalProject(page, 'E2E 取消终态客户', 'E2E-CANCEL-0001', '华东', '100000');
+      await createFormalProject(page, 'E2E 取消终态客户', 'E2E-CANCEL-0001', 'East', '100000');
 
       // 选中项目 → 当前上下文出现取消入口
       const row = page
@@ -203,7 +203,7 @@ test.describe('真实打包 Electron UI 冒烟补充（WorkbenchV2 · 临时 use
       await initializeAndEnterWorkbench(page);
 
       // 造数：正式进单项目 + 本月一张掉票（报表 monthly_invoice / 条形图有数据）
-      await createFormalProject(page, 'E2E 报表导出客户', 'E2E-EXPORT-0001', '华东', '100000');
+      await createFormalProject(page, 'E2E 报表导出客户', 'E2E-EXPORT-0001', 'East', '100000');
       await page.getByRole('button', { name: '快速记录', exact: false }).first().click();
       await page.getByRole('dialog').getByRole('button', { name: /^掉票/ }).click();
       const invoiceDialog = page.getByRole('dialog');

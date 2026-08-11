@@ -157,6 +157,27 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     return ctx;
   }
 
+  it('标签 catalog/mutate 经受信 IPC 返回信封，并刷新队列与详情摘要', async () => {
+    const ctx = await loggedIn();
+    const created = await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'create_project', payload: { intent: 'draft', customerName: 'IPC 标签客户', region: 'East' },
+    } as WorkbenchV2MutationRequest) as { changed: { projectId: string } };
+    const projectId = created.changed.projectId;
+    const groupEnvelope = await ctx.bus.invoke(IPC_CHANNELS.workbenchV2TagMutate, 100, { command: 'create_group', payload: { name: 'IPC 分组' } }) as { ok: boolean; data: { group: { id: string } } };
+    expect(groupEnvelope.ok).toBe(true);
+    const tagEnvelope = await ctx.bus.invoke(IPC_CHANNELS.workbenchV2TagMutate, 100, { command: 'create_tag', payload: { groupId: groupEnvelope.data.group.id, name: 'IPC 标签' } }) as { ok: boolean; data: { tag: { id: string } } };
+    const setEnvelope = await ctx.bus.invoke(IPC_CHANNELS.workbenchV2TagMutate, 100, { command: 'replace_project_tags', payload: { projectId, tagIds: [tagEnvelope.data.tag.id] } }) as { ok: boolean; data: { groupedTags: unknown[] } };
+    expect(setEnvelope).toMatchObject({ ok: true, data: { groupedTags: [{ groupName: 'IPC 分组', tagNames: ['IPC 标签'] }] } });
+    const catalog = await ctx.bus.invoke(IPC_CHANNELS.workbenchV2TagCatalog, 100, { projectId }) as { selectedTagIds: string[] };
+    expect(catalog.selectedTagIds).toEqual([tagEnvelope.data.tag.id]);
+    const page = await ctx.bus.invoke(IPC_CHANNELS.workbenchV2ProjectPage, 100, { query: 'IPC 标签客户' }) as { projects: Array<{ groupedTags: unknown[] }> };
+    expect(page.projects[0].groupedTags).toHaveLength(1);
+    const detail = await ctx.bus.invoke(IPC_CHANNELS.workbenchV2ProjectDetail, 100, projectId) as { groupedTags: unknown[] };
+    expect(detail.groupedTags).toHaveLength(1);
+    const unknown = await ctx.bus.invoke(IPC_CHANNELS.workbenchV2TagMutate, 100, { command: 'replace_project_tags', payload: { projectId, tagIds: ['unknown'] } }) as { ok: boolean; error: { code: string } };
+    expect(unknown).toMatchObject({ ok: false, error: { code: 'PROJECT_TAG_UNKNOWN_TAG' } });
+  });
+
   it('v2Mutate create_project 返回 bounded 结果（revision + invalidate + changed），无 snapshot 字段', async () => {
     const ctx = await loggedIn();
     const before = readBusinessRevision(ctx.db());
