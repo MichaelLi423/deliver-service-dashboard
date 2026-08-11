@@ -173,9 +173,13 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.not.objectContaining({ limit: expect.anything() }));
   });
 
-  it('全局标签库可创建分组和组内标签，成功后刷新目录', async () => {
+  it('最新布局：顶部主导航直接显示标签管理并打开全局标签库', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    await screen.findByRole('heading', { name: /高密项目队列/ }); fireEvent.click(screen.getByText('数据管理')); fireEvent.click(screen.getByRole('button', { name: '项目分类标签库' }));
+    await screen.findByRole('heading', { name: /高密项目队列/ });
+    const navigation = screen.getByRole('navigation', { name: '主导航' });
+    const tagManagement = within(navigation).getByRole('button', { name: '标签管理' });
+    expect(tagManagement).toBeVisible();
+    fireEvent.click(tagManagement);
     const dialog = screen.getByRole('dialog', { name: '项目分类标签库' });
     expect(await within(dialog).findByText('重点跟进')).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText(/分组名称/), { target: { value: '客户层级' } }); fireEvent.click(within(dialog).getByRole('button', { name: '创建分组' }));
@@ -195,14 +199,25 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'create_project', payload: expect.objectContaining({ tagIds: ['tag-move', 'tag-pm', 'tag-custom'] }) })));
   });
 
-  it('编辑可替换标签，队列、详情、上下文按组展示且 DOM 顺序真实交换', async () => {
+  it('最新布局：提醒后是单一项目工作区，内部上下文先于详情，再接高密项目队列并保持联动', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    const queue = await screen.findByRole('region', { name: /高密项目队列/ }); const reminders = screen.getByRole('region', { name: /项目提醒快速处理/ }); const detail = await screen.findByRole('region', { name: '客户 1' }); const context = screen.getByRole('complementary', { name: '当前上下文' });
-    expect(reminders.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); expect(detail.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); expect(queue.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const queue = await screen.findByRole('region', { name: /高密项目队列/ });
+    const reminders = screen.getByRole('region', { name: /项目提醒快速处理/ });
+    const workspace = screen.getByRole('region', { name: '项目工作区' });
+    const context = within(workspace).getByRole('complementary', { name: '当前上下文' });
+    const detailTabs = within(workspace).getByRole('tablist', { name: '项目详情' });
+    const detail = within(workspace).getByRole('region', { name: '客户 1' });
+    expect(reminders.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(workspace.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(context.compareDocumentPosition(detailTabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     for (const region of [queue, detail, context]) { expect(within(region).getByLabelText('项目分类标签')).toHaveTextContent('项目类型'); expect(within(region).getByLabelText('项目分类标签')).toHaveTextContent('ICPMS'); }
     fireEvent.click(within(detail).getByRole('button', { name: '编辑项目资料' })); const dialog = screen.getByRole('dialog', { name: '编辑项目资料' }); fireEvent.click(within(dialog).getByRole('checkbox', { name: '搬迁' })); fireEvent.click(within(dialog).getByRole('checkbox', { name: '重点跟进' })); fireEvent.click(within(dialog).getByRole('button', { name: '保存项目资料' }));
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: { projectId: 'p-1', tagIds: ['tag-icpms', 'tag-custom'] } }));
-    const firstRow = within(queue).getByRole('row', { name: /^客户 1 / }); fireEvent.keyDown(firstRow, { key: 'ArrowDown' }); await waitFor(() => expect(screen.getByRole('complementary', { name: '当前上下文' })).toHaveTextContent('客户 2'));
+    const firstRow = within(queue).getByRole('row', { name: /^客户 1 / }); fireEvent.keyDown(firstRow, { key: 'ArrowDown' }); await waitFor(() => expect(workspace).toHaveTextContent('客户 2'));
+    fireEvent.click(within(reminders).getByRole('button', { name: /客户 1/ }));
+    await waitFor(() => expect(workspace).toHaveTextContent('客户 1'));
+    fireEvent.click(screen.getByRole('button', { name: /执行中.*20000.*平均 5 天/ }));
+    await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'executing' })));
   });
 
   it('编辑项目无任何变化时不发送空更新并给出正常反馈', async () => {
@@ -226,11 +241,11 @@ describe('Oracle #10 bounded workbench renderer', () => {
       restoreFromBackup: vi.fn().mockImplementation(() => { restored = true; return Promise.resolve({ canceled: false, restored: true }); }),
     });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true }); vi.spyOn(window, 'confirm').mockReturnValue(true); render(<App />);
-    await screen.findByRole('region', { name: '客户 1' }); fireEvent.click(screen.getByText('数据管理')); fireEvent.click(screen.getByRole('button', { name: '项目分类标签库' }));
+    await screen.findByRole('region', { name: '客户 1' }); fireEvent.click(screen.getByRole('button', { name: '标签管理' }));
     const oldLibrary = screen.getByRole('dialog', { name: '项目分类标签库' }); expect(await within(oldLibrary).findByText('旧目录标签')).toBeInTheDocument(); fireEvent.click(within(oldLibrary).getByRole('button', { name: '关闭' }));
     fireEvent.click(screen.getByRole('button', { name: '恢复备份' }));
     await waitFor(() => expect(api.v2TagCatalog).toHaveBeenCalledTimes(2));
-    await screen.findByRole('region', { name: '恢复客户' }); fireEvent.click(screen.getByRole('button', { name: '项目分类标签库' }));
+    await screen.findByRole('region', { name: '恢复客户' }); fireEvent.click(screen.getByRole('button', { name: '标签管理' }));
     const library = screen.getByRole('dialog', { name: '项目分类标签库' }); expect(await within(library).findByText('恢复标签')).toBeInTheDocument(); expect(within(library).queryByText('旧目录标签')).not.toBeInTheDocument(); fireEvent.click(within(library).getByRole('button', { name: '关闭' }));
     fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
     const edit = screen.getByRole('dialog', { name: '编辑项目资料' }); expect(within(edit).getByRole('checkbox', { name: '恢复标签' })).toBeChecked(); fireEvent.change(within(edit).getByLabelText(/客户名称/), { target: { value: '恢复客户已核对' } }); fireEvent.click(within(edit).getByRole('button', { name: '保存项目资料' }));

@@ -836,6 +836,7 @@ export function WorkbenchV2({
           </button>
           <button onClick={() => setLayer({ kind: "history" })}>浏览全部记录</button>
           <button onClick={() => setLayer({ kind: "report" })}>运营报表</button>
+          <button onClick={() => setLayer({ kind: "tags" })}>标签管理</button>
           <details className="data-menu">
             <summary>数据管理</summary>
             <div>
@@ -973,29 +974,41 @@ export function WorkbenchV2({
             </button>
           </div>
         </section>
-        <div className="workbench-grid">
-          <section
-            id="reminders"
-            tabIndex={-1}
-            className="panel reminder-panel"
-            aria-labelledby="reminder-title"
-          >
-            <div className="panel-head">
-              <div>
-                <h2 id="reminder-title">
-                  项目提醒快速处理 {overview?.reminderTotal ?? 0}
-                </h2>
-                <p>按业务日期分列，同日项目集中处理</p>
-              </div>
-              <button
-                className="text-action"
-                onClick={() => setLayer({ kind: "reminder-all" })}
-              >
-                查看全部
-              </button>
+        <section
+          id="reminders"
+          tabIndex={-1}
+          className="panel reminder-panel"
+          aria-labelledby="reminder-title"
+        >
+          <div className="panel-head">
+            <div>
+              <h2 id="reminder-title">
+                项目提醒快速处理 {overview?.reminderTotal ?? 0}
+              </h2>
+              <p>按业务日期分列，同日项目集中处理</p>
             </div>
-            <ReminderLanes refreshToken={reminderRefresh} onSelect={selectReminder} />
-          </section>
+            <button
+              className="text-action"
+              onClick={() => setLayer({ kind: "reminder-all" })}
+            >
+              查看全部
+            </button>
+          </div>
+          <ReminderLanes refreshToken={reminderRefresh} onSelect={selectReminder} />
+        </section>
+        <section className="project-workspace" aria-label="项目工作区">
+          <ProjectContext
+            project={selected}
+            detail={detail}
+            loading={loading.detail}
+            onQuick={() => setLayer({ kind: "quick" })}
+            onReminder={() => setLayer({ kind: "reminder" })}
+            onCancel={() => setLayer({ kind: "cancel" })}
+            onStatus={(status) => void mutate(
+              { op: "adjust_status", projectId: selectedId, status },
+              "项目主状态已通过生命周期校验并更新",
+            )}
+          />
           <ProjectDetails
             project={selected}
             detail={detail}
@@ -1036,7 +1049,7 @@ export function WorkbenchV2({
               void deleteRecord({ kind, id } as DeleteInput, "记录已删除").catch((cause) => setDetailError(messageOf(cause)));
             }}
           />
-        </div>
+        </section>
         <section
           id="project-queue"
           tabIndex={-1}
@@ -1243,18 +1256,6 @@ export function WorkbenchV2({
             </button>
           </div>
         </section>
-        <ProjectContext
-          project={selected}
-          detail={detail}
-          loading={loading.detail}
-          onQuick={() => setLayer({ kind: "quick" })}
-          onReminder={() => setLayer({ kind: "reminder" })}
-          onCancel={() => setLayer({ kind: "cancel" })}
-          onStatus={(status) => void mutate(
-            { op: "adjust_status", projectId: selectedId, status },
-            "项目主状态已通过生命周期校验并更新",
-          )}
-        />
       </main>
       {toast && <div className="toast success" role="status">{toast}</div>}
       {layer && (

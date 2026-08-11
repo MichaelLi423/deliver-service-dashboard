@@ -31,8 +31,10 @@ async function seedReminderLanes(page: Page): Promise<void> {
   await expect(page.getByRole('region', { name: '提醒日期泳道' })).toBeVisible();
 }
 
-async function assertViewport(page: Page, width: 820 | 1024 | 1170 | 1190 | 1440, screenshot: string): Promise<void> {
+async function assertViewport(page: Page, width: 1024 | 1170 | 1190 | 1440, screenshot: string): Promise<void> {
   await page.setViewportSize({ width, height: width === 1440 ? 900 : 768 });
+  const workspaceRegion = page.getByRole('region', { name: '项目工作区' });
+  await expect(workspaceRegion, `视口 ${width}px 应存在单一“项目工作区”region`).toBeVisible();
   const layout = await page.evaluate(() => {
     const queue = document.querySelector<HTMLElement>('.queue-table-wrap');
     const filters = document.querySelector<HTMLElement>('.queue-filters');
@@ -43,8 +45,8 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1170 | 1190 | 1440
     const detail = document.querySelector<HTMLElement>('.detail');
     const projectQueue = document.querySelector<HTMLElement>('#project-queue');
     const context = document.querySelector<HTMLElement>('.context');
-    const workbenchGrid = document.querySelector<HTMLElement>('.workbench-grid');
-    const rect = (node: HTMLElement | null) => node ? { top: node.getBoundingClientRect().top, bottom: node.getBoundingClientRect().bottom, left: node.getBoundingClientRect().left } : null;
+    const workspace = document.querySelector<HTMLElement>('[aria-label="项目工作区"]');
+    const rect = (node: HTMLElement | null) => node ? { top: node.getBoundingClientRect().top, bottom: node.getBoundingClientRect().bottom, left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right, width: node.getBoundingClientRect().width } : null;
     return {
       scrollingElement: document.scrollingElement?.tagName ?? '',
       htmlOverflowY: getComputedStyle(document.documentElement).overflowY,
@@ -61,14 +63,14 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1170 | 1190 | 1440
       laneScrollWidth: lanes?.scrollWidth ?? 0,
       laneClientWidth: lanes?.clientWidth ?? 0,
       laneCount: lanes?.querySelectorAll('.reminder-lane').length ?? 0,
-      domOrder: Boolean(reminders && detail && projectQueue && context
-        && (reminders.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING)
-        && (detail.compareDocumentPosition(projectQueue) & Node.DOCUMENT_POSITION_FOLLOWING)
-        && (projectQueue.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING)),
-      reminders: rect(reminders), detail: rect(detail), projectQueue: rect(projectQueue), context: rect(context),
+      domOrder: Boolean(reminders && workspace && projectQueue
+        && (reminders.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && (workspace.compareDocumentPosition(projectQueue) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      workspaceOrder: Boolean(workspace && context && detail && workspace.contains(context) && workspace.contains(detail)
+        && (context.compareDocumentPosition(detail) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      reminders: rect(reminders), workspace: rect(workspace), detail: rect(detail), projectQueue: rect(projectQueue), context: rect(context),
+      detailMaxHeight: detail ? getComputedStyle(detail).maxHeight : '',
       viewportWidth: window.innerWidth,
-      workbenchGridDisplay: workbenchGrid ? getComputedStyle(workbenchGrid).display : '',
-      workbenchGridColumns: workbenchGrid ? getComputedStyle(workbenchGrid).gridTemplateColumns : '',
     };
   });
   expect(layout.scrollingElement).toBe('HTML');
@@ -85,17 +87,18 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1170 | 1190 | 1440
   expect(layout.laneOverflow).toMatch(/auto|scroll/);
   expect(layout.laneCount).toBe(7);
   expect(layout.domOrder).toBe(true);
+  expect(layout.workspaceOrder).toBe(true);
+  expect(layout.workspace).not.toBeNull();
   expect(layout.detail).not.toBeNull();
   expect(layout.projectQueue).not.toBeNull();
   expect(layout.context).not.toBeNull();
-  expect(layout.detail!.bottom).toBeLessThanOrEqual(layout.projectQueue!.top + 1);
-  expect(layout.projectQueue!.bottom).toBeLessThanOrEqual(layout.context!.top + 1);
-  if (width > 1180) {
-    expect(layout.reminders!.left, JSON.stringify({ width, viewportWidth: layout.viewportWidth, display: layout.workbenchGridDisplay, columns: layout.workbenchGridColumns })).toBeLessThan(layout.detail!.left);
-    expect(Math.abs(layout.reminders!.top - layout.detail!.top)).toBeLessThanOrEqual(2);
-  } else {
-    expect(layout.reminders!.bottom).toBeLessThanOrEqual(layout.detail!.top + 1);
-  }
+  expect(layout.reminders!.bottom).toBeLessThanOrEqual(layout.workspace!.top + 1);
+  expect(layout.workspace!.bottom).toBeLessThanOrEqual(layout.projectQueue!.top + 1);
+  expect(Math.abs(layout.reminders!.left - layout.workspace!.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(layout.reminders!.width - layout.workspace!.width)).toBeLessThanOrEqual(2);
+  expect(Math.abs(layout.workspace!.left - layout.projectQueue!.left)).toBeLessThanOrEqual(1);
+  expect(Math.abs(layout.workspace!.width - layout.projectQueue!.width)).toBeLessThanOrEqual(2);
+  expect(layout.detailMaxHeight, `视口 ${width}px 的项目详情不应受固定 max-height 裁切`).toBe('none');
   if (width === 1024) expect(layout.laneScrollWidth).toBeGreaterThan(layout.laneClientWidth);
   if (layout.laneScrollWidth > layout.laneClientWidth) {
     const laneScroll = await page.locator('.reminder-lane-scroll').evaluate((node) => {
@@ -137,6 +140,24 @@ async function assertViewport(page: Page, width: 820 | 1024 | 1170 | 1190 | 1440
   await expect(page.getByText(/第 1–7 项 \/ 共 7 项/)).toBeVisible();
   await page.screenshot({ path: screenshot, fullPage: true });
 }
+
+test('最新布局：主导航直接显示标签管理并打开现有标签库', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'rw-v2-tag-entry-'));
+  const userData = join(root, 'user-data');
+  let app: ElectronApplication | null = null;
+  try {
+    app = await electron.launch({ executablePath: executable, env: { ...process.env, WORKBENCH_E2E_USER_DATA_DIR: userData } });
+    const page = await app.firstWindow();
+    await initialize(page);
+    const tagManagement = page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '标签管理', exact: true });
+    await expect(tagManagement, '“标签管理”应直接显示在顶部主导航，无需打开“数据管理”').toBeVisible();
+    await tagManagement.click();
+    await expect(page.getByRole('dialog', { name: '项目分类标签库' })).toBeVisible();
+  } finally {
+    await app?.close().catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 async function assertIndependentDrawer(page: Page, width: 820 | 1024, screenshot: string): Promise<void> {
   await page.setViewportSize({ width, height: 768 });
@@ -214,7 +235,7 @@ async function assertDeepFormFocusBelowSticky(app: ElectronApplication, page: Pa
   });
 }
 
-test('Oracle #10 任务指挥台布局、150% 文本缩放与 sticky 深层表单焦点均不遮挡', async ({}, testInfo) => {
+test('最新布局：提醒、全宽单一项目工作区、高密项目队列依次排列且详情不裁切', async ({}, testInfo) => {
   const root = mkdtempSync(join(tmpdir(), 'rw-v2-layout-'));
   const userData = join(root, 'user-data');
   let app: ElectronApplication | null = null;
@@ -227,7 +248,6 @@ test('Oracle #10 任务指挥台布局、150% 文本缩放与 sticky 深层表�
     await assertViewport(page, 1170, testInfo.outputPath('workbench-v2-1170.png'));
     await assertViewport(page, 1190, testInfo.outputPath('workbench-v2-1190.png'));
     await assertViewport(page, 1440, testInfo.outputPath('workbench-v2-1440.png'));
-    await assertViewport(page, 820, testInfo.outputPath('workbench-v2-820.png'));
     await assertIndependentDrawer(page, 1024, testInfo.outputPath('serial-address-drawer-1024.png'));
     await assertIndependentDrawer(page, 820, testInfo.outputPath('serial-address-drawer-820.png'));
     await assertHistoryDrawer(page, 1024, testInfo.outputPath('history-drawer-1024.png'));
