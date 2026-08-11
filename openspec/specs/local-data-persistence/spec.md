@@ -186,3 +186,70 @@
 - **WHEN** 新版本启动
 - **THEN** 系统保留迁移前的数据与可恢复状态
 - **AND** 不静默丢弃现有数据
+
+### Requirement: 追加迁移保存新增字段与枚举并兼容旧库
+
+数据结构升级 SHALL 通过追加迁移实现，SHALL NOT 修改已发布的迁移；新增字段（含项目备注、暂存地址、是否暂存、计划装机日期）与受控枚举（含区域 East、South、West、Central、North）SHALL 通过追加迁移持久化；升级旧库时 SHALL 保留既有业务数据，新增字段 SHALL 以兼容默认值（空值）初始化，旧数据 SHALL NOT 被丢弃或改写；迁移过程 SHALL 诊断引用不存在项目的财务事实（孤立关联），并提供治理清理路径；因既有非空项目外键且治理清理保留原行，结构性外键违规 SHALL 以 unresolved count 持续报告、SHALL NOT 阻断迁移，并提供人工恢复/治理路径，SHALL NOT 宣称 foreign_key_check 已归零；迁移失败 SHALL 保留可恢复状态。
+
+#### Scenario: 追加迁移不修改已发布迁移
+- **GIVEN** 数据库已应用已发布的迁移
+- **WHEN** 新版本需要保存新增字段与受控枚举
+- **THEN** 系统仅追加新的迁移
+- **AND** 不修改任何已发布迁移
+
+#### Scenario: 旧库升级保留既有数据并初始化新字段
+- **GIVEN** 旧版本数据库已存在项目等业务数据且尚无新增字段
+- **WHEN** 新版本首次启动执行迁移
+- **THEN** 既有业务数据完整保留
+- **AND** 新增字段以空/兼容默认值初始化，可正常录入
+
+#### Scenario: 新增字段与受控区域值持久化
+- **GIVEN** 负责人录入项目备注、暂存地址、是否暂存、计划装机日期及区域
+- **WHEN** 系统保存并关闭重开应用
+- **THEN** 新增字段与受控区域值持久化保留
+
+#### Scenario: 迁移诊断并清理孤立财务事实
+- **GIVEN** 旧库存在引用不存在项目的掉票或财务记录
+- **WHEN** 迁移执行
+- **THEN** 系统诊断这些孤立关联并给出治理清理路径
+- **AND** 治理清理后待掉票金额指标不再受孤立数据影响
+
+#### Scenario: 结构性外键违规持续报告且不阻断迁移
+- **GIVEN** 旧库存在引用不存在项目且项目外键非空的掉票或财务记录
+- **WHEN** 迁移执行或启动诊断
+- **THEN** 该类结构性外键违规以 unresolved count 报告、不阻断迁移
+- **AND** 系统提供人工恢复/治理路径
+- **AND** 系统不宣称 foreign_key_check 已归零
+
+#### Scenario: 迁移失败保留可恢复状态
+- **GIVEN** 追加迁移执行失败
+- **WHEN** 新版本启动
+- **THEN** 系统保留迁移前的数据与可恢复状态
+- **AND** 不静默丢弃现有数据
+
+### Requirement: 追加迁移 v16 保存项目暂定搬迁范围字段
+
+v15 已发布入库；项目暂定搬迁范围字段 SHALL 通过追加迁移 v16 持久化，SHALL NOT 修改 v1–v15。`projects` 表 SHALL 增加可空列 `temporary_instrument_name`、`temporary_instrument_model`、`temporary_has_ups`，对应领域/DTO 字段 `temporaryInstrumentName`/`temporaryInstrumentModel`/`temporaryHasUps`。升级旧库时 SHALL 保留既有业务数据，新增列 SHALL 以空值初始化、SHALL NOT 丢弃或改写存量值；迁移失败 SHALL 保留可恢复状态。
+
+#### Scenario: v15 已发布库追加 v16 不修改既有迁移
+- **GIVEN** 数据库已应用至 v15 且 v15 已发布入库
+- **WHEN** 新版本需要保存项目暂定搬迁范围字段
+- **THEN** 系统仅追加 v16 迁移
+- **AND** 不修改 v1–v15 任何已发布迁移
+
+#### Scenario: v15 库升级保留数据并初始化暂定范围列
+- **GIVEN** 旧库已应用 v15 且存在项目等业务数据、尚无暂定范围列
+- **WHEN** 新版本首次启动执行 v16 迁移
+- **THEN** 既有业务数据完整保留
+- **AND** temporary_instrument_name/temporary_instrument_model/temporary_has_ups 以空值初始化，可正常录入
+
+#### Scenario: 暂定搬迁范围字段持久化保留
+- **GIVEN** 负责人录入仪器名称、型号与 UPS 是否
+- **WHEN** 系统保存并关闭重开应用
+- **THEN** 暂定范围字段持久化保留
+
+#### Scenario: v16 迁移失败保留可恢复状态
+- **GIVEN** v16 追加迁移执行失败
+- **WHEN** 新版本启动
+- **THEN** 系统保留迁移前的数据与可恢复状态
+- **AND** 不静默丢弃现有数据
