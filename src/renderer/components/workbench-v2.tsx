@@ -235,6 +235,15 @@ function decimalOf(cents: bigint): string {
   const absolute = negative ? -cents : cents;
   return `${negative ? "-" : ""}${absolute / 100n}.${String(absolute % 100n).padStart(2, "0")}`;
 }
+function pendingInvoiceAmount(finalAmount: string | null, invoicedAmount: string): string | null {
+  if (finalAmount === null || finalAmount === "") return null;
+  return decimalOf(centsOf(finalAmount) > centsOf(invoicedAmount) ? centsOf(finalAmount) - centsOf(invoicedAmount) : 0n);
+}
+function isoDateTime(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
+}
 
 interface Filters {
   status: ProjectStatus | "";
@@ -1159,6 +1168,7 @@ export function WorkbenchV2({
               上一页
             </button>
             <span>
+              固定每页20 · {" "}
               第 {projectPage?.total ? currentPageIndex * (projectPage.pageSize ?? projectPage.limit ?? PROJECT_PAGE_SIZE) + 1 : 0}–
               {Math.min(
                 (currentPageIndex + 1) * (projectPage?.pageSize ?? projectPage?.limit ?? PROJECT_PAGE_SIZE),
@@ -1685,6 +1695,14 @@ function ProjectDetails({
   ) => void;
   onDelete: (kind: "service_order" | "activity" | "damage_repair_item" | "batch" | "instrument", id: string) => void;
 }): JSX.Element {
+  const recordFacts: Array<[string, string]> = project ? [
+    ["物流费用登记", `${project.counts.batches} 条`],
+    ["搬迁仪器", `${project.counts.instruments} 台`],
+    ["上门活动", `${project.counts.activities} 条`],
+    ["开单记录", `${project.counts.orders} 条`],
+    ["损坏/维修事项", `${project.counts.repairs} 条`],
+    ["掉票记录", `${project.counts.invoices} 条`],
+  ] : [];
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const action: Partial<Record<DetailTab, WorkbenchActionType>> = {
     搬迁仪器: "instrument",
@@ -1791,6 +1809,23 @@ function ProjectDetails({
           <div className="detail-loading" role="status">
             正在读取当前项目数据…
           </div>
+        ) : tab === "费用与掉票" ? (
+          <div className="invoice-tab-body">
+            <div className="fact-grid" aria-label="金额摘要">
+              <div><span>合同金额</span><strong>{money(project.contractAmount)}</strong></div>
+              <div><span>进单金额快照</span><strong>{money(project.entryAmountSnapshot)}</strong></div>
+              <div><span>最终可确认金额</span><strong>{money(project.finalAmount)}</strong></div>
+              <div><span>尚待掉票</span><strong>{money(pendingInvoiceAmount(project.finalAmount, project.invoicedAmount))}</strong></div>
+            </div>
+            <SectionTable
+              page={section}
+              onInvoiceEdit={onInvoiceEdit}
+              onInvoiceRevoke={onInvoiceRevoke}
+              onBatchEdit={onBatchEdit}
+              onDamageUpdate={onDamageUpdate}
+              onDelete={onDelete}
+            />
+          </div>
         ) : tab === "项目总览" ? (
           <div className="project-overview">
             <div className="overview-edit-actions" aria-label="项目资料维护">
@@ -1830,9 +1865,6 @@ function ProjectDetails({
               ["UPS", detail?.detail?.temporaryHasUps === null || detail?.detail?.temporaryHasUps === undefined ? "未填写" : detail.detail.temporaryHasUps ? "是" : "否"],
               ["合同开始日期", detail?.detail?.contractStartDate || "待补"],
               ["合同截止日期", detail?.detail?.contractEndDate || "待补"],
-              ["物流费用登记", `${project.counts.batches} 条`],
-              ["搬迁仪器", `${project.counts.instruments} 台`],
-              ["开单记录", `${project.counts.orders} 条`],
               ].map(([label, value]) => (
                 <div key={label}>
                   <span>{label}</span>
@@ -1840,6 +1872,11 @@ function ProjectDetails({
                 </div>
               ))}
             </div>
+            <h3>关联登记事实</h3>
+            <div className="fact-grid" aria-label="关联登记事实">
+              {recordFacts.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
+            </div>
+            <p className="notice">序列号地址更新与二维码申请在独立模块按需加载，不在总览展开全部记录。</p>
           </div>
         ) : (
           <SectionTable
@@ -1985,7 +2022,7 @@ function sectionColumns(kind: WorkbenchV2SectionKind): string[] {
         : kind === "orders"
           ? ["orderedAt", "engineer", "orderType", "serviceOrderNo"]
         : kind === "invoices"
-          ? ["invoicedAt", "amount", "active", "revokedAt"]
+          ? ["invoicedAt", "amount", "active", "revokedAt", "lastModifiedAt"]
           : kind === "damage_items"
             ? [
                 "instrumentName",
@@ -2021,6 +2058,7 @@ function columnLabel(key: string): string {
         amount: "金额",
         active: "状态",
         revokedAt: "撤销日期",
+        lastModifiedAt: "最后修改时间",
         instrumentName: "仪器名称",
         damageReason: "损坏原因",
         issueStatus: "事项状态",
@@ -2050,6 +2088,7 @@ function formatCell(column: string, value: unknown): string {
   if (value === null || value === "") return "—";
   if (typeof value === "boolean") return value ? "是" : "否";
   if (column === "amount") return money(String(value));
+  if (column === "lastModifiedAt") return isoDateTime(String(value));
   if (["planTransportDate", "startedAt", "visitAt", "invoicedAt", "revokedAt", "orderedAt"].includes(column))
     return businessDate(String(value)) || String(value);
   return String(value);
@@ -2331,7 +2370,6 @@ function ActionFormV2({
           "oldSiteContact", "newSiteContact", "oldSiteAddress", "newSiteAddress",
           "plannedVisitAt", "plannedTransportAt", "plannedInstallDoneAt", "actualInstallDoneAt",
           "approvalReason", "missingItems", "ecc", "entryAt", "contractAmount", "finalAmount",
-          "serviceOrderNo", "engineers", "serviceOrderNote",
         ] as const) set(key, optional(key));
         const instrumentCount = optional("instrumentCount");
         if (instrumentCount) set("instrumentCount", Number(instrumentCount));
@@ -2813,10 +2851,6 @@ function actionFields(
       <Field name="plannedInstallDoneAt" label="计划装机日期" type="date" defaultValue={businessDate(detail?.plannedInstallAt ?? detail?.plannedInstallDoneAt)} optional />
       <Field name="actualInstallDoneAt" label="实际装机完成日期" type="date" defaultValue={businessDate(detail?.actualInstallDoneAt)} optional />
       <label className="confirm-check full"><input name="siteConfirmed" type="checkbox" defaultChecked={detail?.siteConfirmed ?? false} />现场条件已确认</label>
-      <div className="form-group-title full">可选服务单</div>
-      <Field name="serviceOrderNo" label="服务单号" optional />
-      <Field name="engineers" label="工程师" optional help="填写服务单号时请同时填写工程师。" />
-      <TextArea name="serviceOrderNote" label="开单备注" optional />
     </>
   );
 }
@@ -3513,6 +3547,40 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
   const [region, setRegion] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [summary, setSummary] = useState({
+    customerName: "", oldSiteAddress: "", newSiteAddress: "",
+    temporaryInstrumentName: "", instrumentCount: "", temporaryInstrumentModel: "", temporaryHasUps: "",
+    planVisitAt: "", planTransportAt: "", contractAmount: "",
+  });
+  const summaryText = (value: string): string => value.trim() || "未填写";
+  const intentLabel: Record<ProjectWizardPayload["intent"], string> = {
+    draft: "保存为待进单",
+    pre_entry_execution: "未进单先执行",
+    formal: "正式进单",
+  };
+  const summaryItems: Array<[string, string]> = [
+    ["客户名称", summary.customerName],
+    ["所属区域", region],
+    ["旧址地址", summary.oldSiteAddress],
+    ["新址地址", summary.newSiteAddress],
+    ["暂定仪器名称", summary.temporaryInstrumentName],
+    ["暂定仪器数量", summary.instrumentCount ? `${summary.instrumentCount} 台` : ""],
+    ["暂定型号", summary.temporaryInstrumentModel],
+    ["UPS", summary.temporaryHasUps === "true" ? "是" : summary.temporaryHasUps === "false" ? "否" : ""],
+    ["计划上门日期", summary.planVisitAt],
+    ["计划运输日期", summary.planTransportAt],
+    ["保存意图", intentLabel[intent]],
+  ];
+  const contractAmountIsZero = summary.contractAmount.trim() !== "" && centsOf(summary.contractAmount) === 0n;
+  const updateSummary = (event: FormEvent<HTMLFormElement>): void => {
+    const data = new FormData(event.currentTarget);
+    const text = (name: string): string => String(data.get(name) ?? "");
+    setSummary({
+      customerName: text("customerName"), oldSiteAddress: text("oldSiteAddress"), newSiteAddress: text("newSiteAddress"),
+      temporaryInstrumentName: text("temporaryInstrumentName"), instrumentCount: text("instrumentCount"), temporaryInstrumentModel: text("temporaryInstrumentModel"), temporaryHasUps: text("temporaryHasUps"),
+      planVisitAt: text("planVisitAt"), planTransportAt: text("planTransportAt"), contractAmount: text("contractAmount"),
+    });
+  };
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -3523,7 +3591,7 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
       await onSave({
         intent, customerName: value("customerName"), region,
         contractStartDate: value("contractStartDate") || null, contractEndDate: value("contractEndDate") || null,
-        ...(intent === "formal" ? { ecc: value("ecc"), entryAt: value("entryAt"), contractAmount: value("contractAmount") } : {}),
+        ...(intent === "formal" ? { ecc: value("ecc"), entryAt: value("entryAt") || undefined, contractAmount: value("contractAmount") } : {}),
         oldSiteAddress: value("oldSiteAddress") || null,
         newSiteAddress: value("newSiteAddress") || null, oldSiteContact: value("oldSiteContact"), newSiteContact: value("newSiteContact"),
         instrumentCount: value("instrumentCount") ? Number(value("instrumentCount")) : null,
@@ -3544,7 +3612,7 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
     ["pre_entry_execution", "未进单先执行", "记录是否批复，项目仍保持待进单"],
     ["formal", "正式进单", "明确使用 ECC 和进单日期完成进单"],
   ];
-  return <form className="project-create-form" onSubmit={(event) => void submit(event)}>
+  return <form className="project-create-form" onSubmit={(event) => void submit(event)} onChange={updateSummary}>
     <p className="notice">先明确保存意图。旧址、新址和暂定范围均可后补，不影响建立项目。</p>
     <div className="create-form-sections">
       <fieldset className="edit-form-section"><legend>项目与进单</legend><div className="form-grid">
@@ -3552,7 +3620,8 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
         <Field name="oldSiteContact" label="旧址联系人" optional /><Field name="newSiteContact" label="新址联系人" optional />
         <Field name="contractStartDate" label="合同开始日期" type="date" optional /><Field name="contractEndDate" label="合同截止日期" type="date" optional />
         <TextArea name="projectNote" label="项目备注" optional />
-        {intent === "formal" && <div className="formal-intent-fields full" role="group" aria-label="正式进单资料"><div className="wizard-section-head"><div><h3>正式进单资料</h3><p>仅在正式进单时保存；其他意图不会提交这些值。</p></div><span>正式进单专属</span></div><div className="form-grid"><Field name="ecc" label="ECC" required /><Field name="entryAt" label="进单日期" type="date" defaultValue={todayDate()} required /><Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="可留空后补；新建时不录最终可确认金额。" /></div></div>}
+        <Field name="entryAt" label="进单日期" type="date" optional help="正式进单留空时由系统按当天日期处理。" />
+        {intent === "formal" && <div className="formal-intent-fields full" role="group" aria-label="正式进单资料"><div className="wizard-section-head"><div><h3>正式进单资料</h3><p>仅在正式进单时保存 ECC 和合同金额；进单日期留空时由系统按当天日期处理。</p></div><span>正式进单专属</span></div><div className="form-grid"><Field name="ecc" label="ECC" required /><Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="可留空后补；新建时不录最终可确认金额。" /></div>{contractAmountIsZero && <div className="inline-warning" role="status">合同金额为 0 时，正式进单须另填大于 0 的最终可确认金额。</div>}</div>}
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>搬迁范围（均可后补）</legend><div className="form-grid">
         <Field name="oldSiteAddress" label="旧址地址" optional /><Field name="newSiteAddress" label="新址地址" optional />
@@ -3571,6 +3640,7 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
       <fieldset className="edit-form-section"><legend>保存意图</legend><div className="form-grid">
         <div className="intent-choices full" role="radiogroup" aria-label="保存意图">{intents.map(([value,label,copy]) => <label key={value} className={intent === value ? "selected" : ""}><input type="radio" name="projectIntent" value={value} checked={intent === value} onChange={() => { setIntent(value); setError(""); }} /><strong>{label}</strong><span>{copy}</span></label>)}</div>
         {intent === "pre_entry_execution" && <div className="approval-fields full" role="group" aria-label="未进单先执行批复"><Select name="managerApproved" label="是否批复" required defaultValue="" options={[["", "请选择"], ["true", "是"], ["false", "否"]]} help="只记录是否批复，不收集原因或缺失资料。" /></div>}
+        <div className="summary-grid full" aria-label="保存摘要">{summaryItems.map(([label, value]) => <div key={label}><span>{label}</span><strong>{summaryText(value)}</strong></div>)}</div>
         <div className="form-footer full"><span>{intent === "draft" ? "项目将保持待进单" : intent === "formal" ? "将按正式进单意图校验" : "将标记为提前执行"}</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : intent === "draft" ? "保存为待进单" : intent === "formal" ? "正式进单" : "确认提前执行"}</button></div>
       </div></fieldset>
     </div>

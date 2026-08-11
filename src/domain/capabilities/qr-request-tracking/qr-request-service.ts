@@ -69,11 +69,15 @@ export class QrRequestService {
    * - 申请独立记录，不关联仪器/项目：删除 MUST NOT 影响任何搬迁仪器/项目的
    *   「二维码是否申请」手工标记（该标记独立维护，不由申请记录推导）。
    */
-  delete(id: string): void {
-    if (!this.requests.findById(id)) {
+  delete(id: string): { ownedChildCount: number } {
+    const request = this.requests.findById(id);
+    if (!request) {
       throw new ValidationError('QR_REQUEST_NOT_FOUND', `二维码申请记录不存在: ${id}`);
     }
+    // SQLite 仓储不拥有事务边界；调用方事务使类型行与主行删除原子提交。
+    this.requests.deleteTypesByRequestId?.(id);
     this.requests.deleteById(id);
+    return { ownedChildCount: request.types.length };
   }
 
   /**

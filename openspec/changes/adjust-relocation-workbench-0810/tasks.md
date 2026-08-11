@@ -90,4 +90,15 @@
 - [x] 9.11 扩展 E2E 证据（泳道 1024/1440）：先 `npm run e2e:build`（electron-forge package）再以 `workers=1` 运行 focused E2E，覆盖提醒泳道在 1024（容器内横向滚动、页面无溢出、键盘可达）与 1440（尽量 7 列可读或内部滚动）以及 sticky 固定头部；完成态：playwright focused 用例全绿（未构建时用例会 skip 而非失败，须先构建）。
 - [x] 9.12 扩展 verify matrix 证据：按 20 项分页与 7 日期列相关新增测试登记 `docs/verification/scenario-map.mjs` 证据（[文件, 标题关键词]），运行 `npm run verify:matrix` 重写 scenario-test-matrix.md；完成态：矩阵无缺口或如实登记 pending/note，不得谎称覆盖。
 
+## 10. 归档前验证修复
+
+- [x] 10.1 修复实际仪器布尔字段写边界：UPS 与二维码手工标记对 FormData 字符串 `"false"` 必须严格解析为 false，非布尔输入拒绝，SHALL NOT 继续使用 `Boolean(value)`；完成态：renderer→facade→SQLite 集成测试覆盖 true/false 与非法值。
+- [x] 10.2 保证计划上门到期自动推进在所有真实写路径优先：人工状态调整、新建/编辑到期计划上门日期及导入后的项目均不得绕过 lifecycle 到期规则；运行时单次失败后仍重新调度；完成态：facade/集成/runtime 测试覆盖。
+- [x] 10.3 修复有界读取一致性与边界：overview/project page 等多查询 DTO 与 `businessRevision` 同一只读快照；项目页、提醒列等恰好满页时不返回空下一页；serial/QR 在浏览全部记录中按各自业务日期倒序；提醒泳道锁定日期集合与 cursor 严格校验；项目页共享请求移除 renderer 自定义 limit；完成态：focused read/main 测试覆盖并发快照、20/40 边界、业务日期逆序反例与非法 cursor/date。
+- [x] 10.4 补齐工作台规格事实：保存意图分组展示录入摘要；费用与掉票 tab 展示合同金额、进单金额快照、最终可确认金额、尚待掉票及掉票最后修改时间；项目总览/分 tab 提供完整关联登记事实；完成态：renderer/read DTO 测试通过。
+- [x] 10.5 移除已废弃的项目向导自动创建开单生产路径与旧测试，保持开单仅可经独立快速记录或详情入口创建；完成态：service-order focused 测试与 typecheck 通过。
+- [x] 10.6 收敛类型化删除为单一归属领域入口：main 仅协调事务、expectedRevision、tombstone 与 import marker；各 owning domain policy 负责依赖与 owned-child 删除，移除可绕过审计语义的平行实现；完成态：全部删除集成测试通过。
+- [x] 10.7 补充场景证据：八类删除入口及取消确认、旧址/新址建档留空后补、Ship-to 删除非退回/取消、固定20无旧文案、已有暂定数量回显、关闭重开持久化、sticky 深层表单焦点；收紧矩阵证据标题校验并更新 scenario map/matrix；完成态：`npm run verify:matrix` 无虚弱映射或未说明缺口。
+- [x] 10.8 运行 remediation focused domain/persistence/integration/renderer/typecheck/E2E，检查 diff，提交并推送；完成态：OpenSpec 任务全完成、工作区无相关 tracked 改动。
+
 说明：本任务列表默认不做全量 `npm test`（含 100k/50k 性能用例，耗时极长）；如 focused 验证暴露更广回归风险，再由实施者判断补跑相关 focused 范围。仓库无 lint/CI/hook，不设置对应任务。

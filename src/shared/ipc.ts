@@ -416,7 +416,10 @@ export interface WorkbenchProjectRow {
   finalAmount: string | null;
   invoicedAmount: string;
   contractAmount: string | null;
-  counts: { batches: number; instruments: number; activities: number; orders: number; repairs: number };
+  /** 正式进单时固化的合同金额快照；草稿或未录金额时为 null。 */
+  entryAmountSnapshot: string | null;
+  /** invoices 包含已撤销的掉票历史，供关联事实浏览。 */
+  counts: { batches: number; instruments: number; activities: number; orders: number; repairs: number; invoices: number };
   nonBlocking: { pendingShipTo: number; qrUnmarked: number; repairs: number };
   /** 审计/技术更新时间（精确 ISO）。 */
   updatedAt: string;
@@ -441,11 +444,12 @@ export interface WorkbenchV2PageRequest {
 
 /**
  * 项目 keyset 分页请求（tasks 7.5 / design D9）。
- * 注意：继承自 WorkbenchV2PageRequest 的 `limit` 字段在本契约中已废弃——主进程固定每页
- * 20 个，renderer 传入的任意 limit 一律忽略（legacy 兼容，不产生分页漂移）；新 UI 不应提交。
+ * 主进程固定每页 20 个；运行时结构化 IPC 会忽略 legacy 多余字段，新 UI 不应提交。
  * sort 默认 updated（稳定 id 游标）。
  */
-export interface WorkbenchV2ProjectPageRequest extends WorkbenchV2PageRequest {
+export interface WorkbenchV2ProjectPageRequest {
+  /** 上一页返回的 nextCursor（首页为空）。 */
+  cursor?: string | null;
   status?: ProjectStatus | null;
   region?: string | null;
   /** 客户名称 / 临时编号 / ECC 模糊查询。 */
@@ -1458,8 +1462,8 @@ export interface ProjectUpdatePayload {
  * 补齐资料输入（v2 supplement_project，随请求 payload 提交）。
  *
  * 面向尚未正式进单（待进单/未进单先执行）项目补齐新建项目全部可后补字段，
- * 并在同一事务内支持可选正式进单（携带非空 ECC → formalEntry）与可选搬迁开单
- * （携带服务单号 → 原子创建搬迁开单，客户信息从项目客户读取/派生）。
+ * 并在同一事务内支持可选正式进单（携带非空 ECC → formalEntry）。开单必须经独立
+ * quick record/detail 动作提交，补齐资料绝不创建开单记录。
  *
  * 三态语义与 update_project 一致：`undefined` = 未提交保持现值；`null` = 显式清空
  * （仅可空字段）；有值 = 覆盖。全部经现有领域校验入口落库，不绕过正式进单校验
@@ -1526,11 +1530,6 @@ export interface ProjectSupplementPayload {
   contractAmount?: string | null;
   /** 最终可确认金额（十进制字符串；缺省取合同金额，由领域校验决定）。 */
   finalAmount?: string | null;
-  /** 可选搬迁开单：携带服务单号 → 同一事务内创建搬迁开单（工程师必填，客户取项目客户）。 */
-  serviceOrderNo?: string | null;
-  /** 参与工程师（服务单号必填）。 */
-  engineers?: string | null;
-  serviceOrderNote?: string | null;
 }
 
 /**

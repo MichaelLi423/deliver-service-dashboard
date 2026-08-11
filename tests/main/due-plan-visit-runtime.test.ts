@@ -177,6 +177,25 @@ describe('计划上门日期到期自动推进触发接线（tasks 3.3）', () =
     expect(scheduled).toHaveLength(1); // 不再重新调度
   });
 
+  it('边界推进抛错时记录错误并仍调度下一次边界', () => {
+    const { timer, scheduled } = fakeTimer();
+    const errors: unknown[] = [];
+    const runtime = new DuePlanVisitRuntime({
+      clock: new FixedClock('2026-08-10T23:59:00+08:00'),
+      advance: () => {
+        throw new Error('advance failed');
+      },
+      now: () => new Date(2026, 7, 10, 23, 59, 0),
+      timer,
+      onError: (error) => errors.push(error),
+    });
+    runtime.start();
+    expect(() => scheduled[0].fn()).not.toThrow();
+    expect(errors).toHaveLength(1);
+    expect(scheduled).toHaveLength(2);
+    runtime.dispose();
+  });
+
   it('msUntilNextLocalMidnight：午夜整点 → 24h；临近午夜 → 1ms；绝不返回 0', () => {
     expect(msUntilNextLocalMidnight(new Date(2026, 7, 10, 0, 0, 0, 0))).toBe(24 * 60 * 60 * 1000);
     expect(msUntilNextLocalMidnight(new Date(2026, 7, 10, 23, 59, 59, 999))).toBe(1);

@@ -191,6 +191,50 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
     expect(db.prepare('SELECT scope_confirmed AS s FROM projects WHERE id = ?').get(projectId)).toMatchObject({ s: 0 });
   });
 
+  it('旧址/新址建档留空后可补录：不改变状态，关闭重开后保留', async () => {
+    const dir = makeTempDir('project-addresses-reopen-');
+    dirs.push(dir);
+    const { db } = bootstrapDatabase({ dataDir: dir });
+    const { account } = await new LocalAccountService(new SqliteAccountRepository(db)).initialize({
+      username: '负责人',
+      password: 'password1',
+    });
+    const facade1 = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }));
+    const created = facade1.v2Mutate({
+      op: 'create_project',
+      payload: wizard({
+        customerName: '后补地址客户',
+        ecc: 'ECC-ADDRESS-001',
+        contractAmount: '1000',
+        oldSiteAddress: undefined,
+        newSiteAddress: undefined,
+        instrumentCount: null,
+      }),
+    });
+    const projectId = projectIdOf(created);
+    const before = facade1.v2ProjectDetail(projectId);
+    expect(before.detail).toMatchObject({ oldSiteAddress: null, newSiteAddress: null });
+    expect(before.project!.status).toBe('pending_execution');
+
+    facade1.v2Mutate({
+      op: 'update_project',
+      payload: { projectId, oldSiteAddress: '补录旧址', newSiteAddress: '补录新址' },
+    });
+    expect(facade1.v2ProjectDetail(projectId)).toMatchObject({
+      project: { status: 'pending_execution' },
+      detail: { oldSiteAddress: '补录旧址', newSiteAddress: '补录新址' },
+    });
+    closeDatabase(db);
+
+    const reopened = bootstrapDatabase({ dataDir: dir });
+    const facade2 = new WorkbenchFacade(reopened.db, () => ({ accountId: account.id, username: account.username }));
+    expect(facade2.v2ProjectDetail(projectId)).toMatchObject({
+      project: { status: 'pending_execution' },
+      detail: { oldSiteAddress: '补录旧址', newSiteAddress: '补录新址' },
+    });
+    closeDatabase(reopened.db);
+  });
+
   it('instrumentCount 提供非正整数被拒且不落库', async () => {
     const { facade } = await makeFacade();
     expect(() =>
@@ -288,6 +332,58 @@ describe('创建项目：intent 决定是否正式进单（不再由 ECC 推断�
     expect(row.is_temporary_storage).toBe(1);
     expect(row.manager_approved).toBe(1);
     expect(row.planned_install_done_at).toBe('2026-09-01');
+  });
+
+  it('v15 新字段建档后更新并关闭重开：region 受控枚举及 null/false 语义均持久化', async () => {
+    const dir = makeTempDir('v15-fields-reopen-');
+    dirs.push(dir);
+    const { db } = bootstrapDatabase({ dataDir: dir });
+    const { account } = await new LocalAccountService(new SqliteAccountRepository(db)).initialize({
+      username: '负责人',
+      password: 'password1',
+    });
+    const facade1 = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }));
+    const created = facade1.v2Mutate({
+      op: 'create_project',
+      payload: wizard({
+        intent: 'draft',
+        customerName: 'v15 重开字段客户',
+        instrumentCount: null,
+        region: 'East',
+        projectNote: '建档备注',
+        temporaryStorageAddress: '建档暂存地址',
+        isTemporaryStorage: true,
+        managerApproved: true,
+        plannedInstallAt: '2026-09-01',
+      }),
+    });
+    const projectId = projectIdOf(created);
+    facade1.v2Mutate({
+      op: 'update_project',
+      payload: {
+        projectId,
+        region: 'South',
+        projectNote: null,
+        temporaryStorageAddress: '更新暂存地址',
+        isTemporaryStorage: false,
+        managerApproved: false,
+        plannedInstallAt: '2026-10-02',
+      },
+    });
+    closeDatabase(db);
+
+    const reopened = bootstrapDatabase({ dataDir: dir });
+    const facade2 = new WorkbenchFacade(reopened.db, () => ({ accountId: account.id, username: account.username }));
+    const detail = facade2.v2ProjectDetail(projectId);
+    expect(detail.project!.region).toBe('South');
+    expect(detail.detail).toMatchObject({
+      projectNote: null,
+      temporaryStorageAddress: '更新暂存地址',
+      isTemporaryStorage: false,
+      managerApproved: false,
+      plannedInstallAt: '2026-10-02',
+    });
+    closeDatabase(reopened.db);
   });
 
   it('项目备注/暂存地址留空保存：可空字段不因缺失拒绝建档', async () => {

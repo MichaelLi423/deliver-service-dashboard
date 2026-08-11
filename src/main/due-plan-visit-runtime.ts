@@ -32,6 +32,8 @@ export interface DuePlanVisitRuntimeDeps {
     onActivate: (fn: () => void) => () => void;
     onResume: (fn: () => void) => () => void;
   };
+  /** 边界定时推进失败的观测入口；缺省记录错误但不中断下一次调度。 */
+  onError?: (error: unknown) => void;
 }
 
 const defaultTimer: DuePlanVisitTimer = {
@@ -45,6 +47,7 @@ export class DuePlanVisitRuntime {
   private readonly now: () => Date;
   private readonly timer: DuePlanVisitTimer;
   private readonly depsEvents: DuePlanVisitRuntimeDeps['events'];
+  private readonly onError: (error: unknown) => void;
   private readonly unsubs: Array<() => void> = [];
   private timerHandle: unknown = null;
   private disposed = false;
@@ -55,6 +58,7 @@ export class DuePlanVisitRuntime {
     this.now = deps.now ?? (() => new Date());
     this.timer = deps.timer ?? defaultTimer;
     this.depsEvents = deps.events;
+    this.onError = deps.onError ?? ((error) => console.error('计划上门日期到期推进失败', error));
   }
 
   /** 立即补跑（迁移后/首个工作台读取前、activate、resume 共用；<= 漏跑回溯）。 */
@@ -88,8 +92,14 @@ export class DuePlanVisitRuntime {
     this.timerHandle = this.timer.set(() => {
       if (this.disposed) return; // dispose 后（含已入队回调竞态）不再推进/重调度
       this.timerHandle = null;
-      this.runCatchUp();
-      this.scheduleBoundary();
+      try {
+        this.runCatchUp();
+      } catch (error) {
+        // 定时器回调中捕获，避免异常成为 unhandled chain 并终止后续日期边界调度。
+        this.onError(error);
+      } finally {
+        this.scheduleBoundary();
+      }
     }, delayMs);
   }
 }

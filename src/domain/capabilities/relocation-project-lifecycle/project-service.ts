@@ -303,7 +303,9 @@ export class ProjectService {
       actualInstallDoneAt: project.actualInstallDoneAt,
       acceptanceReportDate: project.acceptanceReportDate,
       planVisitAt: project.planVisitAt,
-      today: facts?.today,
+      // 所有人工状态调整均以服务注入 clock 的当前业务日期参与 lifecycle 判定；
+      // 调用方不能遗漏 today 而绕过计划上门到期自动推进。
+      today: facts?.today ?? this.today(),
       preEntryExecution: project.preEntryExecution,
       executionStarted: facts?.executionStarted ?? false,
       amounts: {
@@ -346,7 +348,8 @@ export class ProjectService {
 
   /**
    * 更新执行准备：计划上门日期、计划运输日期、场地确认。
-   * 计划日期与场地确认不触发主状态流转（TBD-07）。
+   * 写入后以注入时钟的当前业务日期经 lifecycle 重算，保证新建/编辑已到期
+   * 的计划上门日期不会停留在待进单或待执行；状态绝不由本方法直接赋值。
    */
   updateExecutionPreparation(projectId: string, input: ExecutionPreparationInput): Project {
     const project = this.requireProject(projectId);
@@ -363,7 +366,8 @@ export class ProjectService {
     }
     project.updatedAt = this.now();
     this.projects.save(project);
-    return project;
+    this.adjustStatus(projectId, project.status);
+    return this.requireProject(projectId);
   }
 
   /** 录入实际装机完成日期：lifecycle 自动置为待验收（TBD-07）。 */

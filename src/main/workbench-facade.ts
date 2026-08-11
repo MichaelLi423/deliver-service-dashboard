@@ -62,6 +62,17 @@ const optionalMoney = (value: unknown): bigint | null => {
 const text = (v: unknown): string => String(v ?? '').trim();
 const optional = (v: unknown): string | undefined => text(v) || undefined;
 /**
+ * FormData 将 checkbox 值序列化为字符串。这里只接受契约中的 boolean 和精确的
+ * "true"/"false" 字符串；空值沿用登记动作的必填 boolean 默认 false 语义。
+ * 绝不能使用 Boolean(value)，否则字符串 "false" 会被错误地登记为 true。
+ */
+const requiredBoolean = (value: unknown, fieldName: string): boolean => {
+  if (value === undefined || value === null || value === '') return false;
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  throw new ValidationError('INVALID_BOOLEAN', `${fieldName} 仅接受 true 或 false`);
+};
+/**
  * IPC 业务日期边界：renderer 提交 yyyy-mm-dd（business date），主进程仅校验格式后原样透传，
  * 绝不转换为 ISO（design D30：业务时间仅记录业务日期；审计/技术时间保留精确 ISO）。
  * 空/缺失返回 undefined，由调用方决定 null（清空）或 undefined（未提交）语义。
@@ -97,6 +108,8 @@ export class WorkbenchFacade {
     /** 测试/接线可注入的服务覆盖（事务感知仓储，用于验证原子性）。 */
     private readonly injected?: {
       shipToService?: ShipToService;
+      /** 测试注入的二维码服务，用于验证类型行写失败时外层事务整体回滚。 */
+      qrRequestService?: QrRequestService;
       /** 「清理全部业务数据」confirm 前安全备份执行器（复用现有备份机制）。 */
       cleanupBackup?: () => Promise<string>;
       /** 仅测试注入的清理测试钩子（now/rotateGeneration/onAfterDeletes/onBeforeForeignKeys）。 */
@@ -347,10 +360,11 @@ export class WorkbenchFacade {
   //   import_record_audit 保留并标记指向已删除目标（target_deleted_at /
   //   target_delete_operation_id），绝不物理擦除来源审计；拒绝路径零写；
   // - 现有各类型行为保持不变：batch 仅未开始运输/无当前仪器/无改批历史；
-  //   activity 存在工作事实或维修关联拒绝（不级联清事实）；damage 仅未处理、
-  //   备件未使用、无活动关联；completed ship_to_request 禁止；instrument 所属批次
-  //   已开始运输也禁止；acceptance 有 invoice 历史拒绝，否则清空验收事实并按事实
-  //   确定性回退状态；invoice 映射到现有 revoke（必填撤销日期/原因），绝不物理删除。
+  //   activity 存在工作事实或维修关联拒绝（不级联清事实）；damage 删除其拥有的
+  //   活动关联；Ship-to 未完成且无 Account ID 可删除，已完成时须有来源证明且无仪器
+  //   引用；instrument 所属批次已开始运输也禁止；acceptance 有 invoice 历史拒绝，
+  //   否则清空验收事实并按事实确定性回退状态；invoice 映射到现有 revoke（必填撤销
+  //   日期/原因），绝不物理删除。
   // ---------------------------------------------------------------------------
 
   v2Delete(request: WorkbenchV2DeleteRequest): WorkbenchV2DeleteResult {
@@ -677,11 +691,30 @@ export class WorkbenchFacade {
 
   /**
    * 补齐资料（v2 supplement_project）：面向尚未正式进单项目，同一事务内补齐新建项目
-   * 全部可后补字段，并支持可选正式进单（携带非空 ECC）与可选搬迁开单（携带服务单号）。
+   * 全部可后补字段，并支持可选正式进单（携带非空 ECC）。开单只能由独立动作创建。
    * 全部经现有领域校验入口落库，不绕过正式进单校验（缺合同/客户/搬迁范围时 formalEntry
    * 按领域规则拒绝并整体回滚）。
    */
   private writeSupplementProject(input: ProjectSupplementPayload): { projectId: string } {
+    // 旧补齐 IPC 曾将开单字段混入同次保存。公开 DTO 已移除它们，但旧 renderer/外部
+    // JS 仍可能带入运行时形状；任一有值必须在事务前稳定拒绝，保证项目与开单零副作用。
+    const legacy = input as ProjectSupplementPayload & {
+      serviceOrderNo?: unknown;
+      engineers?: unknown;
+      serviceOrderNote?: unknown;
+    };
+    for (const [name, value] of [
+      ['serviceOrderNo', legacy.serviceOrderNo],
+      ['engineers', legacy.engineers],
+      ['serviceOrderNote', legacy.serviceOrderNote],
+    ] as const) {
+      if (text(value) !== '') {
+        throw new ValidationError(
+          WIZARD_REJECTION_CODES.DEPRECATED_FIELD,
+          `补齐资料已不再支持字段「${name}」；请通过独立开单动作提交`,
+        );
+      }
+    }
     const { projectId } = input;
     this.transaction(() => {
       const projectService = this.projectService();
@@ -814,29 +847,6 @@ export class WorkbenchFacade {
         }
       }
 
-      // 可选搬迁开单：携带服务单号 → 原子创建搬迁开单（工程师必填，客户取项目客户）。
-      const orderNo = input.serviceOrderNo?.trim() ?? '';
-      if (orderNo !== '') {
-        const current = this.projects.findById(projectId)!;
-        const customerRepo = new SqliteCustomerRepository(this.db);
-        const orderCustomer = current.customerId ? customerRepo.findById(current.customerId) : undefined;
-        const customerName = orderCustomer?.name ?? '';
-        if (customerName === '') {
-          throw new ValidationError('CUSTOMER_NAME_REQUIRED', '创建搬迁开单前请先关联项目客户');
-        }
-        if (!input.engineers?.trim()) {
-          throw new ValidationError('WIZARD_ENGINEERS_REQUIRED', '填写服务单号时参与工程师必填；项目与开单均未保存');
-        }
-        new ServiceOrderService(this.orders, this.projects).recordOrder({
-          orderType: 'relocation',
-          serviceOrderNo: orderNo,
-          orderedAt: undefined,
-          engineer: input.engineers,
-          customerName,
-          projectId,
-          note: input.serviceOrderNote,
-        }, this.actor());
-      }
     });
     return { projectId };
   }
@@ -914,13 +924,15 @@ export class WorkbenchFacade {
 
   private writeSubmitAction(payload: WorkbenchActionPayload): { projectId?: string } {
     const v = payload.values; const actor = this.actor(); const projectId = payload.projectId ?? '';
-    // 二维码仓储自身以事务原子保存申请与多选类型，避免外层重复开启事务。
+    // 二维码申请与多选类型由外层 BEGIN IMMEDIATE 原子提交；仓储不自行管理事务。
     if (payload.type === 'qr_request') {
-      new QrRequestService(this.qrRequests).createRequest({
-        applicant: text(v.applicant),
-        requestedAt: businessDate(v.requestedAt, '申请日期') ?? '',
-        types: (Array.isArray(v.types) ? v.types : []) as QrRequestTypeCode[],
-      }, actor);
+      this.transactionImmediate(() => {
+        this.qrRequestService().createRequest({
+          applicant: text(v.applicant),
+          requestedAt: businessDate(v.requestedAt, '申请日期') ?? '',
+          types: (Array.isArray(v.types) ? v.types : []) as QrRequestTypeCode[],
+        }, actor);
+      });
       return {};
     }
     this.transaction(() => {
@@ -968,7 +980,7 @@ export class WorkbenchFacade {
           }, actor);
           break;
         }
-        case 'instrument': this.executionService().registerInstrument(projectId,{name:text(v.name),manufacturer:optional(v.manufacturer),model:optional(v.model),serviceLevel:optional(v.serviceLevel),serialNo:optional(v.serialNo),batchId:optional(v.batchId),ups:Boolean(v.ups),qrRequested:Boolean(v.qrRequested)},actor); break;
+        case 'instrument': this.executionService().registerInstrument(projectId,{name:text(v.name),manufacturer:optional(v.manufacturer),model:optional(v.model),serviceLevel:optional(v.serviceLevel),serialNo:optional(v.serialNo),batchId:optional(v.batchId),ups:requiredBoolean(v.ups, 'UPS'),qrRequested:requiredBoolean(v.qrRequested, '二维码申请')},actor); break;
         case 'visit': { const e=text(v.engineers).split(/[、,，]/).filter(Boolean); const a=this.executionService().createActivity(projectId,businessDate(v.visitAt,'到访日期')??null,e,actor); const ids=Array.isArray(v.instrumentIds)?v.instrumentIds.map(String):[text(v.instrumentId)].filter(Boolean); const types=Array.isArray(v.workTypes)?v.workTypes as WorkType[]:[text(v.workType) as WorkType]; for(const id of ids) for(const type of types){this.executionService().startWorkFact(a.id,id,type,actor); if(v.status==='done')this.executionService().completeWorkFact(a.id,id,type,actor);} break; }
         case 'order': {
           // 合并服务单四字段后 UI 不再传 customerName：relocation/certification/
@@ -1134,6 +1146,7 @@ export class WorkbenchFacade {
   private executionService(){return new ExecutionService(this.batches,this.instruments,new SqliteBatchChangeHistoryRepository(this.db),this.activities,new SqliteActivityEngineerRepository(this.db),this.workFacts,this.fees,{onExecutionStarted:(id)=>{this.projectService().adjustStatus(id,'executing',{executionStarted:true});}});}
   private financialService(){return new FinancialClosureService(this.projects,this.contracts,this.invoices,{reevaluateStatus:(id)=>{this.projectService().adjustStatus(id,this.projects.findById(id)?.status??'pending_entry');}});}
   private shipToService(){return this.injected?.shipToService ?? new ShipToService(new SqliteShipToRepository(this.db),this.shipRequests,new SqliteShipToAddressReader(this.db));}
+  private qrRequestService(){return this.injected?.qrRequestService ?? new QrRequestService(this.qrRequests);}
   private damageService(){return new DamageRepairService(this.damageItems,new SqliteActivityDamageLinkRepository(this.db),new SqliteDamageInstrumentReader(this.db),new SqliteRepairActivityReader(this.db),new SqliteContractAmountReader(this.db));}
   /** 受保护删除策略分发器（design D3）：类型分发 + tombstone/import marker 原子审计。 */
   private deletePolicies(): WorkbenchDeletePolicies {
@@ -1142,20 +1155,20 @@ export class WorkbenchFacade {
       actor: () => this.actor(),
       parseBusinessDate: businessDate,
       repositories: {
-        orders: this.orders,
         activities: this.activities,
         projects: this.projects,
-        damageItems: this.damageItems,
-        serialUpdates: this.serialUpdates,
-        qrRequests: this.qrRequests,
         batches: this.batches,
         fees: this.fees,
         instruments: this.instruments,
-        shipRequests: this.shipRequests,
         invoices: this.invoices,
       },
       projectService: () => this.projectService(),
       financialService: () => this.financialService(),
+      serviceOrderService: () => new ServiceOrderService(this.orders, this.projects),
+      damageRepairService: () => this.damageService(),
+      serialAddressUpdateService: () => new SerialAddressUpdateService(this.serialUpdates, new SqliteInstrumentAddressReader(this.db)),
+      qrRequestService: () => this.qrRequestService(),
+      shipToService: () => this.shipToService(),
     });
   }
   private transaction(work:()=>void){this.db.exec('BEGIN');try{work();this.db.exec('COMMIT');}catch(error){try{this.db.exec('ROLLBACK');}catch{}throw error;}}

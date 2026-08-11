@@ -1,12 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { Project } from '../relocation-project-lifecycle';
 import type { ServiceOrder, OrderType } from '../service-order-recording';
-import type {
-  ServiceOrderRepository,
-  WizardSaveGateway,
-} from '../service-order-recording';
+import type { ServiceOrderRepository } from '../service-order-recording';
 import { mapConstraintError } from './repositories';
-import { SqliteProjectRepository } from './repositories';
 
 /**
  * service-order-recording SQLite 仓储（tasks 3.8~3.10 落库）。
@@ -80,36 +75,6 @@ export class SqliteServiceOrderRepository implements ServiceOrderRepository {
 
   deleteById(id: string): void {
     this.db.prepare('DELETE FROM service_orders WHERE id = ?').run(id);
-  }
-}
-
-/**
- * 项目向导原子保存网关（3.10）：项目与自动创建的搬迁开单记录在同一 SQLite
- * 事务内一并保存，失败整体回滚（不产生部分数据）。
- */
-export class SqliteWizardSaveGateway implements WizardSaveGateway {
-  constructor(
-    private readonly db: DatabaseSync,
-    private readonly projectRepo: SqliteProjectRepository,
-    private readonly orderRepo: SqliteServiceOrderRepository,
-  ) {}
-
-  saveAtomically(project: Project, order: ServiceOrder | null): void {
-    this.db.exec('BEGIN');
-    try {
-      this.projectRepo.save(project);
-      if (order) {
-        this.orderRepo.save(order);
-      }
-      this.db.exec('COMMIT');
-    } catch (err) {
-      try {
-        this.db.exec('ROLLBACK');
-      } catch {
-        // 回滚失败时继续抛出主错误
-      }
-      throw err;
-    }
   }
 }
 

@@ -165,6 +165,38 @@ export class ShipToService {
     return this.shipTos.listAll();
   }
 
+  /**
+   * 删除申请记录。调用方必须提供同一事务；本策略负责来源证明、引用保护与
+   * 申请拥有 Ship-to 的删除顺序，审计由上层在同一事务内提交。
+   */
+  deleteRequest(requestId: string): { ownedChildCount: number; shipToId?: string } {
+    const request = this.requireRequest(requestId);
+    const deleteRequest = this.requests.deleteById;
+    if (!deleteRequest) {
+      throw new ValidationError('SHIP_TO_DELETE_UNSUPPORTED', 'Ship-to 申请仓储未提供删除能力');
+    }
+    if (request.status !== 'completed') {
+      if (request.accountId !== null) {
+        throw new ValidationError('SHIP_TO_REQUEST_DELETE_DEPENDENCIES', '该申请未完成但已补入 Account ID，无法安全直接删除；请先完成该申请或由负责人人工处理');
+      }
+      deleteRequest.call(this.requests, requestId);
+      return { ownedChildCount: 0 };
+    }
+    const shipTo = this.shipTos.listAll().find((candidate) => candidate.originRequestId === requestId);
+    if (!shipTo) {
+      throw new ValidationError('SHIP_TO_REQUEST_DELETE_DEPENDENCIES', '已完成申请对应的不可变 Ship-to 无法证明来源（legacy 记录无 origin_request_id），拒绝删除');
+    }
+    if (!this.shipTos.deleteById || !this.shipTos.hasInstrumentReference) {
+      throw new ValidationError('SHIP_TO_DELETE_UNSUPPORTED', 'Ship-to 仓储未提供受保护删除能力');
+    }
+    if (this.shipTos.hasInstrumentReference(shipTo.id)) {
+      throw new ValidationError('SHIP_TO_REQUEST_DELETE_DEPENDENCIES', '已完成申请对应的不可变 Ship-to 仍被搬迁仪器（或经仪器关联的批次/项目）引用，无法删除');
+    }
+    this.shipTos.deleteById(shipTo.id);
+    deleteRequest.call(this.requests, requestId);
+    return { ownedChildCount: 1, shipToId: shipTo.id };
+  }
+
   /** 首次实际提交工作量：按提交日期所属月份归属，待提交草稿不计。 */
   countWorkloadByMonth(): ShipToRequestWorkloadRow[] {
     const counts = new Map<string, number>();

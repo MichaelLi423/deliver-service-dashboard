@@ -244,6 +244,24 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
     return new SqliteDuePlanVisitAdvancer(db, CLOCK);
   }
 
+  it('写入已到期计划上门日期与人工调整均使用注入业务日期，经 lifecycle 立即推进执行中', () => {
+    const dir = makeTempDir();
+    try {
+      const { db, projects, contracts, service } = openService(dir);
+      const { projectId } = prepareEnterableProject(db, contracts, service);
+      service.formalEntry(projectId, { ecc: 'ECC-DUE-WRITE', entryAt: '2026-07-01' });
+      service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
+      expect(projects.findById(projectId)!.status).toBe('executing');
+
+      // 历史/并发留下的待执行行由人工调整入口重算时，也不得因调用方未传 today 而遗漏到期推进。
+      db.prepare('UPDATE projects SET status = ? WHERE id = ?').run('pending_execution', projectId);
+      expect(service.adjustStatus(projectId, 'pending_execution')).toMatchObject({ ok: true, status: 'executing', reason: 'plan_visit_due' });
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
   it('到期自动推进：pending_execution → executing，仅真实转换递增 revision 并写审计（source=system，无客户值）', () => {
     const dir = makeTempDir();
     try {
@@ -251,7 +269,8 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
       const { projectId } = prepareEnterableProject(db, contracts, service);
       service.formalEntry(projectId, { ecc: 'ECC-DUE-1', entryAt: '2026-07-01' });
       service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
-      expect(projects.findById(projectId)!.status).toBe('pending_execution');
+      // advancer 仍须兼容旧版本/并发残留的到期候选行；正常写路径已立即推进。
+      db.prepare('UPDATE projects SET status = ? WHERE id = ?').run('pending_execution', projectId);
 
       const revisionBefore = readBusinessRevision(db);
       const result = advancer(db).advanceDuePlanVisits('2026-08-07');
@@ -299,6 +318,7 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
       const { projectId } = prepareEnterableProject(db, contracts, service);
       service.formalEntry(projectId, { ecc: 'ECC-IDEM-1', entryAt: '2026-07-01' });
       service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
+      db.prepare('UPDATE projects SET status = ? WHERE id = ?').run('pending_execution', projectId);
 
       const first = advancer(db).advanceDuePlanVisits('2026-08-07');
       expect(first).toEqual({ scanned: 1, advanced: 1 });
@@ -326,10 +346,10 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
       const projectId = service.createPendingProject().id;
       service.setPreEntryExecution(projectId, { approved: true });
       service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
-      expect(projects.findById(projectId)!.status).toBe('pending_entry');
+      expect(projects.findById(projectId)!.status).toBe('executing');
 
       const result = advancer(db).advanceDuePlanVisits('2026-08-07');
-      expect(result).toEqual({ scanned: 1, advanced: 1 });
+      expect(result).toEqual({ scanned: 0, advanced: 0 });
       const project = projects.findById(projectId)!;
       expect(project.status).toBe('executing');
       expect(project.preEntryExecution).toBe(true); // 标签为独立事实，不因自动推进清除
@@ -348,7 +368,7 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
       service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
       // 模拟候选状态仍为 pending_execution 但已存在更强事实的行（历史/边缘数据）：
       // 直接落实际装机完成事实（不触发记录路径），advancer 必须重读完整事实而非盲推进执行中。
-      db.prepare('UPDATE projects SET actual_install_done_at = ? WHERE id = ?').run('2026-08-05', projectId);
+      db.prepare('UPDATE projects SET status = ?, actual_install_done_at = ? WHERE id = ?').run('pending_execution', '2026-08-05', projectId);
       expect(projects.findById(projectId)!.status).toBe('pending_execution');
 
       const result = advancer(db).advanceDuePlanVisits('2026-08-07');
@@ -373,6 +393,7 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
       const { projectId } = prepareEnterableProject(db, contracts, service);
       service.formalEntry(projectId, { ecc: 'ECC-PRIO-1', entryAt: '2026-07-01' });
       service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
+      db.prepare('UPDATE projects SET status = ? WHERE id = ?').run('pending_execution', projectId);
 
       // 人工提交其他状态值但项目已到期：自动触发（plan_visit_due）优先
       const manual = service.adjustStatus(projectId, 'pending_acceptance', { today: '2026-08-07' });
@@ -423,7 +444,7 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
       service.setPreEntryExecution(projectId, { approved: true });
       service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
       const advanced = advancer(db).advanceDuePlanVisits('2026-08-07');
-      expect(advanced.advanced).toBe(1);
+      expect(advanced.advanced).toBe(0);
       expect(projects.findById(projectId)!.status).toBe('executing');
 
       const entered = service.formalEntry(projectId, { ecc: 'ECC-NO-REGRESS', entryAt: '2026-08-07' });
@@ -444,7 +465,7 @@ describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () 
       const { projectId } = prepareEnterableProject(db, contracts, service);
       service.setPreEntryExecution(projectId, { approved: true });
       service.updateExecutionPreparation(projectId, { planVisitAt: '2026-08-01' });
-      expect(projects.findById(projectId)!.status).toBe('pending_entry');
+      expect(projects.findById(projectId)!.status).toBe('executing');
 
       const entered = service.formalEntry(projectId, { ecc: 'ECC-DUE-FORMAL', entryAt: '2026-07-20' });
       expect(entered.id).toBe(projectId);

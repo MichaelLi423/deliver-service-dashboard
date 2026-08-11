@@ -444,4 +444,33 @@ describe('完整提醒视图与提醒泳道读取模型（tasks 7.3 / 7.6）', (
       cleanupTempDir(dir);
     }
   });
+
+  it('reminder 分页与泳道仅在存在额外行时返回游标，并拒绝篡改的锁定集合/列游标', () => {
+    const dir = makeTempDir();
+    try {
+      const db = reminderDb(dir);
+      for (let i = 0; i < 20; i++) seed(db, `exact-${String(i).padStart(2, '0')}`, '2026-08-10', '精确页');
+
+      const page = repo(db).reminderPage({ limit: 20 });
+      expect(page.rows).toHaveLength(20);
+      expect(page.nextCursor).toBeNull();
+
+      const lanes = repo(db).reminderLanes({ limit: 20 });
+      const lane = lanes.lanes[0];
+      expect(lane.projects).toHaveLength(20);
+      expect(lane.nextCursor).toBeNull();
+      expect(() => repo(db).reminderLanes({ selectedDates: [] })).toThrow(/1 至 7/);
+      expect(() => repo(db).reminderLanes({ selectedDates: ['2026-08-11', '2026-08-10'] })).toThrow(/严格升序/);
+      expect(() => repo(db).reminderLanes({ selectedDates: ['2026-08-10'], date: '2026-08-11' })).toThrow(/必须属于/);
+
+      seed(db, 'extra', '2026-08-10', '额外行');
+      const first = repo(db).reminderLanes({ limit: 20 });
+      const cursor = first.lanes[0].nextCursor!;
+      expect(cursor).toBeTruthy();
+      expect(() => repo(db).reminderLanes({ selectedDates: ['2026-08-10'], date: '2026-08-10', cursor: `${cursor}x` })).toThrow(/游标/);
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
 });

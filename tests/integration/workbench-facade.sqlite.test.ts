@@ -18,6 +18,7 @@ import {
 } from '../../src/domain/capabilities/local-data-persistence/execution-repositories';
 import { ExecutionService } from '../../src/domain/capabilities/relocation-execution/execution-service';
 import { ShipToService, type ShipToRepository } from '../../src/domain/capabilities/ship-to-management';
+import { QrRequestService, type QrRequestRepository } from '../../src/domain/capabilities/qr-request-tracking';
 import { LocalAccountService } from '../../src/domain/capabilities/workbench-access';
 import { WorkbenchFacade } from '../../src/main/workbench-facade';
 import type {
@@ -71,6 +72,38 @@ async function makeFacade(): Promise<{ facade: WorkbenchFacade; db: import('node
 }
 
 describe('工作台 application facade → 领域服务 → SQLite（v2 有界 API）', () => {
+  it('二维码类型写入失败：外层 BEGIN IMMEDIATE 整体回滚，不留下申请或类型行', async () => {
+    const dir = makeTempDir('workbench-qr-atomic-');
+    dirs.push(dir);
+    const { db } = bootstrapDatabase({ dataDir: dir });
+    const { account } = await new LocalAccountService(new SqliteAccountRepository(db)).initialize({
+      username: '负责人',
+      password: 'password1',
+    });
+    const failingTypes: QrRequestRepository = {
+      findById: () => undefined,
+      listAll: () => [],
+      deleteById: () => undefined,
+      save: (request) => {
+        db.prepare('INSERT INTO qr_requests (id, applicant, requested_at, created_at) VALUES (?,?,?,?)')
+          .run(request.id, request.applicant, request.requestedAt, request.createdAt);
+        db.prepare('INSERT INTO qr_request_types (id, qr_request_id, type_code) VALUES (?,?,?)')
+          .run(`${request.id}:A`, request.id, 'A');
+        throw new Error('injected-qr-type-write-failure');
+      },
+    };
+    const facade = new WorkbenchFacade(db, () => ({ accountId: account.id, username: account.username }), {
+      qrRequestService: new QrRequestService(failingTypes),
+    });
+
+    expect(() => facade.v2Mutate({
+      op: 'submit_action',
+      action: { type: 'qr_request', values: { applicant: '申请人', requestedAt: '2026-08-10', types: ['A'] } },
+    })).toThrow('injected-qr-type-write-failure');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM qr_requests').get()!.n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM qr_request_types').get()!.n).toBe(0);
+  });
+
   it('真实保存项目、项目提醒、十类动作中的核心记录及独立二维码申请', async () => {
     const { facade } = await makeFacade();
     const created = facade.v2Mutate({
@@ -316,8 +349,8 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     const created = facade.v2Mutate({
       op: 'create_project',
       payload: wizard({
-        intent: 'pre_entry_execution',
-        managerApproved: true,
+        intent: 'draft',
+        instrumentCount: undefined,
         customerName: '资料更新客户',
         region: 'East',
         oldSiteContact: '旧址王工',

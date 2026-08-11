@@ -151,7 +151,42 @@ async function assertHistoryDrawer(page: Page, width: 820 | 1024, screenshot: st
   await dialog.getByRole('button', { name: '关闭' }).click();
 }
 
-test('Oracle #10 任务指挥台在 820 / 1024 / 1440 无页面横溢且独立模块记录区可读', async ({}, testInfo) => {
+async function assertDeepFormFocusBelowSticky(app: ElectronApplication, page: Page): Promise<void> {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1.5);
+  });
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.getZoomFactor())).toBe(1.5);
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.getByRole('button', { name: '编辑项目资料' }).click();
+  const dialog = page.getByRole('dialog', { name: '编辑项目资料' });
+  const deepControl = dialog.getByLabel(/暂存地址/);
+  await deepControl.focus();
+  await expect(deepControl).toBeFocused();
+  const seam = await deepControl.evaluate((node) => {
+    const command = document.querySelector<HTMLElement>('.command');
+    const intro = command?.firstElementChild?.getBoundingClientRect();
+    const actions = command?.querySelector<HTMLElement>('.row-actions')?.getBoundingClientRect();
+    const target = node.getBoundingClientRect();
+    return {
+      zoomedViewportWidth: window.innerWidth,
+      targetTop: target.top,
+      targetBottom: target.bottom,
+      commandBottom: command?.getBoundingClientRect().bottom ?? 0,
+      commandWrapped: Boolean(intro && actions && actions.top >= intro.bottom - 1),
+    };
+  });
+  expect(seam.zoomedViewportWidth).toBeLessThanOrEqual(700);
+  expect(seam.commandWrapped).toBe(true);
+  expect(seam.targetTop).toBeGreaterThanOrEqual(seam.commandBottom - 1);
+  expect(seam.targetBottom).toBeLessThanOrEqual(768 + 1);
+  await dialog.getByRole('button', { name: '关闭' }).click();
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1);
+  });
+}
+
+test('Oracle #10 任务指挥台布局、150% 文本缩放与 sticky 深层表单焦点均不遮挡', async ({}, testInfo) => {
   const root = mkdtempSync(join(tmpdir(), 'rw-v2-layout-'));
   const userData = join(root, 'user-data');
   let app: ElectronApplication | null = null;
@@ -167,6 +202,7 @@ test('Oracle #10 任务指挥台在 820 / 1024 / 1440 无页面横溢且独立�
     await assertIndependentDrawer(page, 820, testInfo.outputPath('serial-address-drawer-820.png'));
     await assertHistoryDrawer(page, 1024, testInfo.outputPath('history-drawer-1024.png'));
     await assertHistoryDrawer(page, 820, testInfo.outputPath('history-drawer-820.png'));
+    await assertDeepFormFocusBelowSticky(app, page);
   } finally {
     await app?.close().catch(() => undefined);
     rmSync(root, { recursive: true, force: true });

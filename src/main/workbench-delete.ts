@@ -4,18 +4,18 @@ import { ValidationError } from '../domain/core/errors';
 import { SystemClock } from '../domain/core/time';
 import type { FinancialClosureService } from '../domain/capabilities/project-financial-closure';
 import type { ProjectService } from '../domain/capabilities/relocation-project-lifecycle';
+import type { ServiceOrderService } from '../domain/capabilities/service-order-recording';
+import type { DamageRepairService } from '../domain/capabilities/damage-repair-tracking';
+import type { SerialAddressUpdateService } from '../domain/capabilities/serial-address-update';
+import type { QrRequestService } from '../domain/capabilities/qr-request-tracking';
+import type { ShipToService } from '../domain/capabilities/ship-to-management';
 import type {
   SqliteActivityRepository,
   SqliteBatchRepository,
-  SqliteDamageRepairItemRepository,
   SqliteInstrumentRepository,
   SqliteInvoiceRepository,
   SqliteLogisticsFeeRepository,
   SqliteProjectRepository,
-  SqliteQrRequestRepository,
-  SqliteSerialAddressUpdateRepository,
-  SqliteServiceOrderRepository,
-  SqliteShipToRequestRepository,
 } from '../domain/capabilities/local-data-persistence';
 import { DELETE_REJECTION_CODES } from '../shared/ipc';
 import type {
@@ -30,7 +30,7 @@ import type {
  * - 保持 v2Delete 单一命令形状（kind/id/expectedRevision）；expectedRevision 由
  *   facade 在 BEGIN IMMEDIATE 事务内核验，本模块只做类型分发与策略执行；
  * - 按 kind 分发到显式 type-specific policy，每类策略在写事务内重查状态/依赖，
- *   删除使用该类型显式 SQL（绝无「任意表 DELETE」通用入口）；
+ *   受领域能力拥有的记录删除委派领域 service；
  * - 成功删除与最小 tombstone（record_deletion_audit）同事务原子写入；本次操作内
  *   每删除一条业务记录写一行 tombstone（owned_child_count 记录原子清理的子记录数）；
  * - import_record_audit 不再物理删除：改为更新 target_deleted_at /
@@ -52,20 +52,20 @@ export interface WorkbenchDeleteContext {
   /** IPC 业务日期边界：仅校验格式后原样透传（业务日期 yyyy-mm-dd，不转 ISO）。 */
   parseBusinessDate: (v: unknown, fieldName: string) => string | undefined;
   repositories: {
-    orders: SqliteServiceOrderRepository;
     activities: SqliteActivityRepository;
     projects: SqliteProjectRepository;
-    damageItems: SqliteDamageRepairItemRepository;
-    serialUpdates: SqliteSerialAddressUpdateRepository;
-    qrRequests: SqliteQrRequestRepository;
     batches: SqliteBatchRepository;
     fees: SqliteLogisticsFeeRepository;
     instruments: SqliteInstrumentRepository;
-    shipRequests: SqliteShipToRequestRepository;
     invoices: SqliteInvoiceRepository;
   };
   projectService: () => ProjectService;
   financialService: () => FinancialClosureService;
+  serviceOrderService: () => ServiceOrderService;
+  damageRepairService: () => DamageRepairService;
+  serialAddressUpdateService: () => SerialAddressUpdateService;
+  qrRequestService: () => QrRequestService;
+  shipToService: () => ShipToService;
 }
 
 /** 分发结果：changed/extraTags 由 facade 组装最终信封（invalidated/businessRevision）。 */
@@ -179,18 +179,14 @@ class DeleteOperation {
   }
 
   // -------------------------------------------------------------------------
-  // type-specific policies：每类显式 SQL + 守卫，删除时记录 tombstone/import 目标。
+  // type-specific policies：分发/守卫/审计；领域拥有的删除由对应 service 执行。
   // -------------------------------------------------------------------------
 
   deleteServiceOrder(id: string): void {
-    const order = this.ctx.repositories.orders.findById(id);
-    if (!order) {
-      throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `开单记录不存在: ${id}`);
-    }
-    this.db.prepare('DELETE FROM service_orders WHERE id = ?').run(id);
-    this.tombstone('service_order', id, 0);
+    const result = this.mapDomainDelete(() => this.ctx.serviceOrderService().delete(id), ['ORDER_NOT_FOUND']);
+    this.tombstone('service_order', id, result.ownedChildCount);
     this.importTarget('service_orders', id);
-    this.changed = { kind: 'service_order', id, projectId: order.projectId ?? undefined };
+    this.changed = { kind: 'service_order', id, projectId: result.projectId };
   }
 
   deleteActivity(id: string): void {
@@ -270,50 +266,24 @@ class DeleteOperation {
   }
 
   deleteDamageItem(id: string): void {
-    const item = this.ctx.repositories.damageItems.findById(id);
-    if (!item) {
-      throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `损坏/维修事项不存在: ${id}`);
-    }
-    // 5.2：按 TBD-24 引用关系原子清理仅指向该事项的维修上门活动关联
-    // （activity_damage_links），不删除活动本身、不影响其他事项与该活动的关联、
-    // 不因存在关联直接拒绝；关联仪器与搬迁项目保留、项目生命周期不变。
-    // 事项自身的处理/备件状态属该记录内部事实，删除后维修报表统计由剩余事项派生，
-    // 不存在真正下游不可安全删除的事实，故不做依赖拒绝。
-    const linkCount = this.countWhere('activity_damage_links', 'damage_item_id', id);
-    this.db.prepare('DELETE FROM activity_damage_links WHERE damage_item_id = ?').run(id);
-    this.db.prepare('DELETE FROM damage_repair_items WHERE id = ?').run(id);
-    this.tombstone('damage_repair_item', id, linkCount);
+    const result = this.mapDomainDelete(() => this.ctx.damageRepairService().deleteItem(id), ['DAMAGE_ITEM_NOT_FOUND']);
+    this.tombstone('damage_repair_item', id, result.ownedChildCount);
     this.importTarget('damage_repair_items', id);
-    this.changed = { kind: 'damage_repair_item', id, projectId: item.projectId };
+    this.changed = { kind: 'damage_repair_item', id, projectId: result.projectId };
   }
 
   deleteSerialAddress(id: string): void {
-    const update = this.ctx.repositories.serialUpdates.findById(id);
-    if (!update) {
-      throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `序列号地址更新记录不存在: ${id}`);
-    }
-    const projectId = update.instrumentId ? this.projectOfInstrument(update.instrumentId) : undefined;
-    this.db.prepare('DELETE FROM serial_address_updates WHERE id = ?').run(id);
-    this.tombstone('serial_address', id, 0);
+    const result = this.mapDomainDelete(() => this.ctx.serialAddressUpdateService().delete(id), ['SERIAL_ADDRESS_UPDATE_NOT_FOUND']);
+    const projectId = result.instrumentId ? this.projectOfInstrument(result.instrumentId) : undefined;
+    this.tombstone('serial_address', id, result.ownedChildCount);
     this.importTarget('serial_address_updates', id);
     this.changed = { kind: 'serial_address', id, projectId };
     this.extraTags.push('independent:serial_address');
   }
 
   deleteQrRequest(id: string): void {
-    const requestRow = this.ctx.repositories.qrRequests.findById(id);
-    if (!requestRow) {
-      throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `二维码申请记录不存在: ${id}`);
-    }
-    // 多选类型属申请记录一部分，随申请删除并计入子记录数。
-    const typeCount = (
-      this.db.prepare('SELECT COUNT(*) AS n FROM qr_request_types WHERE qr_request_id = ?').get(id) as {
-        n: number;
-      }
-    ).n;
-    this.db.prepare('DELETE FROM qr_request_types WHERE qr_request_id = ?').run(id);
-    this.db.prepare('DELETE FROM qr_requests WHERE id = ?').run(id);
-    this.tombstone('qr_request', id, typeCount);
+    const result = this.mapDomainDelete(() => this.ctx.qrRequestService().delete(id), ['QR_REQUEST_NOT_FOUND']);
+    this.tombstone('qr_request', id, result.ownedChildCount);
     this.importTarget('qr_requests', id);
     this.changed = { kind: 'qr_request', id };
     this.extraTags.push('independent:qr_request');
@@ -376,49 +346,14 @@ class DeleteOperation {
   }
 
   deleteShipToRequest(id: string): void {
-    const shipRequest = this.ctx.repositories.shipRequests.findById(id);
-    if (!shipRequest) {
-      throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `Ship-to 申请记录不存在: ${id}`);
-    }
-    // 记录级删除，非「退回/取消」语义：不影响其他申请的状态与线性流转。
-    if (shipRequest.status !== 'completed') {
-      // 未完成且未补入 Account ID → 直接删除（不产生任何 Ship-to 主数据遗留）。
-      if (shipRequest.accountId === null) {
-        this.db.prepare('DELETE FROM ship_to_requests WHERE id = ?').run(id);
-        this.tombstone('ship_to_request', id, 0);
-        this.importTarget('ship_to_requests', id);
-        this.changed = { kind: 'ship_to_request', id };
-        this.extraTags.push('lookup:ship_to_requests');
-        return;
-      }
-      // 异常未完成但已有 Account ID → 保守拒绝（无法安全证明未产生主数据）。
-      throw new ValidationError(
-        DELETE_REJECTION_CODES.DEPENDENCIES,
-        '该申请未完成但已补入 Account ID，无法安全直接删除；请先完成该申请或由负责人人工处理',
-      );
-    }
-    // completed：必须经 ship_tos.origin_request_id 证明该不可变 Ship-to 由本申请产生；
-    // legacy null（无法证明来源）保守拒绝。
-    const shipToId = this.shipToIdOfOriginRequest(id);
-    if (shipToId === undefined) {
-      throw new ValidationError(
-        DELETE_REJECTION_CODES.DEPENDENCIES,
-        '已完成申请对应的不可变 Ship-to 无法证明来源（legacy 记录无 origin_request_id），拒绝删除',
-      );
-    }
-    // 被搬迁仪器（及经仪器关联的批次/项目间接引用）引用时原子拒绝并说明原因。
-    if (this.existsWhere('instruments', 'destination_ship_to_id', shipToId)) {
-      throw new ValidationError(
-        DELETE_REJECTION_CODES.DEPENDENCIES,
-        '已完成申请对应的不可变 Ship-to 仍被搬迁仪器（或经仪器关联的批次/项目）引用，无法删除',
-      );
-    }
-    // 无任何引用且仅由该申请产生 → 同事务先删 Ship-to 主数据再删申请，不留孤立。
-    this.db.prepare('DELETE FROM ship_tos WHERE id = ?').run(shipToId);
-    this.db.prepare('DELETE FROM ship_to_requests WHERE id = ?').run(id);
-    this.tombstone('ship_to_request', id, 1);
+    const result = this.mapDomainDelete(
+      () => this.ctx.shipToService().deleteRequest(id),
+      ['SHIP_TO_REQUEST_NOT_FOUND'],
+      ['SHIP_TO_REQUEST_DELETE_DEPENDENCIES'],
+    );
+    this.tombstone('ship_to_request', id, result.ownedChildCount);
     this.importTarget('ship_to_requests', id);
-    this.importTarget('ship_tos', shipToId);
+    if (result.shipToId) this.importTarget('ship_tos', result.shipToId);
     this.changed = { kind: 'ship_to_request', id };
     this.extraTags.push('lookup:ship_to_requests');
   }
@@ -491,20 +426,21 @@ class DeleteOperation {
     return row !== undefined;
   }
 
-  /** 匹配行计数（原子清理的关联子记录数；表名/列名来自固定白名单，无注入面）。 */
-  private countWhere(table: string, column: string, value: string): number {
-    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`).get(value) as {
-      n: number;
-    };
-    return row.n;
-  }
-
-  /** 由申请产生（origin_request_id）的 Ship-to 主数据 ID；无（legacy null）返回 undefined。 */
-  private shipToIdOfOriginRequest(requestId: string): string | undefined {
-    const row = this.db.prepare('SELECT id FROM ship_tos WHERE origin_request_id = ?').get(requestId) as
-      | { id: string }
-      | undefined;
-    return row ? row.id : undefined;
+  /** 将领域稳定错误码映射为既有 IPC 删除拒绝码，避免 UI/信封变化。 */
+  private mapDomainDelete<T>(action: () => T, notFoundCodes: string[], dependencyCodes: string[] = []): T {
+    try {
+      return action();
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        if (notFoundCodes.includes(error.code)) {
+          throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, error.message);
+        }
+        if (dependencyCodes.includes(error.code)) {
+          throw new ValidationError(DELETE_REJECTION_CODES.DEPENDENCIES, error.message);
+        }
+      }
+      throw error;
+    }
   }
 
   /** 项目是否存在任何掉票历史（含已撤销）：有则验收报告删除被拒绝。 */

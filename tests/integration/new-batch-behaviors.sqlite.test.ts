@@ -3,13 +3,13 @@ import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-pers
 import { SqliteAccountRepository } from '../../src/domain/capabilities/local-data-persistence/repositories';
 import { LocalAccountService } from '../../src/domain/capabilities/workbench-access';
 import { WorkbenchFacade, INSTRUMENT_BULK_IMPORT_MAX_ROWS } from '../../src/main/workbench-facade';
-import type { ProjectWizardPayload } from '../../src/shared/ipc';
+import { WIZARD_REJECTION_CODES, type ProjectWizardPayload } from '../../src/shared/ipc';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 
 /**
  * 本批次已确认语义的后端/契约/持久化聚焦测试：
  * - 新建 payload 用 instrumentCount（正整数）不生成虚拟仪器；计划装机完成日期独立字段；
- * - 合同起止日期可空/可清除；supplement_project 原子补齐全部可后补字段 + 可选正式进单/服务单；
+ * - 合同起止日期可空/可清除；supplement_project 原子补齐全部可后补字段 + 可选正式进单；
  * - instrument_bulk_import：5 列 append、整批事务、名称必填、payload 内及库内序列号重复报错；
  * - damage_update 复用领域方法（TBD-15 processing 语义）；
  * - 项目页 repair:'open' 伪筛选 + overview 开放维修项目数（SQL EXISTS 与 repairsPending 同口径）；
@@ -142,7 +142,7 @@ describe('新建项目：instrumentCount 正整数 + 计划装机完成日期独
   });
 });
 
-describe('supplement_project：原子补齐全部可后补字段 + 可选正式进单/服务单', () => {
+describe('supplement_project：原子补齐全部可后补字段 + 可选正式进单', () => {
   async function makePendingProject(): Promise<{ facade: WorkbenchFacade; projectId: string }> {
     const dir = makeTempDir('new-batch-supp-');
     dirs.push(dir);
@@ -164,7 +164,7 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     return { facade, projectId: created.changed!.projectId! };
   }
 
-  it('补齐资料后正式进单：全部后补字段 + 服务单原子落库（客户从项目读取）', async () => {
+  it('补齐资料后正式进单：全部后补字段不创建开单，独立开单动作仍可用', async () => {
     const { facade, projectId } = await makePendingProject();
     let detail = facade.v2ProjectDetail(projectId).project!;
     expect(detail.status).toBe('pending_entry');
@@ -186,9 +186,6 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
         ecc: 'ECC-SUPP-001',
         entryAt: '2026-08-07',
         finalAmount: '200000',
-        serviceOrderNo: 'SO-SUPP-001',
-        engineers: '工程师甲、乙',
-        serviceOrderNote: '补齐资料时创建的开单',
       },
     });
     expect(result.changed?.projectId).toBe(projectId);
@@ -207,7 +204,13 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     expect(detailFull.planTransportAt).toBe('2026-08-16');
     expect(detailFull.plannedInstallDoneAt).toBe('2026-08-25');
     expect(detailFull.siteConfirmed).toBe(true);
-    // 服务单：客户信息从项目客户读取/派生
+    expect(facade.v2SectionPage({ projectId, kind: 'orders' }).total).toBe(0);
+
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'order', projectId, values: { orderType: 'relocation', serviceOrderNo: 'SO-SUPP-001', orderedAt: '2026-08-07', engineer: '工程师甲、乙', note: '独立开单' } },
+    });
     const order = facade.v2SectionPage({ projectId, kind: 'orders' }).rows[0] as Extract<
       ReturnType<WorkbenchFacade['v2SectionPage']>['rows'][number],
       { kind: 'orders' }
@@ -215,7 +218,7 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     expect(order.serviceOrderNo).toBe('SO-SUPP-001');
     expect(order.customerName).toBe('补齐资料客户');
     expect(order.engineer).toBe('工程师甲、乙');
-    expect(order.note).toBe('补齐资料时创建的开单');
+    expect(order.note).toBe('独立开单');
   });
 
   it('supplement 补齐暂定仪器范围（v16）：名称/型号/是否 UPS 落库并回显，不建仪器、不触发正式进单', async () => {
@@ -240,18 +243,26 @@ describe('supplement_project：原子补齐全部可后补字段 + 可选正式�
     expect(facade.v2ProjectDetail(projectId).project!.status).toBe('pending_entry');
   });
 
-  it('supplement 缺工程师（填服务单号）时整体回滚：开单与项目均不保存', async () => {
+  it('supplement 旧开单字段任一有值稳定拒绝，项目与开单均零副作用', async () => {
     const { facade, projectId } = await makePendingProject();
-    expect(() =>
-      facade.v2Mutate({
-        op: 'supplement_project',
-        payload: { projectId, contractAmount: '10000', finalAmount: '10000', ecc: 'ECC-SUPP-002', serviceOrderNo: 'SO-SUPP-002' },
-      }),
-    ).toThrow(/参与工程师/);
-    // 服务单未保存；项目也未正式进单（整次提交回滚）
+    for (const legacy of [
+      { serviceOrderNo: 'SO-SUPP-002' },
+      { engineers: '工程师甲' },
+      { serviceOrderNote: '旧备注' },
+    ]) {
+      try {
+        facade.v2Mutate({
+          op: 'supplement_project',
+          payload: { projectId, contractAmount: '10000', ecc: 'ECC-SUPP-002', ...legacy } as never,
+        });
+      } catch (err) {
+        expect((err as { code?: string }).code).toBe(WIZARD_REJECTION_CODES.DEPRECATED_FIELD);
+        continue;
+      }
+      expect.unreachable('应当拒绝旧开单字段');
+    }
     expect(facade.v2SectionPage({ projectId, kind: 'orders' }).total).toBe(0);
     expect(facade.v2ProjectDetail(projectId).project!.formallyEntered).toBe(false);
-    // 但未进单先执行标签仍保留（回滚不破坏既有状态）
     expect(facade.v2ProjectDetail(projectId).project!.preEntryExecution).toBe(true);
   });
 

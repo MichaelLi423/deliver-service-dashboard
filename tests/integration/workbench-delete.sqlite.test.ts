@@ -6,15 +6,10 @@ import { SqliteAccountRepository } from '../../src/domain/capabilities/local-dat
 import {
   SqliteActivityRepository,
   SqliteBatchRepository,
-  SqliteDamageRepairItemRepository,
   SqliteInstrumentRepository,
   SqliteInvoiceRepository,
   SqliteLogisticsFeeRepository,
   SqliteProjectRepository,
-  SqliteQrRequestRepository,
-  SqliteSerialAddressUpdateRepository,
-  SqliteServiceOrderRepository,
-  SqliteShipToRequestRepository,
 } from '../../src/domain/capabilities/local-data-persistence';
 import { ValidationError } from '../../src/domain/core/errors';
 import type { FinancialClosureService } from '../../src/domain/capabilities/project-financial-closure';
@@ -120,20 +115,20 @@ function makePolicyContext(db: DatabaseSync, projectService: ProjectService): Wo
     actor: () => ({ accountId: account.id, username: '负责人' }),
     parseBusinessDate: (v) => (typeof v === 'string' && v.trim() !== '' ? v : undefined),
     repositories: {
-      orders: new SqliteServiceOrderRepository(db),
       activities: new SqliteActivityRepository(db),
       projects: new SqliteProjectRepository(db),
-      damageItems: new SqliteDamageRepairItemRepository(db),
-      serialUpdates: new SqliteSerialAddressUpdateRepository(db),
-      qrRequests: new SqliteQrRequestRepository(db),
       batches: new SqliteBatchRepository(db),
       fees: new SqliteLogisticsFeeRepository(db),
       instruments: new SqliteInstrumentRepository(db),
-      shipRequests: new SqliteShipToRequestRepository(db),
       invoices: new SqliteInvoiceRepository(db),
     },
     projectService: () => projectService,
     financialService: () => ({} as FinancialClosureService),
+    serviceOrderService: () => ({} as never),
+    damageRepairService: () => ({} as never),
+    serialAddressUpdateService: () => ({} as never),
+    qrRequestService: () => ({} as never),
+    shipToService: () => ({} as never),
   };
 }
 
@@ -603,6 +598,37 @@ describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () =>
       DELETE_REJECTION_CODES.DEPENDENCIES,
     );
     expect(facade.v2LookupPage({ kind: 'ship_to_requests' }).total).toBe(1); // 拒绝零写
+  });
+
+  it('ship_to_request：删除处理中无 Account ID 的并行申请只物理删除目标，不取消或回退另一申请，仍保留 tombstone', async () => {
+    const ctx = await makeCtx();
+    const { facade, db } = ctx;
+    const target = facade.createShipToRequest({ customerName: '待删除并行申请', newSiteAddress: '目标新址' });
+    const untouched = facade.createShipToRequest({ customerName: '保留并行申请', newSiteAddress: '保留新址' });
+    facade.submitShipToRequest(target.request.id);
+    facade.submitShipToRequest(untouched.request.id);
+    expect(db.prepare('SELECT status, account_id FROM ship_to_requests WHERE id = ?').get(target.request.id)).toMatchObject({
+      status: 'processing',
+      account_id: null,
+    });
+
+    facade.v2Delete({ kind: 'ship_to_request', id: target.request.id, expectedRevision: readBusinessRevision(db) });
+    // 目标行物理消失；删除不是取消/退回命令。
+    expect(db.prepare('SELECT id FROM ship_to_requests WHERE id = ?').get(target.request.id)).toBeUndefined();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM ship_to_requests WHERE status IN ('cancelled', 'pending_submit')").get()!.n).toBe(0);
+    // 并行申请仍在处理中，且可沿唯一线性路径继续完成。
+    expect(db.prepare('SELECT status, account_id FROM ship_to_requests WHERE id = ?').get(untouched.request.id)).toMatchObject({
+      status: 'processing',
+      account_id: null,
+    });
+    facade.v2Mutate({ op: 'ship_to_complete', requestId: untouched.request.id, accountId: 'ACC-PARALLEL-001' });
+    expect(db.prepare('SELECT status, account_id FROM ship_to_requests WHERE id = ?').get(untouched.request.id)).toMatchObject({
+      status: 'completed',
+      account_id: 'ACC-PARALLEL-001',
+    });
+    expect(
+      db.prepare('SELECT COUNT(*) AS n FROM record_deletion_audit WHERE record_type = ? AND record_id = ?').get('ship_to_request', target.request.id)!.n,
+    ).toBe(1);
   });
 
   it('ship_to_request：completed 经 origin_request_id 证明来源，无引用随申请原子清理 Ship-to', async () => {

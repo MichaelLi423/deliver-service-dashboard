@@ -6,8 +6,8 @@
  * 1. 扫描 openspec/changes/adjust-relocation-workbench-0810/specs 下各能力的 spec.md，
  *    提取每个能力的 Requirement / Scenario。
  * 2. 读取 docs/verification/scenario-map.mjs 登记表（场景→测试证据 + 状态/备注）。
- * 3. 校验登记表证据真实性：引用的测试文件必须存在，且文件中必须出现登记的关键词
- *    （it()/describe() 标题子串）。找不到证据的场景如实标记为“缺证据”，不谎称覆盖。
+ * 3. 校验登记表证据真实性：测试文件的关键词必须出现在 it()/test()/describe() 标题字面量；
+ *    README 和说明文档证据可全文匹配。找不到证据的场景如实标记为“缺证据”，不谎称覆盖。
  * 4. 生成 docs/verification/scenario-test-matrix.md，包含汇总统计、按能力分组对照表。
  *    全部 spec 场景（含 history-import-wizard）已逐条登记真实测试证据；仅 Windows
  *    操作系统账户边界保持 pending（macOS 开发机不可验证，不伪造证据）。
@@ -55,7 +55,26 @@ function listSpecFiles() {
     .sort();
 }
 
-/** 校验证据：文件存在且内容包含关键词（it/describe 标题子串）。 */
+function isTestSource(file) {
+  return /^(?:tests|e2e)\/.*\.(?:ts|tsx)$/.test(file);
+}
+
+/** 提取 it/test/describe（含 .skip/.only/.todo）首个无插值字符串标题。 */
+function testTitles(content) {
+  const titles = [];
+  const pattern = /\b(?:describe|it|test)(?:\.(?:skip|only|todo))*\s*\(\s*(?:'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)"|`((?:\\.|[^`\\$])*)`)/g;
+  for (const match of content.matchAll(pattern)) {
+    const raw = match[1] ?? match[2] ?? match[3];
+    try {
+      titles.push(JSON.parse(`"${raw.replace(/"/g, '\\"')}"`));
+    } catch {
+      titles.push(raw);
+    }
+  }
+  return titles;
+}
+
+/** 校验证据：测试源码仅匹配测试标题，文档证据可全文匹配。 */
 function validateEvidence(evidence) {
   if (!Array.isArray(evidence) || evidence.length === 0) return { valid: false, detail: '无证据' };
   const issues = [];
@@ -66,8 +85,9 @@ function validateEvidence(evidence) {
       continue;
     }
     const content = readFileSync(abs, 'utf-8');
-    if (!keyword || !content.includes(keyword)) {
-      issues.push(`${file}（未找到「${keyword}」）`);
+    const found = Boolean(keyword) && (isTestSource(file) ? testTitles(content).some((title) => title.includes(keyword)) : content.includes(keyword));
+    if (!keyword || !found) {
+      issues.push(`${file}（标题中未找到「${keyword}」）`);
     }
   }
   return issues.length === 0 ? { valid: true } : { valid: false, detail: issues.join('；') };
@@ -86,14 +106,8 @@ for (const cap of caps) {
       const entry = registry[scenario];
       let status = 'unregistered';
       if (entry) {
-        if (entry.abstract) {
-          // 抽象/文档性场景（如原型设计依据、Windows 边界）：不要求 it/describe 关键词。
-          status = entry.status ?? 'covered';
-        } else {
-          const check = validateEvidence(entry.evidence);
-          status = check.valid ? 'covered' : 'invalid-evidence';
-          if (!check.valid) status = 'invalid-evidence';
-        }
+        const check = validateEvidence(entry.evidence);
+        status = check.valid ? 'covered' : 'invalid-evidence';
         if (entry.status === 'pending' && status === 'covered') status = 'pending';
       }
       rows.push({

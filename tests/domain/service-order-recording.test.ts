@@ -1,16 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import {
-  ProjectWizardService,
-  ServiceOrderService,
-} from '../../src/domain/capabilities/service-order-recording/service-order-service';
+import { ServiceOrderService } from '../../src/domain/capabilities/service-order-recording/service-order-service';
 import { UniquenessError } from '../../src/domain/core/errors';
 import { createPendingProject } from '../../src/domain/capabilities/relocation-project-lifecycle/project';
 import { FixedClock } from '../../src/domain/core/time';
 import { InMemoryProjectRepository } from '../helpers/in-memory-repos';
-import {
-  InMemoryServiceOrderRepository,
-  InMemoryWizardSaveGateway,
-} from '../helpers/service-order-in-memory';
+import { InMemoryServiceOrderRepository } from '../helpers/service-order-in-memory';
 import { makeAccount } from '../helpers/fact-builder';
 
 /**
@@ -25,12 +19,7 @@ function setup() {
   const projects = new InMemoryProjectRepository();
   const orders = new InMemoryServiceOrderRepository();
   const orderService = new ServiceOrderService(orders, projects, CLOCK);
-  const gateway = new InMemoryWizardSaveGateway(
-    (p) => projects.save(p),
-    (o) => orders.save(o),
-  );
-  const wizard = new ProjectWizardService(orders, gateway, CLOCK);
-  return { projects, orders, orderService, gateway, wizard };
+  return { projects, orders, orderService };
 }
 
 describe('四类开单与项目关联（3.8）', () => {
@@ -276,98 +265,6 @@ describe('开单与进单独立（3.9）', () => {
   });
 });
 
-describe('项目向导选填单号自动创建开单记录（3.10）', () => {
-  it('填写选填单号且已选工程师：项目与开单同次保存，开单关联该项目', () => {
-    const { projects, orders, wizard } = setup();
-    const project = createPendingProject();
-
-    const result = wizard.save(
-      { project, engineers: ['工程师甲'], serviceOrderNo: 'ORD-500', customerName: '华东医药' },
-      ACTOR,
-    );
-
-    expect(projects.findById(project.id)?.id).toBe(project.id); // 项目已保存
-    expect(result.order).not.toBeNull();
-    const order = orders.findById(result.order!.id)!;
-    expect(order.orderType).toBe('relocation');
-    expect(order.serviceOrderNo).toBe('ORD-500');
-    expect(order.projectId).toBe(project.id);
-    expect(order.engineer).toBe('工程师甲');
-    expect(order.customerName).toBe('华东医药');
-  });
-
-  it('填写单号但未选定工程师：拒绝保存整个向导（项目与开单均不产生）', () => {
-    const { projects, orders, wizard } = setup();
-    const project = createPendingProject();
-
-    expect(() =>
-      wizard.save(
-        { project, engineers: [], serviceOrderNo: 'ORD-501', customerName: '华东医药' },
-        ACTOR,
-      ),
-    ).toThrow(/参与工程师.*必填/);
-
-    expect(projects.findById(project.id)).toBeUndefined(); // 项目不保存
-    expect(orders.all).toHaveLength(0); // 开单不产生
-  });
-
-  it('开单时间默认当前时间，备注可空并在后补', () => {
-    const { wizard } = setup();
-    const project = createPendingProject();
-    const result = wizard.save(
-      { project, engineers: ['工程师甲'], serviceOrderNo: 'ORD-502', customerName: '华东医药' },
-      ACTOR,
-    );
-    expect(result.order!.orderedAt).toBe('2026-08-07');
-    expect(result.order!.note).toBeNull();
-  });
-
-  it('不填写选填单号不创建任何开单记录', () => {
-    const { projects, orders, wizard } = setup();
-    const project = createPendingProject();
-
-    const result = wizard.save(
-      { project, engineers: ['工程师甲'], serviceOrderNo: null, customerName: '华东医药' },
-      ACTOR,
-    );
-
-    expect(projects.findById(project.id)?.id).toBe(project.id); // 项目按向导规则保存
-    expect(result.order).toBeNull();
-    expect(orders.all).toHaveLength(0);
-  });
-
-  it('同项目仍可手工关联多条开单', () => {
-    const { orders, wizard, orderService } = setup();
-    const project = createPendingProject();
-    wizard.save(
-      { project, engineers: ['工程师甲'], serviceOrderNo: 'ORD-503', customerName: '华东医药' },
-      ACTOR,
-    );
-    orderService.recordOrder(
-      { orderType: 'relocation', serviceOrderNo: 'ORD-504', engineer: '工程师乙', customerName: '华东医药', projectId: project.id },
-      ACTOR,
-    );
-    expect(orders.listByProject(project.id)).toHaveLength(2);
-  });
-
-  it('向导自动创建的开单受服务单号全局唯一约束', () => {
-    const { orders, wizard } = setup();
-    const first = createPendingProject();
-    wizard.save(
-      { project: first, engineers: ['工程师甲'], serviceOrderNo: 'ORD-505', customerName: '客户' },
-      ACTOR,
-    );
-    const second = createPendingProject();
-    expect(() =>
-      wizard.save(
-        { project: second, engineers: ['工程师乙'], serviceOrderNo: 'ORD-505', customerName: '客户' },
-        ACTOR,
-      ),
-    ).toThrow(UniquenessError);
-    expect(orders.all).toHaveLength(1); // 第二次保存整体未写入
-  });
-});
-
 describe('服务单记录删除（5.2）', () => {
   it('确认后删除：开单记录从列表与开单量统计中消失，其他记录不受影响', () => {
     const { orderService, orders } = setup();
@@ -419,17 +316,16 @@ describe('服务单记录删除（5.2）', () => {
 
 describe('开单工作量计数（3.9）', () => {
   it('同一服务单只计一次（服务单号唯一，关联多名工程师/多次上门仍只计一次）', () => {
-    const { orders, wizard } = setup();
-    // 同一服务单 ORD-600：第一次自动创建关联工程师甲，第二次以相同单号被拒绝
-    // （唯一空间），故该服务单在全库仅一条 → 工作量只计一次
+    const { orders, projects, orderService } = setup();
     const project = createPendingProject();
-    wizard.save(
-      { project, engineers: ['工程师甲', '工程师乙'], serviceOrderNo: 'ORD-600', customerName: '客户' },
+    projects.save(project);
+    orderService.recordOrder(
+      { orderType: 'relocation', serviceOrderNo: 'ORD-600', engineer: '工程师甲、工程师乙', customerName: '客户', projectId: project.id },
       ACTOR,
     );
     expect(orders.all).toHaveLength(1);
 
-    const counts = new ServiceOrderService(orders, undefined, CLOCK).countWorkload();
+    const counts = orderService.countWorkload();
     const relocation = counts.find((c) => c.orderType === 'relocation');
     expect(relocation?.count).toBe(1);
   });

@@ -21,7 +21,6 @@ export class SqliteQrRequestRepository implements QrRequestRepository {
 
   save(request: QrRequest): void {
     try {
-      this.db.exec('BEGIN');
       this.db
         .prepare(
           `INSERT INTO qr_requests (
@@ -42,13 +41,7 @@ export class SqliteQrRequestRepository implements QrRequestRepository {
           .prepare('INSERT INTO qr_request_types (id, qr_request_id, type_code) VALUES (?,?,?)')
           .run(`${request.id}:${type}`, request.id, type);
       }
-      this.db.exec('COMMIT');
     } catch (err) {
-      try {
-        this.db.exec('ROLLBACK');
-      } catch {
-        // 回滚失败时继续抛出主错误
-      }
       throw mapConstraintError(err, `二维码申请保存失败`);
     }
   }
@@ -58,19 +51,20 @@ export class SqliteQrRequestRepository implements QrRequestRepository {
     return rows.map((row) => this.assemble(row));
   }
 
-  /** 确认后删除：同事务清理多选类型行与申请行（不留孤立关联）。 */
-  deleteById(id: string): void {
-    this.db.exec('BEGIN');
+  /** 删除申请拥有的类型行；事务边界由领域调用方提供。 */
+  deleteTypesByRequestId(id: string): void {
     try {
       this.db.prepare('DELETE FROM qr_request_types WHERE qr_request_id = ?').run(id);
-      this.db.prepare('DELETE FROM qr_requests WHERE id = ?').run(id);
-      this.db.exec('COMMIT');
     } catch (err) {
-      try {
-        this.db.exec('ROLLBACK');
-      } catch {
-        // 回滚失败时继续抛出主错误
-      }
+      throw mapConstraintError(err, `二维码申请类型删除失败`);
+    }
+  }
+
+  /** 删除申请主行；事务边界由领域调用方提供。 */
+  deleteById(id: string): void {
+    try {
+      this.db.prepare('DELETE FROM qr_requests WHERE id = ?').run(id);
+    } catch (err) {
       throw mapConstraintError(err, `二维码申请删除失败`);
     }
   }

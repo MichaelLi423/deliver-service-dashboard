@@ -258,10 +258,12 @@ export class DamageRepairService {
    * - 本模块无其他真正下游不可安全删除的事实（活动经 work_facts 独立存在、
    *   维修费用仅由事项记录派生），故不做依赖拒绝。
    */
-  deleteItem(id: string): void {
-    this.requireItem(id);
+  deleteItem(id: string): { ownedChildCount: number; projectId: string; instrumentId: string } {
+    const item = this.requireItem(id);
+    const ownedChildCount = this.links.listByDamageItem(id).length;
     this.links.deleteByDamageItemId(id);
     this.items.deleteById(id);
+    return { ownedChildCount, projectId: item.projectId, instrumentId: item.instrumentId };
   }
 
   // ---- 4.7 维修报表统计口径（本能力统计函数，供 operational-reporting 消费） ----

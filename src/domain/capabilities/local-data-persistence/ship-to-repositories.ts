@@ -55,6 +55,16 @@ export class SqliteShipToRepository implements ShipToRepository {
     const rows = this.db.prepare('SELECT * FROM ship_tos').all() as Record<string, unknown>[];
     return rows.map(rowToShipTo);
   }
+
+  deleteById(id: string): void {
+    this.db.prepare('DELETE FROM ship_tos WHERE id = ?').run(id);
+  }
+
+  hasInstrumentReference(id: string): boolean {
+    return this.db
+      .prepare('SELECT 1 FROM instruments WHERE destination_ship_to_id = ? LIMIT 1')
+      .get(id) !== undefined;
+  }
 }
 
 export class SqliteShipToRequestRepository implements ShipToRequestRepository {
@@ -124,6 +134,10 @@ export class SqliteShipToRequestRepository implements ShipToRequestRepository {
   listAll(): ShipToRequest[] {
     const rows = this.db.prepare('SELECT * FROM ship_to_requests').all() as Record<string, unknown>[];
     return rows.map(rowToShipToRequest);
+  }
+
+  deleteById(id: string): void {
+    this.db.prepare('DELETE FROM ship_to_requests WHERE id = ?').run(id);
   }
 }
 

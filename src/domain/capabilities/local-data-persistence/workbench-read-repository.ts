@@ -101,6 +101,32 @@ export function decodeCursor(cursor: string): Cursor {
   throw new Error(`非法分页游标: ${cursor}`);
 }
 
+/** 泳道游标绑定锁定日期集合与推进列，避免跨列/跨集合复用。 */
+function encodeReminderLaneCursor(selectedDates: readonly string[], date: string, id: string): string {
+  return JSON.stringify([selectedDates, date, id]);
+}
+
+function decodeReminderLaneCursor(cursor: string, selectedDates: readonly string[], date: string): Cursor {
+  try {
+    const parsed = JSON.parse(cursor) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 3 &&
+      Array.isArray(parsed[0]) &&
+      parsed[0].every((value) => typeof value === 'string') &&
+      typeof parsed[1] === 'string' &&
+      typeof parsed[2] === 'string' &&
+      parsed[1] === date &&
+      JSON.stringify(parsed[0]) === JSON.stringify(selectedDates)
+    ) {
+      return { sortKey: parsed[2], id: parsed[2] };
+    }
+  } catch {
+    // fall through
+  }
+  throw new ValidationError('REMINDER_LANE_CURSOR_INVALID', '提醒泳道游标与锁定日期集合或列不匹配');
+}
+
 /**
  * 项目队列游标（tasks 7.5 / design D6/D9）：与规范化筛选状态绑定。
  * 形状为 [stateKey, sortKey, id]——stateKey 为规范化 query/region/status/reminder/
@@ -219,9 +245,34 @@ export class WorkbenchReadRepository {
     private readonly options: WorkbenchReadOptions,
   ) {}
 
+  /**
+   * 在调用方未持有事务时创建一个只读快照；已有事务时只复用它，绝不提交或回滚外层。
+   * SQLite 的 WAL 快照在首次读取时固定，确保一个 DTO 内的多条查询观察同一业务修订。
+   */
+  withReadSnapshot<T>(read: () => T): T {
+    if (this.db.isTransaction) return read();
+    this.db.exec('BEGIN');
+    try {
+      const result = read();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // Preserve the original read error.
+      }
+      throw error;
+    }
+  }
+
   // ---- 首页 / 概览 ----
 
   overview(): WorkbenchV2OverviewDto {
+    return this.withReadSnapshot(() => this.overviewInSnapshot());
+  }
+
+  private overviewInSnapshot(): WorkbenchV2OverviewDto {
     const { today, windowDays } = this.options;
     const count = (sql: string, ...params: SQLInputValue[]): number => {
       const row = this.db.prepare(sql).get(...params) as { n: number };
@@ -319,6 +370,10 @@ export class WorkbenchReadRepository {
   // ---- 项目 keyset 分页（tasks 7.5：固定每页 20） ----
 
   projectPage(request: WorkbenchV2ProjectPageRequest): WorkbenchV2ProjectPageDto {
+    return this.withReadSnapshot(() => this.projectPageInSnapshot(request));
+  }
+
+  private projectPageInSnapshot(request: WorkbenchV2ProjectPageRequest): WorkbenchV2ProjectPageDto {
     // 固定每页 20：共享契约不接受 renderer 任意 page size，legacy limit 忽略。
     const limit = PROJECT_PAGE_SIZE;
     const sort = request.sort ?? 'updated';
@@ -336,7 +391,7 @@ export class WorkbenchReadRepository {
         params.push(...cursorPred.params(cursor));
       }
     }
-    params.push(limit);
+    params.push(limit + 1);
 
     const sql = `
       ${PROJECT_BASE_SELECT}
@@ -355,10 +410,12 @@ export class WorkbenchReadRepository {
       .all(...where.params) as Array<{ n: number }>;
     const total = totalRow[0]?.n ?? 0;
 
-    const projects = this.enrichProjects(rows);
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const projects = this.enrichProjects(pageRows);
 
-    const last = rows[rows.length - 1];
-    const nextCursor = rows.length === limit && last ? this.projectCursor(sort, last, stateKey) : null;
+    const last = pageRows[pageRows.length - 1];
+    const nextCursor = hasMore && last ? this.projectCursor(sort, last, stateKey) : null;
 
     return {
       businessRevision: readBusinessRevision(this.db),
@@ -445,7 +502,7 @@ export class WorkbenchReadRepository {
       cursorSql = ` AND ${spec.cursorSql}`;
       cursorParams.push(cursor.sortKey ?? '', cursor.id);
     }
-    const params: SQLInputValue[] = [request.projectId, ...rangeRows.params, ...cursorParams, limit];
+    const params: SQLInputValue[] = [request.projectId, ...rangeRows.params, ...cursorParams, limit + 1];
 
     const rows = prepareReadBigInt(
       this.db,
@@ -457,14 +514,16 @@ export class WorkbenchReadRepository {
       .get(request.projectId, ...rangeCount.params) as { n: number };
     const total = totalRow.n;
 
-    const last = rows[rows.length - 1];
-    const nextCursor = rows.length === limit && last ? encodeCursor(String(last[spec.timeColumn] ?? ''), String(last.id)) : null;
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const last = pageRows[pageRows.length - 1];
+    const nextCursor = hasMore && last ? encodeCursor(String(last[spec.timeColumn] ?? ''), String(last.id)) : null;
 
     return {
       businessRevision: readBusinessRevision(this.db),
       kind: request.kind,
       projectId: request.projectId,
-      rows: rows.map((r) => this.toSectionRow(request.kind, r)),
+      rows: pageRows.map((r) => this.toSectionRow(request.kind, r)),
       total,
       nextCursor,
       limit,
@@ -488,7 +547,7 @@ export class WorkbenchReadRepository {
       // 往期/时间筛选：按业务更新日期（updated_at）。
       const range = dateRangeClause(request, 's.updated_at');
       if (range.sql !== '') where.push(range.sql);
-      const { clause: cursorClause, params: cursorParams } = buildKeysetClause('s', 'created_at', 'desc', request.cursor);
+      const { clause: cursorClause, params: cursorParams } = buildKeysetClause('s', 'updated_at', 'desc', request.cursor);
       const rowWhere = buildWhereClause(cursorClause ? [...where, cursorClause] : where);
       const countWhere = buildWhereClause(where);
       const rows = prepareReadBigInt(
@@ -498,19 +557,21 @@ export class WorkbenchReadRepository {
          FROM serial_address_updates s
          LEFT JOIN instruments i ON i.id = s.instrument_id
          ${rowWhere}
-         ORDER BY s.created_at DESC, s.id DESC
+         ORDER BY s.updated_at DESC, s.id DESC
          LIMIT ?`,
-      ).all(...whereParams, ...range.params, ...cursorParams, limit) as Row[];
+      ).all(...whereParams, ...range.params, ...cursorParams, limit + 1) as Row[];
       const totalRow = this.db
         .prepare(`SELECT COUNT(*) AS n FROM serial_address_updates s ${countWhere}`)
         .get(...whereParams, ...range.params) as { n: number };
       const total = totalRow.n;
-      const last = rows[rows.length - 1];
-      const nextCursor = rows.length === limit && last ? encodeCursor(String(last.created_at), String(last.id)) : null;
+      const hasMore = rows.length > limit;
+      const pageRows = hasMore ? rows.slice(0, limit) : rows;
+      const last = pageRows[pageRows.length - 1];
+      const nextCursor = hasMore && last ? encodeCursor(String(last.updated_at), String(last.id)) : null;
       return {
         businessRevision: readBusinessRevision(this.db),
         kind: request.kind,
-        rows: rows.map(
+        rows: pageRows.map(
           (r): WorkbenchV2IndependentRow => ({
             kind: 'serial_address',
             id: String(r.id),
@@ -540,27 +601,29 @@ export class WorkbenchReadRepository {
     // 往期/时间筛选：按业务申请日期（requested_at）。
     const range = dateRangeClause(request, 'q.requested_at');
     if (range.sql !== '') where.push(range.sql);
-    const { clause: cursorClause, params: cursorParams } = buildKeysetClause('q', 'created_at', 'desc', request.cursor);
+    const { clause: cursorClause, params: cursorParams } = buildKeysetClause('q', 'requested_at', 'desc', request.cursor);
     const rowWhere = buildWhereClause(cursorClause ? [...where, cursorClause] : where);
     const countWhere = buildWhereClause(where);
     const rows = this.db
       .prepare(
         `SELECT q.id, q.applicant, q.requested_at, q.created_at FROM qr_requests q ${rowWhere}
-         ORDER BY q.created_at DESC, q.id DESC
+         ORDER BY q.requested_at DESC, q.id DESC
          LIMIT ?`,
       )
-      .all(...whereParams, ...range.params, ...cursorParams, limit) as Row[];
+      .all(...whereParams, ...range.params, ...cursorParams, limit + 1) as Row[];
     const totalRow = this.db
       .prepare(`SELECT COUNT(*) AS n FROM qr_requests q ${countWhere}`)
       .get(...whereParams, ...range.params) as { n: number };
     const total = totalRow.n;
-    const typesByRequest = this.qrTypesFor(rows.map((r) => String(r.id)));
-    const last = rows[rows.length - 1];
-    const nextCursor = rows.length === limit && last ? encodeCursor(String(last.created_at), String(last.id)) : null;
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const typesByRequest = this.qrTypesFor(pageRows.map((r) => String(r.id)));
+    const last = pageRows[pageRows.length - 1];
+    const nextCursor = hasMore && last ? encodeCursor(String(last.requested_at), String(last.id)) : null;
     return {
       businessRevision: readBusinessRevision(this.db),
       kind: request.kind,
-      rows: rows.map(
+      rows: pageRows.map(
         (r): WorkbenchV2IndependentRow => {
           const types = typesByRequest.get(String(r.id)) ?? [];
           return {
@@ -606,17 +669,19 @@ export class WorkbenchReadRepository {
          FROM ship_to_requests r ${rowWhere}
          ORDER BY r.created_at DESC, r.id DESC
          LIMIT ?`,
-      ).all(...whereParams, ...range.params, ...cursorParams, limit) as Row[];
+      ).all(...whereParams, ...range.params, ...cursorParams, limit + 1) as Row[];
       const totalRow = this.db
         .prepare(`SELECT COUNT(*) AS n FROM ship_to_requests r ${countWhere}`)
         .get(...whereParams, ...range.params) as { n: number };
       const total = totalRow.n;
-      const last = rows[rows.length - 1];
-      const nextCursor = rows.length === limit && last ? encodeCursor(String(last.created_at), String(last.id)) : null;
+      const hasMore = rows.length > limit;
+      const pageRows = hasMore ? rows.slice(0, limit) : rows;
+      const last = pageRows[pageRows.length - 1];
+      const nextCursor = hasMore && last ? encodeCursor(String(last.created_at), String(last.id)) : null;
       return {
         businessRevision: readBusinessRevision(this.db),
         kind: request.kind,
-        rows: rows.map(
+        rows: pageRows.map(
           (r): WorkbenchV2LookupRow => ({
             kind: 'ship_to_requests',
             id: String(r.id),
@@ -655,17 +720,19 @@ export class WorkbenchReadRepository {
          ORDER BY c.name ASC, c.id ASC
          LIMIT ?`,
       )
-      .all(...whereParams, ...range.params, ...cursorParams, limit) as Row[];
+      .all(...whereParams, ...range.params, ...cursorParams, limit + 1) as Row[];
     const totalRow = this.db
       .prepare(`SELECT COUNT(*) AS n FROM customers c ${countWhere}`)
       .get(...whereParams, ...range.params) as { n: number };
     const total = totalRow.n;
-    const last = rows[rows.length - 1];
-    const nextCursor = rows.length === limit && last ? encodeCursor(String(last.name), String(last.id)) : null;
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const last = pageRows[pageRows.length - 1];
+    const nextCursor = hasMore && last ? encodeCursor(String(last.name), String(last.id)) : null;
     return {
       businessRevision: readBusinessRevision(this.db),
       kind: request.kind,
-      rows: rows.map(
+      rows: pageRows.map(
         (r): WorkbenchV2LookupRow => ({
           kind: 'customers',
           id: String(r.id),
@@ -705,20 +772,22 @@ export class WorkbenchReadRepository {
       `SELECT ${spec.selectSql}, COALESCE(${spec.dateExpr}, '') AS __business_date
        ${spec.fromSql}
        ${whereSql} ${cursorSql} ${orderSql} LIMIT ?`,
-    ).all(...range.params, ...cursorParams, limit) as Row[];
+    ).all(...range.params, ...cursorParams, limit + 1) as Row[];
     const totalRow = this.db
       .prepare(`SELECT COUNT(*) AS n ${spec.fromSql} ${whereSql}`)
       .get(...range.params) as { n: number };
     const total = totalRow.n;
-    const last = rows[rows.length - 1];
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const last = pageRows[pageRows.length - 1];
     const nextCursor =
-      rows.length === limit && last
+      hasMore && last
         ? encodeCursor(String(last.__business_date ?? ''), String(last.id))
         : null;
     return {
       businessRevision: readBusinessRevision(this.db),
       kind: request.kind,
-      rows: rows.map((r) => this.toHistoryRow(request.kind, r)),
+      rows: pageRows.map((r) => this.toHistoryRow(request.kind, r)),
       total,
       nextCursor,
       limit,
@@ -754,20 +823,22 @@ export class WorkbenchReadRepository {
        WHERE ${baseWhere} ${cursorSql}
        ORDER BY COALESCE(p.reminder_at, '') ${orderDir}, p.id ${orderDir}
        LIMIT ?`,
-    ).all(...cursorParams, limit) as Row[];
+    ).all(...cursorParams, limit + 1) as Row[];
     const totalRow = this.db
       .prepare(`SELECT COUNT(*) AS n FROM projects p WHERE ${baseWhere}`)
       .get() as { n: number };
     const total = totalRow.n;
-    const last = rows[rows.length - 1];
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const last = pageRows[pageRows.length - 1];
     const nextCursor =
-      rows.length === limit && last
+      hasMore && last
         ? encodeCursor(last.reminder_at === null ? '' : String(last.reminder_at), String(last.id))
         : null;
 
     return {
       businessRevision: readBusinessRevision(this.db),
-      rows: rows.map((r) => this.toReminderRow(r)),
+      rows: pageRows.map((r) => this.toReminderRow(r)),
       total,
       nextCursor,
       limit,
@@ -790,8 +861,17 @@ export class WorkbenchReadRepository {
 
     // 日期集合：已锁定（请求回传）或首次计算（升序最多 7 个不同非空日期）。
     let dates: string[];
-    if (request.selectedDates && request.selectedDates.length > 0) {
-      dates = request.selectedDates.slice(0, REMINDER_LANE_MAX_DATES);
+    if (request.selectedDates !== undefined && request.selectedDates !== null) {
+      dates = [...request.selectedDates];
+      if (dates.length === 0 || dates.length > REMINDER_LANE_MAX_DATES) {
+        throw new ValidationError('REMINDER_LANE_DATES_INVALID', '提醒泳道日期集合必须为 1 至 7 个日期');
+      }
+      for (let index = 0; index < dates.length; index += 1) {
+        assertValidBusinessDate(dates[index], '提醒泳道日期');
+        if (index > 0 && dates[index - 1] >= dates[index]) {
+          throw new ValidationError('REMINDER_LANE_DATES_INVALID', '提醒泳道日期集合必须唯一且严格升序');
+        }
+      }
     } else {
       const dateRows = this.db
         .prepare(
@@ -805,17 +885,27 @@ export class WorkbenchReadRepository {
       dates = dateRows.map((r) => r.d);
     }
 
+    if (request.date !== undefined && request.date !== null) {
+      assertValidBusinessDate(request.date, '提醒泳道列日期');
+      if (!dates.includes(request.date)) {
+        throw new ValidationError('REMINDER_LANE_DATE_INVALID', '要推进的提醒泳道日期必须属于锁定日期集合');
+      }
+    }
+    if (request.cursor && !request.date) {
+      throw new ValidationError('REMINDER_LANE_CURSOR_INVALID', '提醒泳道游标必须指定要推进的日期列');
+    }
+
     const lanes: WorkbenchV2ReminderLane[] = dates.map((date) => {
       const advancing = request.date === date;
       const columnCursor = advancing ? request.cursor ?? null : null;
       const params: SQLInputValue[] = [date];
       let cursorSql = '';
       if (columnCursor) {
-        const parsed = decodeCursor(columnCursor);
+        const parsed = decodeReminderLaneCursor(columnCursor, dates, date);
         cursorSql = ' AND p.id > ?';
         params.push(parsed.id);
       }
-      params.push(laneLimit);
+      params.push(laneLimit + 1);
       const rows = prepareReadBigInt(
         this.db,
         `SELECT p.id, p.temp_no, p.reminder_at, p.reminder_note, c.ecc, cu.name AS customer_name
@@ -829,14 +919,16 @@ export class WorkbenchReadRepository {
       const totalRow = this.db
         .prepare('SELECT COUNT(*) AS n FROM projects WHERE reminder_at = ?')
         .get(date) as { n: number };
-      const last = rows[rows.length - 1];
+      const hasMore = rows.length > laneLimit;
+      const pageRows = hasMore ? rows.slice(0, laneLimit) : rows;
+      const last = pageRows[pageRows.length - 1];
       const nextCursor =
-        rows.length === laneLimit && last
-          ? encodeCursor(String(last.id), String(last.id))
+        hasMore && last
+          ? encodeReminderLaneCursor(dates, date, String(last.id))
           : null;
       return {
         date,
-        projects: rows.map((r) => ({
+        projects: pageRows.map((r) => ({
           projectId: String(r.id),
           customerName: this.customerNameOf(r),
           ecc: r.ecc === null ? null : String(r.ecc),
@@ -1130,12 +1222,14 @@ export class WorkbenchReadRepository {
       finalAmount: centsString(toBigInt(row.final_confirmable_amount_cents)),
       invoicedAmount: formatCents(toBigInt(row.invoiced_cents) ?? 0n),
       contractAmount: centsString(toBigInt(row.usd_tax_amount_cents)),
+      entryAmountSnapshot: centsString(toBigInt(row.entry_amount_snapshot_cents)),
       counts: {
         batches: c.batches,
         instruments: c.instruments,
         activities: c.activities,
         orders: c.orders,
         repairs: c.repairs,
+        invoices: c.invoices,
       },
       nonBlocking: {
         pendingShipTo,
@@ -1154,7 +1248,7 @@ export class WorkbenchReadRepository {
     const init = (id: string): Counts => {
       const existing = map.get(id);
       if (existing) return existing;
-      const next = { batches: 0, instruments: 0, activities: 0, orders: 0, repairs: 0, qrUnmarked: 0, repairsPending: 0 };
+      const next = { batches: 0, instruments: 0, activities: 0, orders: 0, repairs: 0, invoices: 0, qrUnmarked: 0, repairsPending: 0 };
       map.set(id, next);
       return next;
     };
@@ -1185,6 +1279,12 @@ export class WorkbenchReadRepository {
       .prepare(`SELECT project_id, COUNT(*) AS n FROM service_orders WHERE project_id IN (${placeholders}) GROUP BY project_id`)
       .all(...projectIds) as Array<{ project_id: string; n: number }>;
     for (const r of orders) init(r.project_id).orders = r.n;
+
+    // 关联事实浏览需保留掉票撤销历史，故不按 revoked_at 过滤。
+    const invoices = this.db
+      .prepare(`SELECT project_id, COUNT(*) AS n FROM invoices WHERE project_id IN (${placeholders}) GROUP BY project_id`)
+      .all(...projectIds) as Array<{ project_id: string; n: number }>;
+    for (const r of invoices) init(r.project_id).invoices = r.n;
 
     const repairs = this.db
       .prepare(
@@ -1341,6 +1441,7 @@ interface Counts {
   activities: number;
   orders: number;
   repairs: number;
+  invoices: number;
   qrUnmarked: number;
   repairsPending: number;
 }
@@ -1351,6 +1452,7 @@ const EMPTY_COUNTS: Counts = {
   activities: 0,
   orders: 0,
   repairs: 0,
+  invoices: 0,
   qrUnmarked: 0,
   repairsPending: 0,
 };
@@ -1376,7 +1478,7 @@ const PROJECT_BASE_SELECT = `
     p.cancelled_at, p.cancel_reason, p.temporary_instrument_count,
     p.temporary_instrument_name, p.temporary_instrument_model, p.temporary_has_ups,
     p.created_at, p.customer_id, p.contract_id,
-    c.ecc, c.final_confirmable_amount_cents, c.usd_tax_amount_cents,
+    c.ecc, c.final_confirmable_amount_cents, c.usd_tax_amount_cents, c.entry_amount_snapshot_cents,
     cu.name AS customer_name,
     (SELECT COALESCE(SUM(i.amount_cents), 0) FROM invoices i
       WHERE i.project_id = p.id AND i.revoked_at IS NULL) AS invoiced_cents

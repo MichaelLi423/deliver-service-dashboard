@@ -10,6 +10,10 @@ export interface ShipToRepository {
   findByAccountId(accountId: string): ShipTo | undefined;
   save(shipTo: ShipTo): void;
   listAll(): ShipTo[];
+  /** 删除可证明由申请产生且未被仪器引用的 Ship-to。 */
+  deleteById?(id: string): void;
+  /** Ship-to 是否仍被搬迁仪器目的地址引用。 */
+  hasInstrumentReference?(id: string): boolean;
 }
 
 export interface ShipToRequestRepository {
@@ -20,6 +24,8 @@ export interface ShipToRequestRepository {
   findByCustomerAndAddress(customerName: string, newSiteAddress: string): ShipToRequest | undefined;
   save(request: ShipToRequest): void;
   listAll(): ShipToRequest[];
+  /** 删除申请主记录。 */
+  deleteById?(id: string): void;
 }
 
 /**

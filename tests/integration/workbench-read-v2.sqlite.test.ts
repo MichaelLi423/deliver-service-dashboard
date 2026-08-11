@@ -314,7 +314,7 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
     seed('b-note-only', null, '仅备注无时间'); // null → 无分类但计入 any
 
     const repo = reader(ctx, today, windowDays);
-    const page = repo.projectPage({ reminder: 'any', limit: 100 });
+    const page = repo.projectPage({ reminder: 'any' });
     const byId = new Map(page.projects.map((p) => [p.id, p]));
     const expectClass = (id: string, cls: string | null): void => {
       const row = byId.get(id);
@@ -331,17 +331,64 @@ describe('工作台 v2 overview（Oracle #10 首屏）', () => {
     expectClass('b-note-only', null);
 
     // 过滤口径
-    expect(repo.projectPage({ reminder: 'overdue', limit: 100 }).projects.map((p) => p.id)).toContain('b-overdue');
-    expect(repo.projectPage({ reminder: 'today', limit: 100 }).projects.map((p) => p.id)).toEqual(['b-today']);
-    const upcoming = repo.projectPage({ reminder: 'upcoming', limit: 100 }).projects.map((p) => p.id).sort();
+    expect(repo.projectPage({ reminder: 'overdue' }).projects.map((p) => p.id)).toContain('b-overdue');
+    expect(repo.projectPage({ reminder: 'today' }).projects.map((p) => p.id)).toEqual(['b-today']);
+    const upcoming = repo.projectPage({ reminder: 'upcoming' }).projects.map((p) => p.id).sort();
     expect(upcoming).toEqual(['b-upcoming', 'b-window-edge']);
-    const anyIds = repo.projectPage({ reminder: 'any', limit: 100 }).projects.map((p) => p.id).sort();
+    const anyIds = repo.projectPage({ reminder: 'any' }).projects.map((p) => p.id).sort();
     expect(anyIds).toEqual(['b-note-only', 'b-outside', 'b-overdue', 'b-today', 'b-upcoming', 'b-window-edge']);
     closeDatabase(ctx.db);
   });
 });
 
 describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
+  it('withReadSnapshot 在 WAL 并发写入后仍保持旧行与旧 businessRevision 配对', () => {
+    const ctx = makeFacade();
+    const repo = reader(ctx);
+    const writer = openDatabase({ path: ctx.dbPath });
+    try {
+      const oldRevision = readBusinessRevision(ctx.db);
+      repo.withReadSnapshot(() => {
+        const oldRows = ctx.db.prepare('SELECT id FROM projects ORDER BY id').all() as Array<{ id: string }>;
+        writer.prepare(
+          'INSERT INTO projects (id, temp_no, status, region, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+        ).run('wal-concurrent', 'TP-WAL', 'pending_execution', 'East', '2026-08-08T00:00:00+08:00', '2026-08-08T00:00:00+08:00');
+        expect(oldRows.map((row) => row.id)).not.toContain('wal-concurrent');
+        expect(readBusinessRevision(ctx.db)).toBe(oldRevision);
+        expect((ctx.db.prepare('SELECT id FROM projects WHERE id = ?').get('wal-concurrent'))).toBeUndefined();
+      });
+      expect(readBusinessRevision(ctx.db)).toBeGreaterThan(oldRevision);
+    } finally {
+      closeDatabase(writer);
+      closeDatabase(ctx.db);
+    }
+  });
+
+  it('恰好 20 条项目时不虚报 nextCursor，21 条时才返回游标', () => {
+    const ctx = makeFacade();
+    seedProjects(ctx.db, 19);
+    expect(reader(ctx).projectPage({}).nextCursor).toBeNull();
+    ctx.db.prepare(
+      'INSERT INTO projects (id, temp_no, status, region, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+    ).run('project-extra', 'TP-EXTRA', 'pending_execution', 'East', '2027-01-01T00:00:00+08:00', '2027-01-01T00:00:00+08:00');
+    const page = reader(ctx).projectPage({});
+    expect(page.projects).toHaveLength(20);
+    expect(page.nextCursor).toBeTruthy();
+    closeDatabase(ctx.db);
+  });
+
+  it('40 条项目恰好两页，第二页不虚报 nextCursor', () => {
+    const ctx = makeFacade();
+    seedProjects(ctx.db, 39);
+    const first = reader(ctx).projectPage({});
+    expect(first.projects).toHaveLength(20);
+    expect(first.nextCursor).toBeTruthy();
+    const second = reader(ctx).projectPage({ cursor: first.nextCursor });
+    expect(second.projects).toHaveLength(20);
+    expect(second.nextCursor).toBeNull();
+    closeDatabase(ctx.db);
+  });
+
   it('任务7.5：固定每页 20（renderer 任意 limit 忽略）、翻页无重复无遗漏、游标稳定、total 正确', () => {
     const ctx = makeFacade();
     seedProjects(ctx.db, 120);
@@ -373,7 +420,7 @@ describe('工作台 v2 项目 keyset 分页（Oracle #10）', () => {
     expect(seen.size).toBe(121);
 
     // 主进程统一 20：renderer 请求任意 limit（含超上限 1000）一律忽略
-    const capped = repo.projectPage({ limit: 1000 });
+    const capped = repo.projectPage({});
     expect(capped.projects.length).toBe(20);
     expect(capped.limit).toBe(20);
     expect(capped.pageSize).toBe(20);
@@ -580,14 +627,49 @@ describe('工作台 v2 项目详情 + 子记录分页（Oracle #10）', () => {
     const p = detail.project!;
     expect(p.contractAmount).toBe('100000.00');
     expect(p.finalAmount).toBe('100000.00');
+    expect(p.entryAmountSnapshot).toBe('100000.00');
     expect(p.invoicedAmount).toBe('20000.00');
-    expect(p.counts).toMatchObject({ batches: 1, instruments: 1, activities: 1, orders: 0, repairs: 0 });
+    expect(p.counts).toMatchObject({ batches: 1, instruments: 1, activities: 1, orders: 0, repairs: 0, invoices: 1 });
     expect(detail.detail).toMatchObject({ siteConfirmed: false, contractStartDate: '2026-08-01' });
 
     // 不存在 → project/detail 均为 null
     const missing = facade.v2ProjectDetail('no-such-project');
     expect(missing.project).toBeNull();
     expect(missing.detail).toBeNull();
+    closeDatabase(db);
+  });
+
+  it('entryAmountSnapshot 精确读取 formal/零金额/null 草稿/超安全整数，并保留撤销掉票计数和修改时间', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    expect(facade.v2ProjectDetail(projectId).project!.entryAmountSnapshot).toBe('100000.00');
+
+    const project = db.prepare(
+      'INSERT INTO projects (id, temp_no, status, region, entry_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
+    );
+    const contract = db.prepare(
+      'INSERT INTO contracts (id, project_id, temp_number, entry_amount_snapshot_cents, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+    );
+    project.run('entry-zero', 'TP-ENTRY-ZERO', 'pending_execution', 'East', '2026-08-01', 't', 't');
+    contract.run('contract-entry-zero', 'entry-zero', 'TP-ENTRY-ZERO', 0, 't', 't');
+    project.run('entry-big', 'TP-ENTRY-BIG', 'pending_execution', 'East', '2026-08-01', 't', 't');
+    contract.run('contract-entry-big', 'entry-big', 'TP-ENTRY-BIG', 9007199254740993n, 't', 't');
+    const draftId = facade.v2Mutate({
+      op: 'create_project',
+      payload: { intent: 'draft', customerName: '快照草稿', region: 'East', instrumentCount: null },
+    }).changed!.projectId!;
+
+    expect(facade.v2ProjectDetail('entry-zero').project!.entryAmountSnapshot).toBe('0.00');
+    expect(facade.v2ProjectDetail('entry-big').project!.entryAmountSnapshot).toBe('90071992547409.93');
+    expect(facade.v2ProjectDetail(draftId).project!.entryAmountSnapshot).toBeNull();
+
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'invoice', projectId, values: { invoicedAt: '2026-08-11', amount: '1000' } } });
+    const invoice = facade.v2SectionPage({ projectId, kind: 'invoices' }).rows[0] as Extract<WorkbenchV2SectionRow, { kind: 'invoices' }>;
+    facade.v2Mutate({ op: 'invoice_revoke', invoiceId: invoice.id, time: '2026-08-12', reason: '更正' });
+    const revoked = facade.v2SectionPage({ projectId, kind: 'invoices' }).rows[0] as Extract<WorkbenchV2SectionRow, { kind: 'invoices' }>;
+    expect(revoked.active).toBe(false);
+    expect(revoked.lastModifiedAt).toBeTruthy();
+    expect(facade.v2ProjectDetail(projectId).project!.counts.invoices).toBe(1);
     closeDatabase(db);
   });
 
@@ -1006,6 +1088,26 @@ describe('Oracle #10 二次复审：independent/lookup 分页缺陷回归', () =
  * （业务日期 yyyy-mm-dd，含边界），缺省完全兼容现有行为。
  */
 describe('工作台 v2 往期/时间筛选（from/to）', () => {
+  it('independentPage 按业务日期而非 created_at 倒序，并以同一业务日期+id 游标翻页', () => {
+    const ctx = makeFacade();
+    const serial = ctx.db.prepare(
+      'INSERT INTO serial_address_updates (id, instrument_id, customer_name, new_site_address, serial_no, account_id, updated_at, created_at) VALUES (?,?,?,?,?,?,?,?)',
+    );
+    serial.run('serial-old-business-new-created', null, '甲', 'A', 'S1', 'A1', '2026-08-01', '2026-08-30T00:00:00+08:00');
+    serial.run('serial-new-business-old-created', null, '乙', 'B', 'S2', 'A2', '2026-08-20', '2026-08-01T00:00:00+08:00');
+    const qr = ctx.db.prepare('INSERT INTO qr_requests (id, applicant, requested_at, created_at) VALUES (?,?,?,?)');
+    qr.run('qr-old-business-new-created', '甲', '2026-08-01', '2026-08-30T00:00:00+08:00');
+    qr.run('qr-new-business-old-created', '乙', '2026-08-20', '2026-08-01T00:00:00+08:00');
+
+    expect(ctx.facade.v2IndependentPage({ kind: 'serial_address' }).rows.map((row) => row.id)).toEqual([
+      'serial-new-business-old-created', 'serial-old-business-new-created',
+    ]);
+    expect(ctx.facade.v2IndependentPage({ kind: 'qr_request' }).rows.map((row) => row.id)).toEqual([
+      'qr-new-business-old-created', 'qr-old-business-new-created',
+    ]);
+    closeDatabase(ctx.db);
+  });
+
   it('independentPage：serial_address 按更新日期、qr_request 按申请日期过滤', () => {
     const ctx = makeFacade();
     const { db, facade } = ctx;
@@ -1407,7 +1509,7 @@ describe('工作台 v2 有界性（Oracle #10 反全量约束）', () => {
     const ctx = makeFacade();
     seedProjects(ctx.db, 5000);
     const repo = reader(ctx);
-    const page = repo.projectPage({ limit: 50 });
+    const page = repo.projectPage({});
     expect(page.projects.length).toBe(PROJECT_PAGE_SIZE); // 固定 20，limit 被忽略
     expect(page.total).toBe(5001);
     const serialized = JSON.stringify(page);

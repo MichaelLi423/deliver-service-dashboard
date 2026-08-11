@@ -187,7 +187,7 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
     const t0 = Date.now();
     const overview = ctx.repo.overview();
     const t1 = Date.now();
-    const page = ctx.repo.projectPage({ limit: 50 });
+    const page = ctx.repo.projectPage({});
     const t2 = Date.now();
 
     // 首屏聚合正确（100k 规模）
@@ -237,7 +237,7 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
     let cursor: string | null = null;
     let pages = 0;
     do {
-      const page = ctx.repo.projectPage({ cursor, limit: 100 });
+      const page = ctx.repo.projectPage({ cursor });
       for (const p of page.projects) {
         expect(seen.has(p.id), `翻页不应重复: ${p.id}`).toBe(false);
         seen.add(p.id);
@@ -248,11 +248,11 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
       if (pages % 100 === 0) await tick();
     } while (cursor !== null);
     expect(seen.size).toBe(100_000);
-    // 100k/20 恰好 5000 满页；keyset 语义下最后一满页仍给游标，需第 5001 次空页确认结束
-    expect(pages).toBe(5_001);
+    // 100k/20 恰好 5000 满页；多取一条探测后末页不再虚报游标。
+    expect(pages).toBe(5_000);
 
     // 游标稳定：同一 cursor 两次返回相同顺序
-    const first = ctx.repo.projectPage({ limit: 50 });
+    const first = ctx.repo.projectPage({});
     const again = ctx.repo.projectPage({ cursor: first.nextCursor });
     expect(again.projects.map((p) => p.id)).toEqual(
       ctx.repo.projectPage({ cursor: first.nextCursor }).projects.map((p) => p.id),
@@ -327,14 +327,14 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
       insertReminder.run(id, `TP-${id}`, 'pending_entry', '华东', at, '边界提醒', 't', '2026-08-01T00:00:00+08:00');
     }
     const expectIds = (reminder: 'overdue' | 'today' | 'upcoming', ids: string[]): void => {
-      const got = ctx.repo.projectPage({ reminder, limit: 100 }).projects.map((p) => p.id).sort();
+      const got = ctx.repo.projectPage({ reminder }).projects.map((p) => p.id).sort();
       expect(got, reminder).toEqual(ids.slice().sort());
     };
     expectIds('overdue', ['perf-rem-overdue']);
     expectIds('today', ['perf-rem-today']);
     expectIds('upcoming', ['perf-rem-upcoming']);
     // 窗口外（2026-08-16 > today+7）不进入任何分类
-    expect(ctx.repo.projectPage({ reminder: 'upcoming', limit: 100 }).projects.map((p) => p.id)).not.toContain('perf-rem-outside');
+    expect(ctx.repo.projectPage({ reminder: 'upcoming' }).projects.map((p) => p.id)).not.toContain('perf-rem-outside');
 
     // 大数据下计数正确（100k 项目的子记录计数经有界 IN 聚合）
     const detailBulk = ctx.repo.projectDetail('bulk-p-0');
@@ -379,27 +379,29 @@ describe('Oracle #10 性能：100k 项目 + 大量子记录', () => {
     expect(serial.ids.length).toBe(1_000);
     expect(serial.total).toBe(1_000);
     expect(new Set(serial.ids).size).toBe(1_000);
-    // 10 满页 + 1 空页终止（满页末尾 keyset 语义仍需一次空页确认）
-    expect(serial.pages).toBe(11);
+    // 多取一条探测后，恰好 10 页时末页直接终止。
+    expect(serial.pages).toBe(10);
 
     // qr_request 1000 条：同样全量翻页（含类型装配）
     const qr = await walk((cursor) => ctx.repo.independentPage({ kind: 'qr_request', limit: 100, cursor }));
     expect(qr.ids.length).toBe(1_000);
     expect(qr.total).toBe(1_000);
     expect(new Set(qr.ids).size).toBe(1_000);
+    expect(qr.pages).toBe(10);
 
     // lookup ship_to_requests 2000 条 / limit 100 → 20 页：无重复遗漏
     const reqs = await walk((cursor) => ctx.repo.lookupPage({ kind: 'ship_to_requests', limit: 100, cursor }));
     expect(reqs.ids.length).toBe(2_000);
     expect(reqs.total).toBe(2_000);
     expect(new Set(reqs.ids).size).toBe(2_000);
-    expect(reqs.pages).toBe(21); // 20 满页 + 1 空页
+    expect(reqs.pages).toBe(20);
 
     // lookup customers 5000 条（name 升序 keyset）
     const customers = await walk((cursor) => ctx.repo.lookupPage({ kind: 'customers', limit: 100, cursor }));
     expect(customers.ids.length).toBe(5_000);
     expect(customers.total).toBe(5_000);
     expect(new Set(customers.ids).size).toBe(5_000);
+    expect(customers.pages).toBe(50);
 
     // query 筛选后 cursor 行为：分页客户1 命中 分页客户1/10..19/100..199/1000..1999
     const filtered = await walk((cursor) =>

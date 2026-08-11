@@ -198,8 +198,9 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
       IPC_CHANNELS.workbenchV2ProjectDetail,
       100,
       page.projects[0].id,
-    )) as { project: { contractAmount: string } };
+    )) as { project: { contractAmount: string; entryAmountSnapshot: string | null } };
     expect(detail.project.contractAmount).toBe('100000.00');
+    expect(detail.project.entryAmountSnapshot).toBe('100000.00');
   });
 
   it('v2 mutation 后 businessRevision 递增（写后 invalidate 语义）', async () => {
@@ -234,6 +235,37 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
       reminder: 'any',
     } as WorkbenchV2ProjectPageRequest)) as { projects: Array<{ reminderNote: string | null }> };
     expect(page.projects[0].reminderNote).toBe('跟进');
+  });
+
+  it('renderer FormData 形状的仪器 boolean 字符串经 facade 精确写入；非法值零写', async () => {
+    const ctx = await loggedIn();
+    const created = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'create_project',
+      payload: { intent: 'draft', customerName: '仪器布尔客户', region: 'East' },
+    } as WorkbenchV2MutationRequest)) as { changed: { projectId: string } };
+    const projectId = created.changed.projectId;
+
+    for (const [name, ups, qrRequested] of [
+      ['字符串 false', 'false', 'false'],
+      ['字符串 true', 'true', 'true'],
+    ] as const) {
+      await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+        op: 'submit_action',
+        action: { type: 'instrument', projectId, values: { name, ups, qrRequested } },
+      } as WorkbenchV2MutationRequest);
+    }
+    const rows = ctx.db().prepare('SELECT ups, qr_requested FROM instruments ORDER BY rowid').all() as Array<{
+      ups: number;
+      qr_requested: number;
+    }>;
+    expect(rows).toEqual([{ ups: 0, qr_requested: 0 }, { ups: 1, qr_requested: 1 }]);
+
+    const countBefore = (ctx.db().prepare('SELECT COUNT(*) AS n FROM instruments').get() as { n: number }).n;
+    await expect(ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
+      op: 'submit_action',
+      action: { type: 'instrument', projectId, values: { name: '非法布尔', ups: '1', qrRequested: 'false' } },
+    } as WorkbenchV2MutationRequest)).rejects.toMatchObject({ code: 'INVALID_BOOLEAN' });
+    expect((ctx.db().prepare('SELECT COUNT(*) AS n FROM instruments').get() as { n: number }).n).toBe(countBefore);
   });
 
   it('update_project 经 IPC 通道：资料更新落库并返回 bounded 失效标签', async () => {

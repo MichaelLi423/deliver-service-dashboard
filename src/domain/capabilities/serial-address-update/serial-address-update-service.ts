@@ -100,11 +100,13 @@ export class SerialAddressUpdateService {
    * - 只删除该事实记录，MUST NOT 删除/修改关联仪器、项目或 Account ID 对应的 Ship-to；
    * - 删除后该仪器实际关联新址以剩余最近更新事实为准（getActualAddress 读侧派生）。
    */
-  delete(id: string): void {
-    if (!this.updates.findById(id)) {
+  delete(id: string): { ownedChildCount: number; instrumentId?: string } {
+    const update = this.updates.findById(id);
+    if (!update) {
       throw new ValidationError('SERIAL_ADDRESS_UPDATE_NOT_FOUND', `序列号地址更新记录不存在: ${id}`);
     }
     this.updates.deleteById(id);
+    return { ownedChildCount: 0, instrumentId: update.instrumentId ?? undefined };
   }
 
   /** 更新事实列表与筛选：按客户、新址地址、序列号、Account ID 或更新时间。 */

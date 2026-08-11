@@ -43,10 +43,10 @@ describe('模块所有权边界', () => {
     expect('PROJECT_STATUSES' in execution).toBe(false);
   });
 
-  it('service-order-recording 拥有四类开单与向导原子保存，不重复定义状态转换', () => {
+  it('service-order-recording 拥有四类独立开单，不重复定义状态转换', () => {
     expect('resolveStatus' in serviceOrder).toBe(false);
     expect(typeof serviceOrder.ServiceOrderService).toBe('function');
-    expect(typeof serviceOrder.ProjectWizardService).toBe('function');
+    expect('ProjectWizardService' in serviceOrder).toBe(false);
   });
 
   it('ship-to-management 拥有 Ship-to 不可变主数据与线性申请，不触碰项目生命周期', () => {
