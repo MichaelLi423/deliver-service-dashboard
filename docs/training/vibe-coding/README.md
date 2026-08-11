@@ -32,6 +32,8 @@
 | [tool-roles.md](./tool-roles.md) | 工具职责、边界与本项目状态 |
 | [workflow-checklist.md](./workflow-checklist.md) | 六个最佳实践检查点与风险分级 |
 | [demo-runbook.md](./demo-runbook.md) | 排练/现场/回滚步骤、四阶段 commit 与 no-live-agent 边界 |
+| [presenter-preparation.md](./presenter-preparation.md) | 讲师备课手册：准备清单、18 页讲解卡、现场操作与故障预案 |
+| [slides/README.md](./slides/README.md) | 18 页 PPTX、PDF 预览及可维护生成源码 |
 | [review-report.md](./review-report.md) | 代码评审记录（真实发现与债务） |
 | [verify-report.md](./verify-report.md) | 规范核对记录（requirements 到证据映射） |
 | [qa-template.md](./qa-template.md) | 课前收集、共性问题、待答问题池与内部附件注入点 |
