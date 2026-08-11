@@ -742,12 +742,17 @@ describe('Oracle #10 bounded workbench renderer', () => {
   it('补齐进单资料使用原子 supplement_project，不夹带独立开单字段', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     const dialog = await openQuickAction('补齐进单核心资料');
+    const contractAmount = within(dialog).getByLabelText(/合同 USD/);
+    expect(contractAmount).toHaveAccessibleDescription(/合同金额为 0 仍可正式进单/);
+    expect(contractAmount).toHaveAccessibleDescription(/最终可确认金额可暂空/);
+    expect(contractAmount).toHaveAccessibleDescription(/首次登记掉票前补录/);
+    expect(dialog).not.toHaveTextContent(/正式进单须另填/);
     fireEvent.change(within(dialog).getByLabelText(/仪器数量/), { target: { value: '8' } });
     fireEvent.change(within(dialog).getByLabelText(/^计划装机日期/), { target: { value: '2026-09-01' } });
     fireEvent.change(within(dialog).getByLabelText(/实际装机完成日期/), { target: { value: '2026-09-02' } });
     fireEvent.change(within(dialog).getByLabelText(/^ECC/), { target: { value: 'ECC-8' } });
     fireEvent.change(within(dialog).getByLabelText(/进单日期/), { target: { value: '2026-08-09' } });
-    fireEvent.change(within(dialog).getByLabelText(/合同 USD/), { target: { value: '100' } });
+    fireEvent.change(contractAmount, { target: { value: '100' } });
     fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }));
     expect(within(dialog).queryByLabelText(/服务单号|工程师|开单备注/)).not.toBeInTheDocument();
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'supplement_project', payload: expect.objectContaining({ projectId: 'p-1', instrumentCount: 8, plannedInstallDoneAt: '2026-09-01', actualInstallDoneAt: '2026-09-02', ecc: 'ECC-8' }) })));

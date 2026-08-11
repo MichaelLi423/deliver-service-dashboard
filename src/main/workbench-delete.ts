@@ -3,7 +3,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import { ValidationError } from '../domain/core/errors';
 import { SystemClock } from '../domain/core/time';
 import type { FinancialClosureService } from '../domain/capabilities/project-financial-closure';
-import type { ProjectService } from '../domain/capabilities/relocation-project-lifecycle';
+import { ProtectedProjectDeletionService, type ProjectService } from '../domain/capabilities/relocation-project-lifecycle';
+import { ProtectedExecutionDeletionService } from '../domain/capabilities/relocation-execution';
 import type { ServiceOrderService } from '../domain/capabilities/service-order-recording';
 import type { DamageRepairService } from '../domain/capabilities/damage-repair-tracking';
 import type { SerialAddressUpdateService } from '../domain/capabilities/serial-address-update';
@@ -190,75 +191,33 @@ class DeleteOperation {
   }
 
   deleteActivity(id: string): void {
-    const activity = this.ctx.repositories.activities.findById(id);
-    if (!activity) {
-      throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `上门活动不存在: ${id}`);
-    }
-    // 下游事实依赖拒绝（同一写事务内重查，事务回滚零写）：
-    // - 工作事实（work_facts）：执行事实，不可级联删除 → 拒绝；
-    // - 维修上门活动关联（activity_damage_links）：指向本活动的下游引用 → 拒绝。
-    if (this.existsWhere('work_facts', 'activity_id', id)) {
-      throw new ValidationError(
-        DELETE_REJECTION_CODES.DEPENDENCIES,
-        '该上门活动已产生工作事实，无法删除；请先处理工作事实',
-      );
-    }
-    if (this.existsWhere('activity_damage_links', 'activity_id', id)) {
-      throw new ValidationError(
-        DELETE_REJECTION_CODES.DEPENDENCIES,
-        '该上门活动已关联损坏/维修事项，无法删除；请先解除维修关联',
-      );
-    }
-    // 可删除的活动（无工作事实/无维修关联）不承载任何状态相关事实：项目是否「已开始
-    // 执行」只由 work_facts（或批次开始运输）决定，活动自身不计入；故删除不影响主
-    // 状态，无需经 lifecycle 重算（无真实状态变化），也绝不直接赋值状态。
-    // 活动自身的参与工程师属活动记录一部分（非独立事实），随活动删除并计入子记录数。
-    const engineerCount = (
-      this.db.prepare('SELECT COUNT(*) AS n FROM activity_engineers WHERE activity_id = ?').get(id) as {
-        n: number;
-      }
-    ).n;
-    this.db.prepare('DELETE FROM activity_engineers WHERE activity_id = ?').run(id);
-    this.db.prepare('DELETE FROM activities WHERE id = ?').run(id);
-    this.tombstone('activity', id, engineerCount);
+    const result = this.mapDomainDelete(() => this.executionDeletes().deleteActivity(id), ['EXECUTION_ACTIVITY_NOT_FOUND'], ['EXECUTION_DELETE_DEPENDENCIES']);
+    this.tombstone('activity', id, result.ownedChildCount);
     this.importTarget('activities', id);
-    this.changed = { kind: 'activity', id, projectId: activity.projectId };
+    this.changed = { kind: 'activity', id, projectId: result.projectId };
   }
 
   deleteAcceptance(projectId: string): void {
-    const project = this.ctx.repositories.projects.findById(projectId);
-    if (!project) {
-      throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `项目不存在: ${projectId}`);
-    }
-    // 有 invoice 历史（含已撤销）→ 拒绝（掉票闭环事实不可逆回退）。
-    if (this.projectInvoiceHistoryExists(projectId)) {
-      throw new ValidationError(
-        DELETE_REJECTION_CODES.DEPENDENCIES,
-        '该项目存在掉票历史（含已撤销），验收报告不可删除；掉票闭环事实不可逆回退',
-      );
-    }
-    const fromStatus = project.status;
-    const executionStarted = this.projectExecutionStarted(projectId);
+    let result: { fromStatus: string; toStatus: string };
     try {
-      // 删除验收事实后经 lifecycle 唯一入口重算主状态（clearAcceptance 内部同防御校验）。
-      this.ctx.projectService().clearAcceptance(projectId, {
-        hasAnyInvoiceHistory: false,
-        executionStarted,
-      });
+      result = this.projectDeletes().clearAcceptance(projectId);
     } catch (error) {
-      // 重算不可靠（终态/金额闭环完成态等）→ 在删除任何行前映射为 STATUS_RECALC。
       if (error instanceof ValidationError && error.code === 'ACCEPTANCE_STATUS_RECALC_FAILED') {
         throw new ValidationError(
           DELETE_REJECTION_CODES.STATUS_RECALC_UNRELIABLE,
           `验收报告删除后状态重算未通过：${error.message}`,
         );
       }
+      if (error instanceof ValidationError && error.code === 'PROJECT_NOT_FOUND') {
+        throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, error.message);
+      }
+      if (error instanceof ValidationError && error.code === 'ACCEPTANCE_DELETE_DEPENDENCIES') {
+        throw new ValidationError(DELETE_REJECTION_CODES.DEPENDENCIES, error.message);
+      }
       throw error;
     }
-    // 真实状态变化 → 同事务写 transition audit（source=user，无客户值）；零变化不写。
-    const after = this.ctx.repositories.projects.findById(projectId);
-    if (after && after.status !== fromStatus) {
-      this.writeTransitionAudit(projectId, fromStatus, after.status, 'acceptance_deleted');
+    if (result.fromStatus !== result.toStatus) {
+      this.writeTransitionAudit(projectId, result.fromStatus, result.toStatus, 'acceptance_deleted');
     }
     // acceptance 无物理业务行删除：tombstone 记录「验收报告已删除」这一审计事实。
     this.tombstone('acceptance', projectId, 0);
@@ -290,59 +249,18 @@ class DeleteOperation {
   }
 
   deleteBatch(id: string): void {
-    const batch = this.ctx.repositories.batches.findById(id);
-    if (!batch) {
-      throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `搬迁批次不存在: ${id}`);
-    }
-    // 严格守卫：仅未开始运输、无当前仪器、无改批历史可删除。
-    if (batch.startedAt !== null) {
-      throw new ValidationError(DELETE_REJECTION_CODES.DEPENDENCIES, '该搬迁批次已开始运输，无法删除');
-    }
-    if (this.existsWhere('instruments', 'batch_id', id)) {
-      throw new ValidationError(
-        DELETE_REJECTION_CODES.DEPENDENCIES,
-        '该搬迁批次仍存在当前仪器，无法删除；请先解绑仪器',
-      );
-    }
-    if (
-      this.existsWhere('batch_change_history', 'from_batch_id', id) ||
-      this.existsWhere('batch_change_history', 'to_batch_id', id)
-    ) {
-      throw new ValidationError(DELETE_REJECTION_CODES.DEPENDENCIES, '该搬迁批次存在改批历史，无法删除');
-    }
-    // 批次与物流费用合并为一次记录：批次自身唯一物流费用随批次删除（子记录数计 1）。
-    const fee = this.ctx.repositories.fees.findByBatchId(id);
-    if (fee) {
-      this.db.prepare('DELETE FROM logistics_fees WHERE id = ?').run(fee.id);
-      this.importTarget('logistics_fees', fee.id);
-    }
-    this.db.prepare('DELETE FROM batches WHERE id = ?').run(id);
-    this.tombstone('batch', id, fee ? 1 : 0);
+    const result = this.mapDomainDelete(() => this.executionDeletes().deleteBatch(id), ['EXECUTION_BATCH_NOT_FOUND'], ['EXECUTION_DELETE_DEPENDENCIES']);
+    this.tombstone('batch', id, result.ownedChildCount);
+    if (result.feeId) this.importTarget('logistics_fees', result.feeId);
     this.importTarget('batches', id);
-    this.changed = { kind: 'batch', id, projectId: batch.projectId };
+    this.changed = { kind: 'batch', id, projectId: result.projectId };
   }
 
   deleteInstrument(id: string): void {
-    const instrument = this.ctx.repositories.instruments.findById(id);
-    if (!instrument) {
-      throw new ValidationError(DELETE_REJECTION_CODES.NOT_FOUND, `搬迁仪器不存在: ${id}`);
-    }
-    // 所属批次已开始运输 → 禁止删除。
-    if (instrument.batchId) {
-      const batch = this.ctx.repositories.batches.findById(instrument.batchId);
-      if (batch && batch.startedAt !== null) {
-        throw new ValidationError(
-          DELETE_REJECTION_CODES.DEPENDENCIES,
-          '该搬迁仪器所属批次已开始运输，无法删除',
-        );
-      }
-    }
-    // 保留其他依赖检查（损坏事项/工作事实/改批历史/序列号更新）。
-    this.assertInstrumentDeletable(id);
-    this.db.prepare('DELETE FROM instruments WHERE id = ?').run(id);
-    this.tombstone('instrument', id, 0);
+    const result = this.mapDomainDelete(() => this.executionDeletes().deleteInstrument(id), ['EXECUTION_INSTRUMENT_NOT_FOUND'], ['EXECUTION_DELETE_DEPENDENCIES']);
+    this.tombstone('instrument', id, result.ownedChildCount);
     this.importTarget('instruments', id);
-    this.changed = { kind: 'instrument', id, projectId: instrument.projectId };
+    this.changed = { kind: 'instrument', id, projectId: result.projectId };
   }
 
   deleteShipToRequest(id: string): void {
@@ -414,16 +332,12 @@ class DeleteOperation {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // 只读守卫（表名/列名来自固定白名单，无注入面；不写库）。
-  // -------------------------------------------------------------------------
+  private executionDeletes(): ProtectedExecutionDeletionService {
+    return new ProtectedExecutionDeletionService(this.db, this.ctx.repositories.activities, this.ctx.repositories.batches, this.ctx.repositories.instruments, this.ctx.repositories.fees);
+  }
 
-  /** 是否存在匹配行（表名/列名来自固定白名单，无注入面）。 */
-  private existsWhere(table: string, column: string, value: string): boolean {
-    const row = this.db.prepare(`SELECT 1 AS x FROM ${table} WHERE ${column} = ? LIMIT 1`).get(value) as
-      | { x: number }
-      | undefined;
-    return row !== undefined;
+  private projectDeletes(): ProtectedProjectDeletionService {
+    return new ProtectedProjectDeletionService(this.db, this.ctx.repositories.projects, this.ctx.projectService());
   }
 
   /** 将领域稳定错误码映射为既有 IPC 删除拒绝码，避免 UI/信封变化。 */
@@ -440,48 +354,6 @@ class DeleteOperation {
         }
       }
       throw error;
-    }
-  }
-
-  /** 项目是否存在任何掉票历史（含已撤销）：有则验收报告删除被拒绝。 */
-  private projectInvoiceHistoryExists(projectId: string): boolean {
-    const row = this.db.prepare('SELECT COUNT(*) AS n FROM invoices WHERE project_id = ?').get(projectId) as {
-      n: number;
-    };
-    return row.n > 0;
-  }
-
-  /** 项目是否已开始执行：任一批次开始运输 或 任一工作事实已开始。 */
-  private projectExecutionStarted(projectId: string): boolean {
-    const batchStarted = this.db
-      .prepare('SELECT 1 AS x FROM batches WHERE project_id = ? AND started_at IS NOT NULL LIMIT 1')
-      .get(projectId);
-    if (batchStarted) return true;
-    const workFact = this.db
-      .prepare(
-        `SELECT 1 AS x FROM work_facts wf
-         JOIN activities a ON a.id = wf.activity_id
-         WHERE a.project_id = ? LIMIT 1`,
-      )
-      .get(projectId);
-    return workFact !== undefined;
-  }
-
-  /** 仪器存在依赖记录时拒绝删除（保护依赖，避免静默级联丢失业务数据）。 */
-  private assertInstrumentDeletable(instrumentId: string): void {
-    const dependents = [
-      ['damage_repair_items', 'instrument_id'],
-      ['work_facts', 'instrument_id'],
-      ['batch_change_history', 'instrument_id'],
-      ['serial_address_updates', 'instrument_id'],
-    ] as const;
-    for (const [table, column] of dependents) {
-      if (this.existsWhere(table, column, instrumentId)) {
-        throw new ValidationError(
-          DELETE_REJECTION_CODES.DEPENDENCIES,
-          `该搬迁仪器存在依赖记录（${table}），无法安全删除；请先处理依赖记录`,
-        );
-      }
     }
   }
 

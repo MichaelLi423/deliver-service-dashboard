@@ -1,6 +1,7 @@
 import { parseDecimalToCents } from '../../core/money';
 import { createHash } from 'node:crypto';
 import type { ProjectStatusOrCancelled } from '../relocation-project-lifecycle/states';
+import { resolveStatus, type TransitionResult } from '../relocation-project-lifecycle/lifecycle';
 import { normalizeDateValue } from './excel-date';
 import {
   MAPPING_V1,
@@ -798,12 +799,57 @@ export interface StateRebuildFacts {
   cancelledAt: string | null;
 }
 
-/** 从导入事实确定性重建主状态（复用 lifecycle 规则，缺失事实不产生猜测状态）。 */
+/**
+ * 导入状态重建必须经过 lifecycle 的唯一转换入口，不能维护一套平行优先级。
+ * 导入没有计划上门日期和掉票闭环事实；终态取消与验收/装机等更强事实仍由
+ * resolveStatus 的既有优先级决定。
+ */
+export function resolveImportedStatus(
+  facts: StateRebuildFacts,
+  currentStatus?: ProjectStatusOrCancelled,
+): TransitionResult {
+  const baseline: ProjectStatusOrCancelled = facts.entryAt === null ? 'pending_entry' : 'pending_execution';
+  // requestedStatus 始终由本次导入后的完整事实推导；currentStatus 仅供 lifecycle
+  // 应用终态与自动触发约束，绝不能反过来吞掉新增取消/进单事实。
+  const factTarget: ProjectStatusOrCancelled = facts.cancelledAt !== null
+    ? 'cancelled'
+    : facts.executionStarted
+      ? 'executing'
+      : baseline;
+  const requestedStatus = currentStatus !== undefined &&
+    statusRank(currentStatus) > statusRank(factTarget)
+    ? currentStatus
+    : factTarget;
+  return resolveStatus({
+    currentStatus: currentStatus ?? baseline,
+    requestedStatus,
+    actualInstallDoneAt: facts.actualInstallDoneAt,
+    acceptanceReportDate: facts.acceptanceReportDate,
+    executionStarted: facts.executionStarted,
+    formallyEntered: facts.entryAt !== null,
+    amounts: { confirmedAmountCents: 0n, finalConfirmableAmountCents: null },
+    cancel: { hasAnyInvoiceHistory: false },
+  });
+}
+
+/** 导入仅以前进事实推进既有项目；较强已持久化状态不因较弱源事实倒退。 */
+function statusRank(status: ProjectStatusOrCancelled): number {
+  switch (status) {
+    case 'pending_entry': return 0;
+    case 'pending_execution': return 1;
+    case 'executing': return 2;
+    case 'pending_acceptance': return 3;
+    case 'pending_invoice': return 4;
+    case 'completed': return 5;
+    case 'cancelled': return 6;
+  }
+}
+
+/** 从导入事实确定性重建主状态（兼容既有调用方）。 */
 export function rebuildStatus(facts: StateRebuildFacts): ProjectStatusOrCancelled {
-  if (facts.cancelledAt !== null) return 'cancelled';
-  if (facts.acceptanceReportDate !== null) return 'pending_invoice';
-  if (facts.actualInstallDoneAt !== null) return 'pending_acceptance';
-  if (facts.executionStarted) return 'executing';
-  if (facts.entryAt !== null) return 'pending_execution';
-  return 'pending_entry';
+  const result = resolveImportedStatus(facts);
+  if (!result.ok) {
+    throw new Error(`导入项目状态重建失败：${result.errors.join('；')}`);
+  }
+  return result.status;
 }

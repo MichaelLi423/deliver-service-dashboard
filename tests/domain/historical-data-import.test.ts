@@ -6,6 +6,7 @@ import {
 import {
   buildImportPlan,
   rebuildStatus,
+  resolveImportedStatus,
 } from '../../src/domain/capabilities/historical-data-import/engine';
 import { sourceRowKey } from '../../src/domain/capabilities/historical-data-import/source-model';
 import {
@@ -328,6 +329,139 @@ describe('8.7 批次事务与幂等重跑（SQLite 集成）', () => {
 });
 
 describe('8.8 确定性状态重建', () => {
+  it('状态决策复用 lifecycle：验收事实优先于执行事实', () => {
+    expect(resolveImportedStatus({
+      entryAt: '2026-07-01', executionStarted: true,
+      actualInstallDoneAt: '2026-07-10', acceptanceReportDate: '2026-07-15', cancelledAt: null,
+    })).toMatchObject({ ok: true, status: 'pending_invoice', reason: 'auto_acceptance' });
+  });
+
+  it('导入状态真实变化与项目写入同事务记录最小转换审计', () => {
+    const dir = makeTempDir();
+    try {
+      const { db } = bootstrapDatabase({ dataDir: dir });
+      const rows = [
+        row(CONTRACT, '合同信息', 2, { 'ECC#': 'ECC-IMPORT-STATUS', 客户名称: '导入状态客户', 进单时间: '2026-07-01T00:00:00+08:00' }),
+        row(EXEC, '搬迁项目', 2, { 'ECC#': 'ECC-IMPORT-STATUS', 客户单位名称: '导入状态客户', 仪器名称: '状态仪器', 序列号: 'STATUS-SN', 验收报告形成日期: '2026-07-15T00:00:00+08:00' }),
+      ];
+      expect(runDryRun({ rows, mapping: MAPPING_V1 }).errors).toEqual([]);
+      runImport(db, { rows, mapping: MAPPING_V1 });
+      expect(db.prepare('SELECT status FROM projects').get()).toMatchObject({ status: 'pending_invoice' });
+      expect(db.prepare('SELECT from_status, to_status, reason, source FROM project_status_transition_audit').get())
+        .toEqual({ from_status: 'pending_entry', to_status: 'pending_invoice', reason: 'auto_acceptance', source: 'import' });
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('forward-fix 以真实已取消状态进入 lifecycle，不恢复终态也不追加伪转换审计', () => {
+    const dir = makeTempDir();
+    try {
+      const { db } = bootstrapDatabase({ dataDir: dir });
+      const initial = [
+        row(CONTRACT, '合同信息', 2, { 'ECC#': 'ECC-FIX-CANCELLED', 客户名称: '终态客户', 合同USD含税金额: '100' }),
+        row(EXEC, '搬迁项目', 2, { 'ECC#': 'ECC-FIX-CANCELLED', 客户单位名称: '终态客户', 取消时间: '2026-07-15T00:00:00+08:00' }),
+      ];
+      runImport(db, { rows: initial, mapping: MAPPING_V1 });
+      const auditsBefore = (db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get() as { n: number }).n;
+      const corrected = [
+        row(CONTRACT, '合同信息', 2, { 'ECC#': 'ECC-FIX-CANCELLED', 客户名称: '终态客户', 合同USD含税金额: '200' }),
+        row(EXEC, '搬迁项目', 2, { 'ECC#': 'ECC-FIX-CANCELLED', 客户单位名称: '终态客户' }),
+      ];
+      runImport(db, { rows: corrected, mapping: MAPPING_V1 });
+      expect(db.prepare('SELECT status, cancelled_at FROM projects').get()).toMatchObject({ status: 'cancelled' });
+      expect((db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get() as { n: number }).n).toBe(auditsBefore);
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('forward-fix 新增取消事实：真实 pending_execution 经 lifecycle 进入 cancelled 并审计', () => {
+    const dir = makeTempDir();
+    try {
+      const { db } = bootstrapDatabase({ dataDir: dir });
+      const base = [
+        row(CONTRACT, '合同信息', 2, { 'ECC#': 'ECC-FIX-NEW-CANCEL', 客户名称: '新增取消客户', 进单时间: '2026-07-01T00:00:00+08:00' }),
+      ];
+      runImport(db, { rows: base, mapping: MAPPING_V1 });
+      const before = (db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get() as { n: number }).n;
+      runImport(db, {
+        rows: [...base, row(EXEC, '搬迁项目', 2, { 'ECC#': 'ECC-FIX-NEW-CANCEL', 客户单位名称: '新增取消客户', 取消时间: '2026-07-15T00:00:00+08:00' })],
+        mapping: MAPPING_V1,
+      });
+      expect(db.prepare('SELECT status FROM projects').get()).toMatchObject({ status: 'cancelled' });
+      expect((db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get() as { n: number }).n).toBe(before + 1);
+      expect(db.prepare(
+        "SELECT from_status, to_status, reason FROM project_status_transition_audit WHERE from_status='pending_execution' AND to_status='cancelled'",
+      ).get()).toEqual({ from_status: 'pending_execution', to_status: 'cancelled', reason: 'cancel' });
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('forward-fix 补进单日期：真实 pending_entry 经 lifecycle 进入 pending_execution 并审计', () => {
+    const dir = makeTempDir();
+    try {
+      const { db } = bootstrapDatabase({ dataDir: dir });
+      const base = [row(CONTRACT, '合同信息', 2, { 'ECC#': 'ECC-FIX-ENTRY', 客户名称: '补进单客户' })];
+      runImport(db, { rows: base, mapping: MAPPING_V1 });
+      const before = (db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get() as { n: number }).n;
+      runImport(db, {
+        rows: [row(CONTRACT, '合同信息', 2, { 'ECC#': 'ECC-FIX-ENTRY', 客户名称: '补进单客户', 进单时间: '2026-07-01T00:00:00+08:00' })],
+        mapping: MAPPING_V1,
+      });
+      expect(db.prepare('SELECT status FROM projects').get()).toMatchObject({ status: 'pending_execution' });
+      expect((db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get() as { n: number }).n).toBe(before + 1);
+      expect(db.prepare(
+        "SELECT from_status, to_status, reason FROM project_status_transition_audit WHERE from_status='pending_entry' AND to_status='pending_execution'",
+      ).get()).toEqual({ from_status: 'pending_entry', to_status: 'pending_execution', reason: 'manual' });
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('forward-fix 不倒退 pending_invoice，并在新验收事实时记录 lifecycle 的真实 from/to/reason', () => {
+    const dir = makeTempDir();
+    try {
+      const { db } = bootstrapDatabase({ dataDir: dir });
+      const base = [
+        row(CONTRACT, '合同信息', 2, { 'ECC#': 'ECC-FIX-LIFECYCLE', 客户名称: '审计客户', 进单时间: '2026-07-01T00:00:00+08:00' }),
+      ];
+      runImport(db, { rows: base, mapping: MAPPING_V1 });
+      const auditsBeforeAcceptance = (db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get() as { n: number }).n;
+      const withAcceptance = [
+        ...base,
+        row(EXEC, '搬迁项目', 2, { 'ECC#': 'ECC-FIX-LIFECYCLE', 客户单位名称: '审计客户', 验收报告形成日期: '2026-07-15T00:00:00+08:00' }),
+      ];
+      runImport(db, { rows: withAcceptance, mapping: MAPPING_V1 });
+      expect(db.prepare('SELECT status FROM projects').get()).toMatchObject({ status: 'pending_invoice' });
+      const acceptanceAudits = db.prepare(
+        `SELECT from_status, to_status, reason FROM project_status_transition_audit
+         WHERE from_status = 'pending_execution' AND to_status = 'pending_invoice' AND reason = 'auto_acceptance'`,
+      ).all();
+      expect((db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get() as { n: number }).n)
+        .toBe(auditsBeforeAcceptance + 1);
+      expect(acceptanceAudits).toEqual([
+        { from_status: 'pending_execution', to_status: 'pending_invoice', reason: 'auto_acceptance' },
+      ]);
+
+      const corrected = [
+        row(CONTRACT, '合同信息', 2, { 'ECC#': 'ECC-FIX-LIFECYCLE', 客户名称: '审计客户', 进单时间: '2026-07-01T00:00:00+08:00', 合同USD含税金额: '200' }),
+      ];
+      runImport(db, { rows: corrected, mapping: MAPPING_V1 });
+      expect(db.prepare('SELECT status FROM projects').get()).toMatchObject({ status: 'pending_invoice' });
+      expect((db.prepare('SELECT COUNT(*) AS n FROM project_status_transition_audit').get() as { n: number }).n)
+        .toBe(auditsBeforeAcceptance + 1);
+      closeDatabase(db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
   it('项目状态由事实推导重建，缺失事实不产生猜测状态', () => {
     expect(rebuildStatus({ entryAt: null, executionStarted: false, actualInstallDoneAt: null, acceptanceReportDate: null, cancelledAt: null })).toBe('pending_entry');
     expect(rebuildStatus({ entryAt: '2026-07-01T00:00:00+08:00', executionStarted: false, actualInstallDoneAt: null, acceptanceReportDate: null, cancelledAt: null })).toBe('pending_execution');

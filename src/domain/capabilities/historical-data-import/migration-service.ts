@@ -14,7 +14,7 @@ import {
 import {
   buildImportPlan,
   contentHash,
-  rebuildStatus,
+  resolveImportedStatus,
   sourceRowsDigest,
   type DryRunReport,
   type ImportPlan,
@@ -29,6 +29,7 @@ import {
   type RequiredFieldError,
 } from './engine';
 import { MAPPING_V1, type MigrationMapping } from './mapping';
+import type { ProjectStatusOrCancelled } from '../relocation-project-lifecycle/states';
 import type { SourceRow } from './source-model';
 import type { MigrationAuditRecord } from './migration-audit';
 import type { NormalizedRow } from './normalized-row';
@@ -953,13 +954,26 @@ function writeImportedProject(
   }
 
   const existingProject = findImportedRow(db, 'projects', projectKey);
-  const status = rebuildStatus({
+  // forward-fix 必须先读取真实状态，再交 lifecycle 判定；不能以导入基线覆盖
+  // 已取消/待掉票等已持久化的更强状态。
+  const previous = existingProject
+    ? db.prepare('SELECT status, cancelled_at FROM projects WHERE id = ?').get(existingProject.id) as {
+      status: ProjectStatusOrCancelled;
+      cancelled_at: string | null;
+    }
+    : undefined;
+  const statusResult = resolveImportedStatus({
     entryAt: project.entryAt,
     executionStarted: false,
     actualInstallDoneAt: project.actualInstallDoneAt,
     acceptanceReportDate: project.acceptanceReportDate,
     cancelledAt: project.cancelledAt,
-  });
+  }, previous?.status);
+  if (!statusResult.ok && previous === undefined) {
+    throw new Error(`导入项目状态重建失败：${statusResult.errors.join('；')}`);
+  }
+  const status = statusResult.status;
+  const statusReason = statusResult.ok ? statusResult.reason : 'unchanged';
 
   if (existingProject) {
     // forward-fix：仅更新同 source key 产生的迁移项目（Oracle 高风险 4：不删除任何数据）。
@@ -993,11 +1007,12 @@ function writeImportedProject(
       project.actualInstallDoneAt,
       project.acceptanceReportDate !== null ? 1 : 0,
       project.acceptanceReportDate,
-      project.cancelledAt,
+      previous!.status === 'cancelled' ? previous!.cancelled_at : project.cancelledAt,
       projectHash,
       nowIso,
       existingProject.id,
     );
+    writeImportTransitionAudit(db, existingProject.id, previous!.status, status, statusReason, project, nowIso);
     db.prepare(
       `UPDATE contracts SET
          usd_tax_amount_cents=?, entry_amount_snapshot_cents=?, final_confirmable_amount_cents=?,
@@ -1088,6 +1103,7 @@ function writeImportedProject(
   );
 
   db.prepare('UPDATE projects SET contract_id = ? WHERE id = ?').run(contractId, projectId);
+  writeImportTransitionAudit(db, projectId, 'pending_entry', status, statusReason, project, nowIso);
 
   // 首次导入：记录目标快照（projects + contracts 金额；防后续 forward-fix 覆盖人工修改）。
   upsertRecordAudit(
@@ -1100,6 +1116,26 @@ function writeImportedProject(
     nowIso,
   );
   void operator;
+}
+
+/** 导入重建后的真实状态变化与项目写入处于同一业务事务，审计不携带客户值。 */
+function writeImportTransitionAudit(
+  db: DatabaseSync,
+  projectId: string,
+  fromStatus: string,
+  toStatus: string,
+  reason: string,
+  project: ImportedProject,
+  nowIso: string,
+): void {
+  if (fromStatus === toStatus) return;
+  const effective = project.cancelledAt ?? project.acceptanceReportDate ?? project.actualInstallDoneAt ?? project.entryAt ?? nowIso.slice(0, 10);
+  db.prepare(
+    `INSERT INTO project_status_transition_audit (
+       id, project_id, from_status, to_status, reason,
+       effective_business_date, source, created_at
+     ) VALUES (?,?,?,?,?,?,?,?)`,
+  ).run(randomUUID(), projectId, fromStatus, toStatus, reason, effective.slice(0, 10), 'import', nowIso);
 }
 
 /** 开单记录（schema v7 import 来源列；人工记录永不改删）。 */

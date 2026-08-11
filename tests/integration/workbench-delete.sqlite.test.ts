@@ -14,6 +14,7 @@ import {
 import { ValidationError } from '../../src/domain/core/errors';
 import type { FinancialClosureService } from '../../src/domain/capabilities/project-financial-closure';
 import type { ProjectService } from '../../src/domain/capabilities/relocation-project-lifecycle';
+import { ProtectedExecutionDeletionService } from '../../src/domain/capabilities/relocation-execution';
 import { LocalAccountService } from '../../src/domain/capabilities/workbench-access';
 import { WorkbenchFacade } from '../../src/main/workbench-facade';
 import {
@@ -133,6 +134,30 @@ function makePolicyContext(db: DatabaseSync, projectService: ProjectService): Wo
 }
 
 describe('受保护登记记录删除（v2Delete，ora-1 严格守卫）', () => {
+  it('执行领域删除入口拥有活动依赖检查及工程师子记录清理，facade 仅协调审计', async () => {
+    const ctx = await makeCtx();
+    const { facade, db, projectId } = ctx;
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'visit', projectId, values: { visitAt: '2026-08-13', engineers: '工程师甲、工程师乙' } },
+    });
+    const activityId = String(db.prepare('SELECT id FROM activities WHERE project_id = ?').get(projectId)!.id);
+    const executionDeletes = new ProtectedExecutionDeletionService(
+      db,
+      new SqliteActivityRepository(db),
+      new SqliteBatchRepository(db),
+      new SqliteInstrumentRepository(db),
+      new SqliteLogisticsFeeRepository(db),
+    );
+
+    expect(executionDeletes.deleteActivity(activityId)).toMatchObject({ projectId, ownedChildCount: 2 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM activities WHERE id = ?').get(activityId)!.n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM activity_engineers WHERE activity_id = ?').get(activityId)!.n).toBe(0);
+    // 领域入口本身不拥有工作台 tombstone；经 facade 的删除路径才写审计协调事实。
+    expect(db.prepare('SELECT COUNT(*) AS n FROM record_deletion_audit').get()!.n).toBe(0);
+  });
+
   it('expectedRevision 不匹配当前业务修订时整体拒绝且不写库（事务内核验）', async () => {
     const ctx = await makeCtx();
     const revision = readBusinessRevision(ctx.db);

@@ -53,6 +53,7 @@ import {
 
 const PAGE_SIZE = 50;
 const PROJECT_PAGE_SIZE = 20;
+const ZERO_CONTRACT_AMOUNT_GUIDANCE = "合同金额为 0 仍可正式进单；最终可确认金额可暂空，请在首次登记掉票前补录。";
 const QR_REQUEST_TYPES = [
   { code: "A", label: "A" },
   { code: "B", label: "B" },
@@ -2860,7 +2861,7 @@ function actionFields(
         label="合同 USD 含税金额"
         type="number"
         step="0.01"
-        help="合同金额为 0 时，正式进单须另填大于 0 的最终可确认金额。"
+        help={ZERO_CONTRACT_AMOUNT_GUIDANCE}
         defaultValue={project.contractAmount ?? ""}
         optional
       />
@@ -3785,7 +3786,7 @@ function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, on
         <Field name="contractStartDate" label="合同开始日期" type="date" optional /><Field name="contractEndDate" label="合同截止日期" type="date" optional />
         <TextArea name="projectNote" label="项目备注" optional />
         <Field name="entryAt" label="进单日期" type="date" optional disabled={intent !== "formal"} help={intent === "formal" ? "可留空，系统将使用当天日期。" : "仅正式进单时可填写；切换为正式进单后启用。"} />
-        {intent === "formal" && <div className="formal-intent-fields full" role="group" aria-label="正式进单资料"><div className="wizard-section-head"><div><h3>正式进单资料</h3><p>仅在正式进单时保存 ECC 和合同金额；进单日期留空时由系统按当天日期处理。</p></div><span>正式进单专属</span></div><div className="form-grid"><Field name="ecc" label="ECC" required /><Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="可留空后补；新建时不录最终可确认金额。" /></div>{contractAmountIsZero && <div className="inline-warning" role="status">合同金额为 0 仍可正式进单；最终可确认金额可暂空，请在首次登记掉票前补录。</div>}</div>}
+        {intent === "formal" && <div className="formal-intent-fields full" role="group" aria-label="正式进单资料"><div className="wizard-section-head"><div><h3>正式进单资料</h3><p>仅在正式进单时保存 ECC 和合同金额；进单日期留空时由系统按当天日期处理。</p></div><span>正式进单专属</span></div><div className="form-grid"><Field name="ecc" label="ECC" required /><Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="可留空后补；新建时不录最终可确认金额。" /></div>{contractAmountIsZero && <div className="inline-warning" role="status">{ZERO_CONTRACT_AMOUNT_GUIDANCE}</div>}</div>}
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>搬迁范围（均可后补）</legend><div className="form-grid">
         <Field name="oldSiteAddress" label="旧址地址" optional /><Field name="newSiteAddress" label="新址地址" optional />

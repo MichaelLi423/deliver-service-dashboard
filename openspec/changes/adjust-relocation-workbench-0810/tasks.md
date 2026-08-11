@@ -100,5 +100,6 @@
 - [x] 10.6 收敛类型化删除为单一归属领域入口：main 仅协调事务、expectedRevision、tombstone 与 import marker；各 owning domain policy 负责依赖与 owned-child 删除，移除可绕过审计语义的平行实现；完成态：全部删除集成测试通过。
 - [x] 10.7 补充场景证据：八类删除入口及取消确认、旧址/新址建档留空后补、Ship-to 删除非退回/取消、固定20无旧文案、已有暂定数量回显、关闭重开持久化、sticky 深层表单焦点；收紧矩阵证据标题校验并更新 scenario map/matrix；完成态：`npm run verify:matrix` 无虚弱映射或未说明缺口。
 - [x] 10.8 运行 remediation focused domain/persistence/integration/renderer/typecheck/E2E，检查 diff，提交并推送；完成态：OpenSpec 任务全完成、工作区无相关 tracked 改动。
+- [x] 10.9 修复剩余归档 warning：到期计划上门与未进单先执行可在同次建档/补录中保存，真实状态变化统一写 transition audit，历史导入复用 lifecycle 状态决策；所有多查询工作台 DTO 与 `businessRevision` 使用同一 WAL 只读快照；activity/acceptance/batch/instrument 删除策略下沉 owning domain；合同金额为 0 的提示符合首次掉票前补录规则，非正式 intent 的进单日期禁用且正式提交保留。补充对应 focused 回归测试，并以普通测试套件标题包裹八类删除入口的逐类 `v2Delete` 断言，使矩阵可校验真实行为证据；完成态：focused Vitest、typecheck、重新构建后的 Electron E2E 与 `npm run verify:matrix` 全绿，相关改动单独提交并推送。
 
 说明：本任务列表默认不做全量 `npm test`（含 100k/50k 性能用例，耗时极长）；如 focused 验证暴露更广回归风险，再由实施者判断补跑相关 focused 范围。仓库无 lint/CI/hook，不设置对应任务。

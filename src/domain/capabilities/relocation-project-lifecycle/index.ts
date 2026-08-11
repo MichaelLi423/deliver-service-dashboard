@@ -13,3 +13,4 @@ export * from './contract';
 export * from './contract-service';
 export * from './project';
 export * from './project-service';
+export * from './protected-deletion-service';

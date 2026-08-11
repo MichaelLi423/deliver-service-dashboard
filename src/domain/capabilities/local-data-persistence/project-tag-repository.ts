@@ -21,11 +21,13 @@ export class SqliteProjectTagRepository {
   constructor(private readonly db: DatabaseSync) {}
 
   catalog(projectId?: string | null): ProjectTagCatalogDto {
-    if (projectId != null && !this.projectExists(projectId)) {
-      throw new ValidationError('PROJECT_TAG_UNKNOWN_PROJECT', `项目不存在: ${projectId}`);
-    }
-    const groups = this.groups();
-    return { businessRevision: this.revision(), groups, selectedTagIds: projectId == null ? [] : this.tagIdsFor(projectId) };
+    return this.withReadSnapshot(() => {
+      if (projectId != null && !this.projectExists(projectId)) {
+        throw new ValidationError('PROJECT_TAG_UNKNOWN_PROJECT', `项目不存在: ${projectId}`);
+      }
+      const groups = this.groups();
+      return { businessRevision: this.revision(), groups, selectedTagIds: projectId == null ? [] : this.tagIdsFor(projectId) };
+    });
   }
 
   createGroup(input: CreateProjectTagGroupRequestDto): ProjectTagGroupDto {
@@ -92,4 +94,22 @@ export class SqliteProjectTagRepository {
   private projectExists(id: string): boolean { return Boolean(this.db.prepare('SELECT 1 FROM projects WHERE id=?').get(id)); }
   private nextOrder(table: 'project_tag_groups' | 'project_tag_definitions', groupId: string): number { const sql=table === 'project_tag_groups' ? 'SELECT COALESCE(MAX(sort_order),0)+10 AS n FROM project_tag_groups' : 'SELECT COALESCE(MAX(sort_order),0)+10 AS n FROM project_tag_definitions WHERE group_id=?'; return Number((this.db.prepare(sql).get(...(groupId ? [groupId] : [])) as {n:number}).n); }
   private revision(): number { return Number((this.db.prepare('SELECT business_revision FROM database_metadata WHERE id=1').get() as {business_revision:number}).business_revision); }
+
+  /** 已有事务时复用它；否则用本地读事务将 catalog 的多次查询固定在同一 WAL 快照。 */
+  private withReadSnapshot<T>(read: () => T): T {
+    if (this.db.isTransaction) return read();
+    this.db.exec('BEGIN');
+    try {
+      const result = read();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // Preserve the original read error.
+      }
+      throw error;
+    }
+  }
 }

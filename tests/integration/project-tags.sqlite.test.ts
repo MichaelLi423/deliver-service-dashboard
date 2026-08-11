@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { bootstrapDatabase } from '../../src/domain/capabilities/local-data-persistence/bootstrap';
-import { closeDatabase } from '../../src/domain/capabilities/local-data-persistence/connection';
+import { closeDatabase, openDatabase } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { createManualBackup } from '../../src/domain/capabilities/local-data-persistence/backup';
 import { restoreFromBackup } from '../../src/domain/capabilities/local-data-persistence/restore';
 import { FixedClock } from '../../src/domain/core/time';
@@ -110,6 +110,57 @@ describe('项目分类标签 SQLite 集成', () => {
     expectCode(() => facade.v2Mutate({ op: 'update_project', payload: { projectId, tagIds: ['missing'] } }), 'PROJECT_TAG_UNKNOWN_TAG');
     expect(facade.v2TagCatalog({ projectId }).selectedTagIds).toEqual([]);
     closeDatabase(db);
+  });
+
+  it('catalog 在 WAL 并发写入后不会混合目录、已选标签与 businessRevision', async () => {
+    const { facade, db } = await setup();
+    const projectId = facade.v2Mutate({ op: 'create_project', payload: { intent: 'draft', customerName: '快照客户', region: 'East' } }).changed!.projectId!;
+    const oldTag = facade.v2TagCatalog().groups[0].tags[0];
+    facade.v2TagMutate({ command: 'replace_project_tags', payload: { projectId, tagIds: [oldTag.id] } });
+    const oldRevision = Number((db.prepare('SELECT business_revision FROM database_metadata WHERE id=1').get() as { business_revision: number }).business_revision);
+    const dbPath = String((db.prepare('PRAGMA database_list').all() as Array<{ file: string }>)[0].file);
+    const writer = openDatabase({ path: dbPath });
+    const originalPrepare = db.prepare.bind(db);
+    let injected = false;
+
+    // 项目存在性读取是 catalog 的首次查询。写者在该读取后提交，未包住整个 catalog
+    // 时后续目录、selected tag 或 revision 会读到新修订。
+    (db as { prepare: typeof db.prepare }).prepare = ((sql: string) => {
+      const statement = originalPrepare(sql);
+      if (sql !== 'SELECT 1 FROM projects WHERE id=?') return statement;
+      return new Proxy(statement, {
+        get(target, property, receiver) {
+          if (property !== 'get') return Reflect.get(target, property, receiver);
+          return (...args: Parameters<typeof target.get>) => {
+            const row = target.get(...args);
+            writer.exec('BEGIN');
+            try {
+              writer.prepare('INSERT INTO project_tag_groups (id,name,sort_order) VALUES (?,?,?)').run('wal-group', '并发分组', 999);
+              writer.prepare('INSERT INTO project_tag_definitions (id,group_id,name,sort_order) VALUES (?,?,?,?)').run('wal-tag', 'wal-group', '并发标签', 10);
+              writer.prepare('INSERT INTO project_tag_assignments (project_id,tag_id) VALUES (?,?)').run(projectId, 'wal-tag');
+              writer.exec('COMMIT');
+            } catch (error) {
+              writer.exec('ROLLBACK');
+              throw error;
+            }
+            injected = true;
+            return row;
+          };
+        },
+      });
+    }) as typeof db.prepare;
+
+    try {
+      const catalog = facade.v2TagCatalog({ projectId });
+      expect(injected).toBe(true);
+      expect(catalog.groups.flatMap((group) => group.tags).map((tag) => tag.id)).not.toContain('wal-tag');
+      expect(catalog.selectedTagIds).toEqual([oldTag.id]);
+      expect(catalog.businessRevision).toBe(oldRevision);
+    } finally {
+      (db as { prepare: typeof db.prepare }).prepare = originalPrepare;
+      closeDatabase(writer);
+    }
+    expect(Number((db.prepare('SELECT business_revision FROM database_metadata WHERE id=1').get() as { business_revision: number }).business_revision)).toBeGreaterThan(oldRevision);
   });
 
   it('重开 SQLite 后保留自定义目录与项目关联', async () => {

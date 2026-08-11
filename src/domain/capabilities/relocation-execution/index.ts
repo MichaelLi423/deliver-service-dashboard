@@ -8,3 +8,4 @@
 export * from './execution-types';
 export * from './execution-repositories';
 export * from './execution-service';
+export * from './protected-deletion-service';
