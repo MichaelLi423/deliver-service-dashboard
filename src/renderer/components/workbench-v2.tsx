@@ -14,6 +14,8 @@ import type {
   DataCleanPrepareDto,
   InstrumentBulkImportRow,
   ProjectStatus,
+  ProjectTagCatalogDto,
+  ProjectTagGroupSummaryDto,
   ProjectSupplementPayload,
   ProjectUpdatePayload,
   ProjectWizardPayload,
@@ -253,7 +255,7 @@ interface Filters {
   query: string;
 }
 type LayerState =
-  | { kind: "new" | "quick" | "reminder" | "reminder-all" | "cancel" | "report" | "history" | "clean" | "edit-project" | "correct-entry" }
+  | { kind: "new" | "quick" | "reminder" | "reminder-all" | "cancel" | "report" | "history" | "clean" | "tags" | "edit-project" | "correct-entry" }
   | { kind: "action"; action: WorkbenchActionType }
   | { kind: "independent"; module: WorkbenchV2IndependentKind }
   | {
@@ -353,6 +355,9 @@ export function WorkbenchV2({
   const [historyImport, setHistoryImport] = useState(false);
   const [independentRefresh, setIndependentRefresh] = useState(0);
   const [reminderRefresh, setReminderRefresh] = useState(0);
+  const [tagCatalog, setTagCatalog] = useState<ProjectTagCatalogDto | null>(null);
+  const [tagCatalogLoading, setTagCatalogLoading] = useState(true);
+  const [tagCatalogError, setTagCatalogError] = useState("");
   const revision = useRef(0);
   const requests = useRef({ projects: 0, detail: 0, section: 0, overview: 0 });
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
@@ -390,6 +395,22 @@ export function WorkbenchV2({
     } finally {
       if (id === requests.current.overview)
         setLoading((old) => ({ ...old, overview: false }));
+    }
+  }
+
+  async function loadTagCatalog(): Promise<void> {
+    setTagCatalogLoading(true);
+    setTagCatalogError("");
+    try {
+      const api = bridge();
+      if (!api?.v2TagCatalog) throw new Error("当前环境暂不支持项目分类标签");
+      const next = await api.v2TagCatalog();
+      revision.current = Math.max(revision.current, next.businessRevision);
+      setTagCatalog(next);
+    } catch (cause) {
+      setTagCatalogError(messageOf(cause));
+    } finally {
+      setTagCatalogLoading(false);
     }
   }
 
@@ -503,6 +524,7 @@ export function WorkbenchV2({
 
   useEffect(() => {
     void loadOverview();
+    void loadTagCatalog();
   }, []);
   useEffect(() => {
     setCursorStack([null]);
@@ -558,6 +580,7 @@ export function WorkbenchV2({
     )
       setIndependentRefresh((value) => value + 1);
     if (tags.includes("reminders")) setReminderRefresh((value) => value + 1);
+    if (tags.includes("tag_catalog")) jobs.push(loadTagCatalog());
     await Promise.all(jobs);
   }
 
@@ -724,6 +747,9 @@ export function WorkbenchV2({
         if (refreshed) onSessionRestored?.(refreshed);
         // 直接重读工作台数据（恢复的库 revision 可能更低，先重置修订水位）。
         revision.current = 0;
+        selectionPin.current = "";
+        setLayer(null);
+        setSelectedId("");
         setCursorStack([null]);
         setDetail(null);
         setSectionPage(null);
@@ -731,7 +757,7 @@ export function WorkbenchV2({
         setTab("项目总览");
         setToast("备份已恢复，数据已重新加载");
         window.setTimeout(() => setToast(""), 2800);
-        void Promise.all([loadOverview(), loadProjects(null, 0)]);
+        void Promise.all([loadOverview(), loadProjects(null, 0), loadTagCatalog()]);
       }
     } catch (cause) {
       setError(messageOf(cause));
@@ -821,6 +847,10 @@ export function WorkbenchV2({
               <button onClick={() => void runBackup()}>手动备份</button>
               <button className="danger-text" onClick={() => void runRestore()}>
                 恢复备份
+              </button>
+              <div className="data-menu-divider" />
+              <button onClick={() => setLayer({ kind: "tags" })}>
+                项目分类标签库
               </button>
               <div className="data-menu-divider" />
               <button className="danger-text" onClick={() => setLayer({ kind: "clean" })}>
@@ -965,19 +995,45 @@ export function WorkbenchV2({
             </div>
             <ReminderLanes refreshToken={reminderRefresh} onSelect={selectReminder} />
           </section>
-          <ProjectContext
+          <ProjectDetails
             project={selected}
             detail={detail}
-            loading={loading.detail}
-            onQuick={() => setLayer({ kind: "quick" })}
-            onReminder={() => setLayer({ kind: "reminder" })}
-            onCancel={() => setLayer({ kind: "cancel" })}
-            onStatus={(status) =>
-              void mutate(
-                { op: "adjust_status", projectId: selectedId, status },
-                "项目主状态已通过生命周期校验并更新",
-              )
-            }
+            tab={tab}
+            section={sectionPage}
+            loading={loading.detail || loading.section}
+            error={detailError}
+            pageIndex={currentSectionIndex}
+            onTab={setTab}
+            onRetry={() => {
+              if (!selectedId) return;
+              const kind = TAB_SECTION[tab];
+              if (kind) void loadSection(selectedId, kind, sectionCursors.at(-1) ?? null);
+              else void loadDetail(selectedId);
+            }}
+            onAction={(action) => setLayer({ kind: "action", action })}
+            onEditProject={() => setLayer({ kind: "edit-project" })}
+            onCorrectEntry={() => setLayer({ kind: "correct-entry" })}
+            onCompleteEntry={() => setLayer({ kind: "action", action: "core" })}
+            onNext={() => {
+              if (!sectionPage?.nextCursor || !selectedId) return;
+              const next = [...sectionCursors, sectionPage.nextCursor];
+              setSectionCursors(next);
+              void loadSection(selectedId, TAB_SECTION[tab]!, sectionPage.nextCursor);
+            }}
+            onPrevious={() => {
+              if (sectionCursors.length <= 1 || !selectedId) return;
+              const next = sectionCursors.slice(0, -1);
+              setSectionCursors(next);
+              void loadSection(selectedId, TAB_SECTION[tab]!, next.at(-1) ?? null);
+            }}
+            onInvoiceEdit={(invoice) => setLayer({ kind: "invoice-edit", invoice })}
+            onInvoiceRevoke={(invoice) => setLayer({ kind: "invoice-revoke", invoice })}
+            onBatchEdit={(batch) => setLayer({ kind: "batch-edit", batch })}
+            onDamageUpdate={(damage) => setLayer({ kind: "damage-update", damage })}
+            onDelete={(kind, id) => {
+              if (!window.confirm("删除后无法恢复，确认删除这条记录？")) return;
+              void deleteRecord({ kind, id } as DeleteInput, "记录已删除").catch((cause) => setDetailError(messageOf(cause)));
+            }}
           />
         </div>
         <section
@@ -1117,6 +1173,7 @@ export function WorkbenchV2({
                       {project.preEntryExecution && (
                         <em className="warning">未进单先执行</em>
                       )}
+                      <GroupedTags groups={project.groupedTags} compact />
                     </td>
                     <td>
                       <StatusBadge status={project.status} />
@@ -1185,59 +1242,17 @@ export function WorkbenchV2({
             </button>
           </div>
         </section>
-        <ProjectDetails
+        <ProjectContext
           project={selected}
           detail={detail}
-          tab={tab}
-          section={sectionPage}
-          loading={loading.detail || loading.section}
-          error={detailError}
-          pageIndex={currentSectionIndex}
-          onTab={setTab}
-          onRetry={() => {
-            if (!selectedId) return;
-            const kind = TAB_SECTION[tab];
-            if (kind)
-              void loadSection(selectedId, kind, sectionCursors.at(-1) ?? null);
-            else void loadDetail(selectedId);
-          }}
-          onAction={(action) => setLayer({ kind: "action", action })}
-          onEditProject={() => setLayer({ kind: "edit-project" })}
-          onCorrectEntry={() => setLayer({ kind: "correct-entry" })}
-          onCompleteEntry={() => setLayer({ kind: "action", action: "core" })}
-          onNext={() => {
-            if (!sectionPage?.nextCursor || !selectedId) return;
-            const next = [...sectionCursors, sectionPage.nextCursor];
-            setSectionCursors(next);
-            void loadSection(
-              selectedId,
-              TAB_SECTION[tab]!,
-              sectionPage.nextCursor,
-            );
-          }}
-          onPrevious={() => {
-            if (sectionCursors.length <= 1 || !selectedId) return;
-            const next = sectionCursors.slice(0, -1);
-            setSectionCursors(next);
-            void loadSection(
-              selectedId,
-              TAB_SECTION[tab]!,
-              next.at(-1) ?? null,
-            );
-          }}
-          onInvoiceEdit={(invoice) =>
-            setLayer({ kind: "invoice-edit", invoice })
-          }
-          onInvoiceRevoke={(invoice) =>
-            setLayer({ kind: "invoice-revoke", invoice })
-          }
-          onBatchEdit={(batch) => setLayer({ kind: "batch-edit", batch })}
-          onDamageUpdate={(damage) => setLayer({ kind: "damage-update", damage })}
-          onDelete={(kind, id) => {
-            if (!window.confirm("删除后无法恢复，确认删除这条记录？")) return;
-            void deleteRecord({ kind, id } as DeleteInput, "记录已删除")
-              .catch((cause) => setDetailError(messageOf(cause)));
-          }}
+          loading={loading.detail}
+          onQuick={() => setLayer({ kind: "quick" })}
+          onReminder={() => setLayer({ kind: "reminder" })}
+          onCancel={() => setLayer({ kind: "cancel" })}
+          onStatus={(status) => void mutate(
+            { op: "adjust_status", projectId: selectedId, status },
+            "项目主状态已通过生命周期校验并更新",
+          )}
         />
       </main>
       {toast && <div className="toast success" role="status">{toast}</div>}
@@ -1245,11 +1260,15 @@ export function WorkbenchV2({
         <Layer
           title={layerTitle(layer)}
           description={layerDescription(layer, selected)}
-          side={layer.kind === "independent" || layer.kind === "report" || layer.kind === "history" || layer.kind === "reminder-all"}
+          side={layer.kind === "independent" || layer.kind === "report" || layer.kind === "history" || layer.kind === "reminder-all" || layer.kind === "tags"}
           onClose={() => setLayer(null)}
         >
           {layer.kind === "new" ? (
             <ProjectCreateSinglePageForm
+              catalog={tagCatalog}
+              catalogLoading={tagCatalogLoading}
+              catalogError={tagCatalogError}
+              onRetryCatalog={loadTagCatalog}
               onSave={(payload) =>
                 mutate({ op: "create_project", payload }, "搬迁项目已创建")
               }
@@ -1259,6 +1278,11 @@ export function WorkbenchV2({
               mode="project"
               project={selected}
               detail={detail?.detail ?? null}
+              initialTagIds={detail?.tagIds ?? selected.tagIds ?? []}
+              catalog={tagCatalog}
+              catalogLoading={tagCatalogLoading}
+              catalogError={tagCatalogError}
+              onRetryCatalog={loadTagCatalog}
               onSave={(payload) =>
                 mutate(updateProjectRequest(payload), "项目资料已更新")
               }
@@ -1268,6 +1292,11 @@ export function WorkbenchV2({
               mode="entry"
               project={selected}
               detail={detail?.detail ?? null}
+              initialTagIds={detail?.tagIds ?? selected.tagIds ?? []}
+              catalog={tagCatalog}
+              catalogLoading={tagCatalogLoading}
+              catalogError={tagCatalogError}
+              onRetryCatalog={loadTagCatalog}
               onSave={(payload) =>
                 mutate(updateProjectRequest(payload), "进单与合同资料已更正")
               }
@@ -1395,7 +1424,9 @@ export function WorkbenchV2({
               }
             />
           ) : layer.kind === "report" ? (
-            <ReportPanelV2 />
+            <ReportPanelV2 catalog={tagCatalog} catalogLoading={tagCatalogLoading} catalogError={tagCatalogError} onRetryCatalog={loadTagCatalog} />
+          ) : layer.kind === "tags" ? (
+            <TagLibraryPanel catalog={tagCatalog} loading={tagCatalogLoading} error={tagCatalogError} onRefresh={loadTagCatalog} />
           ) : layer.kind === "history" ? (
             <HistoryBrowserV2 onRevision={(next) => { revision.current = Math.max(revision.current, next); }} onDelete={(request, success) => deleteRecord(request, success, false)} />
           ) : layer.kind === "reminder-all" ? (
@@ -1584,6 +1615,7 @@ function ProjectContext({
             <span className="tag warning">损坏/维修 {project.nonBlocking.repairs}</span>
           )}
         </div>
+        <GroupedTags groups={detail?.groupedTags ?? project.groupedTags} />
         <div className="status-adjust">
           <label htmlFor="context-status-v2">人工调整主状态</label>
           <select id="context-status-v2" defaultValue={project.status}>
@@ -1746,6 +1778,7 @@ function ProjectDetails({
           </div>
         )}
       </div>
+      <GroupedTags groups={detail?.groupedTags ?? project?.groupedTags} />
       {project && (
         <div className="tabbar">
           <div role="tablist" aria-label="项目详情">
@@ -3371,6 +3404,110 @@ function DataRows({
   );
 }
 
+type TagCatalogProps = {
+  catalog: ProjectTagCatalogDto | null;
+  catalogLoading: boolean;
+  catalogError: string;
+  onRetryCatalog: () => Promise<void>;
+};
+
+function validCatalogTagIds(catalog: ProjectTagCatalogDto, selected: readonly string[]): string[] {
+  const selectedSet = new Set(selected);
+  return catalog.groups.flatMap((group) => group.tags.map((tag) => tag.id)).filter((tagId) => selectedSet.has(tagId));
+}
+
+function sameStringList(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function GroupedTagPicker({
+  catalog,
+  loading,
+  error,
+  selected,
+  onChange,
+  onRetry,
+  legend = "项目分类标签",
+}: {
+  catalog: ProjectTagCatalogDto | null;
+  loading: boolean;
+  error: string;
+  selected: readonly string[];
+  onChange: (tagIds: string[]) => void;
+  onRetry: () => void;
+  legend?: string;
+}): JSX.Element {
+  const selectedSet = new Set(selected);
+  function toggle(tagId: string): void {
+    onChange(selectedSet.has(tagId) ? selected.filter((id) => id !== tagId) : [...selected, tagId]);
+  }
+  return (
+    <fieldset className="tag-picker full">
+      <legend>{legend}</legend>
+      <p>可在同一组或不同组中多选；分类不会改变项目主状态。</p>
+      {loading ? <div className="tag-catalog-state" role="status">正在读取项目分类标签…</div>
+        : error ? <div className="inline-error" role="alert">{error}<button className="text-action" type="button" onClick={onRetry}>重试</button></div>
+          : !catalog?.groups.length ? <div className="tag-catalog-state">标签库暂无内容，请先到“项目分类标签库”创建分组和标签。</div>
+            : <div className="tag-picker-groups">{catalog.groups.map((group) => (
+              <fieldset key={group.id} className="tag-picker-group">
+                <legend>{group.name}</legend>
+                {group.tags.length ? <div className="tag-options">{group.tags.map((tag) => (
+                  <label key={tag.id} className={selectedSet.has(tag.id) ? "selected" : ""}>
+                    <input type="checkbox" name="tagIds" value={tag.id} checked={selectedSet.has(tag.id)} onChange={() => toggle(tag.id)} />
+                    <span>{tag.name}</span>
+                  </label>
+                ))}</div> : <span className="tag-group-empty">暂无标签</span>}
+              </fieldset>
+            ))}</div>}
+    </fieldset>
+  );
+}
+
+function GroupedTags({ groups, compact = false }: { groups?: readonly ProjectTagGroupSummaryDto[]; compact?: boolean }): JSX.Element | null {
+  if (!groups?.length) return null;
+  return <div className={`project-tags ${compact ? "compact" : ""}`} aria-label="项目分类标签">
+    {groups.map((group) => <div className="project-tag-group" key={group.groupId}>
+      <span>{group.groupName}</span>
+      <div>{group.tagNames.map((name, index) => <b key={group.tagIds[index] ?? name}>{name}</b>)}</div>
+    </div>)}
+  </div>;
+}
+
+function TagLibraryPanel({ catalog, loading, error, onRefresh }: { catalog: ProjectTagCatalogDto | null; loading: boolean; error: string; onRefresh: () => Promise<void> }): JSX.Element {
+  const [busy, setBusy] = useState<"group" | "tag" | "">("");
+  const [mutationError, setMutationError] = useState("");
+  const [notice, setNotice] = useState("");
+  async function create(event: FormEvent<HTMLFormElement>, command: "create_group" | "create_tag"): Promise<void> {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const name = String(data.get("name") ?? "").trim();
+    const groupId = String(data.get("groupId") ?? "");
+    setBusy(command === "create_group" ? "group" : "tag"); setMutationError(""); setNotice("");
+    try {
+      const api = bridge();
+      if (!api?.v2TagMutate) throw new Error("当前环境暂不支持维护标签库");
+      await api.v2TagMutate(command === "create_group" ? { command, payload: { name } } : { command, payload: { groupId, name } });
+      form.reset();
+      await onRefresh();
+      setNotice(command === "create_group" ? "标签分组已创建" : "组内标签已创建，可供全部项目选择");
+    } catch (cause) { setMutationError(messageOf(cause)); }
+    finally { setBusy(""); }
+  }
+  return <div className="tag-library">
+    <section className="tag-library-intro"><p className="overline">全局分类</p><h3>维护所有项目共用的分类标签</h3><p>创建分组及组内标签，供所有搬迁项目复用。</p></section>
+    <div className="tag-library-create">
+      <form onSubmit={(event) => void create(event, "create_group")}><h4>新建分组</h4><div className="field"><label htmlFor="tag-group-name">分组名称 <b>必填</b></label><input id="tag-group-name" name="name" placeholder="例如：项目优先级" required /></div><button className="button primary" disabled={Boolean(busy)}>{busy === "group" ? "正在创建…" : "创建分组"}</button></form>
+      <form onSubmit={(event) => void create(event, "create_tag")}><h4>添加组内标签</h4><Select name="groupId" label="所属分组" required defaultValue="" options={[["", "请选择分组"], ...(catalog?.groups.map((group) => [group.id, group.name] as [string, string]) ?? [])]} /><div className="field"><label htmlFor="tag-item-name">标签名称 <b>必填</b></label><input id="tag-item-name" name="name" placeholder="例如：重点跟进" required /></div><button className="button primary" disabled={Boolean(busy) || !catalog?.groups.length}>{busy === "tag" ? "正在添加…" : "添加标签"}</button></form>
+    </div>
+    {notice && <div className="inline-success" role="status">{notice}</div>}
+    {(error || mutationError) && <div className="inline-error" role="alert">{mutationError || error}<button className="text-action" type="button" onClick={() => void onRefresh()}>重试读取</button></div>}
+    <section className="tag-library-catalog" aria-busy={loading}><div className="report-section-head"><div><p className="overline">当前标签库</p><h3>{catalog?.groups.length ?? 0} 个分组</h3></div></div>
+      {loading ? <div className="tag-catalog-state" role="status">正在读取标签库…</div> : !catalog?.groups.length ? <Empty title="还没有标签分组" copy="先创建分组，再向分组中添加标签。" /> : <div className="tag-library-groups">{catalog.groups.map((group) => <article key={group.id}><h4>{group.name}</h4>{group.tags.length ? <div className="tag-library-tags">{group.tags.map((tag) => <span key={tag.id}>{tag.name}</span>)}</div> : <p>暂无标签，可在上方添加。</p>}</article>)}</div>}
+    </section>
+  </div>;
+}
+
 function ProjectRegionSelect({
   value,
   legacy = false,
@@ -3397,16 +3534,24 @@ function ProjectEditForm({
   mode,
   project,
   detail,
+  initialTagIds,
+  catalog,
+  catalogLoading,
+  catalogError,
+  onRetryCatalog,
   onSave,
-}: {
+}: TagCatalogProps & {
   mode: "project" | "entry";
   project: WorkbenchProjectRow;
   detail: NonNullable<WorkbenchV2ProjectDetailDto["detail"]> | null;
+  initialTagIds: readonly string[];
   onSave: (payload: ProjectUpdatePayload) => Promise<void>;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [region, setRegion] = useState(project.region ?? "");
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([...initialTagIds]);
   const nullable = (data: FormData, name: string): string | null => {
     const value = String(data.get(name) ?? "").trim();
     return value || null;
@@ -3415,41 +3560,55 @@ function ProjectEditForm({
     event.preventDefault();
     if (busy) return;
     const data = new FormData(event.currentTarget);
-    setBusy(true);
     setError("");
-    try {
-      if (mode === "project") {
-        await onSave({
-          projectId: project.id,
-          customerName: String(data.get("customerName") ?? "").trim(),
-          ...(!project.regionNeedsAdjustment || region !== project.region ? { region: String(data.get("region") ?? "").trim() } : {}),
-          contractStartDate: nullable(data, "contractStartDate"),
-          contractEndDate: nullable(data, "contractEndDate"),
-          oldSiteContact: nullable(data, "oldSiteContact"),
-          newSiteContact: nullable(data, "newSiteContact"),
-          oldSiteAddress: nullable(data, "oldSiteAddress"),
-          newSiteAddress: nullable(data, "newSiteAddress"),
-          plannedVisitAt: nullable(data, "plannedVisitAt"),
-          plannedTransportAt: nullable(data, "plannedTransportAt"),
-          plannedInstallAt: nullable(data, "plannedInstallAt"),
-          siteConfirmed: data.has("siteConfirmed"),
-          projectNote: nullable(data, "projectNote"),
-          temporaryStorageAddress: nullable(data, "temporaryStorageAddress"),
-          isTemporaryStorage: data.get("isTemporaryStorage") === "" ? null : data.get("isTemporaryStorage") === "true",
-          temporaryInstrumentCount: nullable(data, "temporaryInstrumentCount") === null ? null : Number(nullable(data, "temporaryInstrumentCount")),
-          temporaryInstrumentName: nullable(data, "temporaryInstrumentName"),
-          temporaryInstrumentModel: nullable(data, "temporaryInstrumentModel"),
-          temporaryHasUps: data.get("temporaryHasUps") === "" ? null : data.get("temporaryHasUps") === "true",
-        });
-      } else {
-        await onSave({
-          projectId: project.id,
-          ecc: nullable(data, "ecc"),
-          entryAt: nullable(data, "entryAt"),
-          contractUsdTaxAmount: nullable(data, "contractUsdTaxAmount"),
-          finalConfirmableAmount: nullable(data, "finalConfirmableAmount"),
-        });
+    setNotice("");
+    const patch: ProjectUpdatePayload = { projectId: project.id };
+    function addIfChanged<K extends keyof ProjectUpdatePayload>(
+      key: K,
+      current: ProjectUpdatePayload[K],
+      initial: ProjectUpdatePayload[K],
+    ): void {
+      if (current !== initial) patch[key] = current;
+    }
+    if (mode === "project") {
+      const temporaryInstrumentCountText = nullable(data, "temporaryInstrumentCount");
+      addIfChanged("customerName", String(data.get("customerName") ?? "").trim(), project.customerName.trim());
+      addIfChanged("region", String(data.get("region") ?? "").trim(), project.region ?? "");
+      addIfChanged("contractStartDate", nullable(data, "contractStartDate"), detail?.contractStartDate ?? null);
+      addIfChanged("contractEndDate", nullable(data, "contractEndDate"), detail?.contractEndDate ?? null);
+      addIfChanged("oldSiteContact", nullable(data, "oldSiteContact"), detail?.oldSiteContact ?? null);
+      addIfChanged("newSiteContact", nullable(data, "newSiteContact"), detail?.newSiteContact ?? null);
+      addIfChanged("oldSiteAddress", nullable(data, "oldSiteAddress"), detail?.oldSiteAddress ?? null);
+      addIfChanged("newSiteAddress", nullable(data, "newSiteAddress"), detail?.newSiteAddress ?? null);
+      addIfChanged("plannedVisitAt", nullable(data, "plannedVisitAt"), detail?.planVisitAt ?? null);
+      addIfChanged("plannedTransportAt", nullable(data, "plannedTransportAt"), detail?.planTransportAt ?? null);
+      addIfChanged("plannedInstallAt", nullable(data, "plannedInstallAt"), detail?.plannedInstallAt ?? null);
+      addIfChanged("siteConfirmed", data.has("siteConfirmed"), detail?.siteConfirmed ?? false);
+      addIfChanged("projectNote", nullable(data, "projectNote"), detail?.projectNote ?? null);
+      addIfChanged("temporaryStorageAddress", nullable(data, "temporaryStorageAddress"), detail?.temporaryStorageAddress ?? null);
+      addIfChanged("isTemporaryStorage", data.get("isTemporaryStorage") === "" ? null : data.get("isTemporaryStorage") === "true", detail?.isTemporaryStorage ?? null);
+      addIfChanged("temporaryInstrumentCount", temporaryInstrumentCountText === null ? null : Number(temporaryInstrumentCountText), detail?.temporaryInstrumentCount ?? null);
+      addIfChanged("temporaryInstrumentName", nullable(data, "temporaryInstrumentName"), detail?.temporaryInstrumentName ?? null);
+      addIfChanged("temporaryInstrumentModel", nullable(data, "temporaryInstrumentModel"), detail?.temporaryInstrumentModel ?? null);
+      addIfChanged("temporaryHasUps", data.get("temporaryHasUps") === "" ? null : data.get("temporaryHasUps") === "true", detail?.temporaryHasUps ?? null);
+      if (catalog) {
+        const currentTagIds = validCatalogTagIds(catalog, selectedTagIds);
+        const initialCatalogTagIds = validCatalogTagIds(catalog, initialTagIds);
+        if (!sameStringList(currentTagIds, initialCatalogTagIds)) patch.tagIds = currentTagIds;
       }
+    } else {
+      addIfChanged("ecc", nullable(data, "ecc"), project.ecc);
+      addIfChanged("entryAt", nullable(data, "entryAt"), businessDate(project.entryAt) || null);
+      addIfChanged("contractUsdTaxAmount", nullable(data, "contractUsdTaxAmount"), project.contractAmount);
+      addIfChanged("finalConfirmableAmount", nullable(data, "finalConfirmableAmount"), project.finalAmount);
+    }
+    if (Object.keys(patch).length === 1) {
+      setNotice("没有需要保存的更改。");
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSave(patch);
     } catch (cause) {
       setError(messageOf(cause));
     } finally {
@@ -3458,7 +3617,7 @@ function ProjectEditForm({
   }
   if (mode === "entry") {
     return (
-      <form className="project-edit-form" onSubmit={(event) => void submit(event)}>
+      <form className="project-edit-form" onSubmit={(event) => void submit(event)} onChange={() => setNotice("")}>
         <p className="notice">
           仅用于更正已经正式进单项目的识别与金额资料。合同金额是当前合同值；进单金额快照保留正式进单当时的口径，不会因本次更正自动改写。
         </p>
@@ -3479,6 +3638,7 @@ function ProjectEditForm({
           </fieldset>
         </div>
         {error && <div className="inline-error" role="alert">{error}</div>}
+        {notice && <p className="notice" role="status">{notice}</p>}
         <div className="form-footer">
           <span>不会修改仪器、序列号或服务单资料。</span>
           <button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存更正"}</button>
@@ -3487,7 +3647,7 @@ function ProjectEditForm({
     );
   }
   return (
-    <form className="project-edit-form" onSubmit={(event) => void submit(event)}>
+    <form className="project-edit-form" onSubmit={(event) => void submit(event)} onChange={() => setNotice("")}>
       <p className="notice">维护项目级资料；暂定范围不会生成仪器记录，可后补。逐台仪器、序列号和服务单请在各自业务入口维护。</p>
       <div className="edit-form-sections">
         <fieldset className="edit-form-section">
@@ -3532,8 +3692,10 @@ function ProjectEditForm({
             </label>
           </div>
         </fieldset>
+        <GroupedTagPicker catalog={catalog} loading={catalogLoading} error={catalogError} selected={selectedTagIds} onChange={setSelectedTagIds} onRetry={() => void onRetryCatalog()} />
       </div>
       {error && <div className="inline-error" role="alert">{error}</div>}
+      {notice && <p className="notice" role="status">{notice}</p>}
       <div className="form-footer">
         <span>保存后刷新当前项目总览。</span>
         <button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存项目资料"}</button>
@@ -3542,11 +3704,12 @@ function ProjectEditForm({
   );
 }
 
-function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWizardPayload) => Promise<void> }): JSX.Element {
+function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, onRetryCatalog, onSave }: TagCatalogProps & { onSave: (payload: ProjectWizardPayload) => Promise<void> }): JSX.Element {
   const [intent, setIntent] = useState<ProjectWizardPayload["intent"]>("draft");
   const [region, setRegion] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [summary, setSummary] = useState({
     customerName: "", oldSiteAddress: "", newSiteAddress: "",
     temporaryInstrumentName: "", instrumentCount: "", temporaryInstrumentModel: "", temporaryHasUps: "",
@@ -3604,6 +3767,7 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
         planVisitAt: value("planVisitAt"), planTransportAt: value("planTransportAt"), plannedInstallAt: value("plannedInstallAt"), actualInstallDoneAt: value("actualInstallDoneAt"),
         siteConfirmed: data.get("siteConfirmed") === "on",
         managerApproved: intent === "pre_entry_execution" ? value("managerApproved") === "true" : undefined,
+        ...(catalog ? { tagIds: validCatalogTagIds(catalog, selectedTagIds) } : {}),
       });
     } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); }
   }
@@ -3620,8 +3784,8 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
         <Field name="oldSiteContact" label="旧址联系人" optional /><Field name="newSiteContact" label="新址联系人" optional />
         <Field name="contractStartDate" label="合同开始日期" type="date" optional /><Field name="contractEndDate" label="合同截止日期" type="date" optional />
         <TextArea name="projectNote" label="项目备注" optional />
-        <Field name="entryAt" label="进单日期" type="date" optional help="正式进单留空时由系统按当天日期处理。" />
-        {intent === "formal" && <div className="formal-intent-fields full" role="group" aria-label="正式进单资料"><div className="wizard-section-head"><div><h3>正式进单资料</h3><p>仅在正式进单时保存 ECC 和合同金额；进单日期留空时由系统按当天日期处理。</p></div><span>正式进单专属</span></div><div className="form-grid"><Field name="ecc" label="ECC" required /><Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="可留空后补；新建时不录最终可确认金额。" /></div>{contractAmountIsZero && <div className="inline-warning" role="status">合同金额为 0 时，正式进单须另填大于 0 的最终可确认金额。</div>}</div>}
+        <Field name="entryAt" label="进单日期" type="date" optional disabled={intent !== "formal"} help={intent === "formal" ? "可留空，系统将使用当天日期。" : "仅正式进单时可填写；切换为正式进单后启用。"} />
+        {intent === "formal" && <div className="formal-intent-fields full" role="group" aria-label="正式进单资料"><div className="wizard-section-head"><div><h3>正式进单资料</h3><p>仅在正式进单时保存 ECC 和合同金额；进单日期留空时由系统按当天日期处理。</p></div><span>正式进单专属</span></div><div className="form-grid"><Field name="ecc" label="ECC" required /><Field name="contractAmount" label="合同 USD 含税金额" type="number" min="0" step="any" optional help="可留空后补；新建时不录最终可确认金额。" /></div>{contractAmountIsZero && <div className="inline-warning" role="status">合同金额为 0 仍可正式进单；最终可确认金额可暂空，请在首次登记掉票前补录。</div>}</div>}
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>搬迁范围（均可后补）</legend><div className="form-grid">
         <Field name="oldSiteAddress" label="旧址地址" optional /><Field name="newSiteAddress" label="新址地址" optional />
@@ -3637,6 +3801,7 @@ function ProjectCreateSinglePageForm({ onSave }: { onSave: (payload: ProjectWiza
         <Select name="isTemporaryStorage" label="是否暂存" defaultValue="" options={[["", "未填写"], ["false", "否"], ["true", "是"]]} />
         <label className="confirm-check full"><input name="siteConfirmed" type="checkbox" />场地已确认</label>
       </div></fieldset>
+      <GroupedTagPicker catalog={catalog} loading={catalogLoading} error={catalogError} selected={selectedTagIds} onChange={setSelectedTagIds} onRetry={() => void onRetryCatalog()} />
       <fieldset className="edit-form-section"><legend>保存意图</legend><div className="form-grid">
         <div className="intent-choices full" role="radiogroup" aria-label="保存意图">{intents.map(([value,label,copy]) => <label key={value} className={intent === value ? "selected" : ""}><input type="radio" name="projectIntent" value={value} checked={intent === value} onChange={() => { setIntent(value); setError(""); }} /><strong>{label}</strong><span>{copy}</span></label>)}</div>
         {intent === "pre_entry_execution" && <div className="approval-fields full" role="group" aria-label="未进单先执行批复"><Select name="managerApproved" label="是否批复" required defaultValue="" options={[["", "请选择"], ["true", "是"], ["false", "否"]]} help="只记录是否批复，不收集原因或缺失资料。" /></div>}
@@ -3941,7 +4106,7 @@ function DataCleanPanel({ onComplete }: { onComplete: () => Promise<void> }): JS
     {error && <div className="inline-error clean-recheck-error" role="alert">{error}</div>}</div>;
 }
 
-function ReportPanelV2(): JSX.Element {
+function ReportPanelV2({ catalog, catalogLoading, catalogError, onRetryCatalog }: TagCatalogProps): JSX.Element {
   const [draftFilter, setDraftFilter] = useState<ReportFilterDto>({
     monthFrom: "",
     monthTo: "",
@@ -3964,7 +4129,7 @@ function ReportPanelV2(): JSX.Element {
       if (!api) throw new Error("当前环境未连接主进程");
       const nextReport = await api.buildReport(draftFilter);
       setReport(nextReport);
-      setAppliedFilter({ ...draftFilter });
+      setAppliedFilter({ ...draftFilter, ...(draftFilter.tagIds ? { tagIds: [...draftFilter.tagIds] } : {}) });
       setDetails([]);
     } catch (cause) {
       setError(messageOf(cause));
@@ -4030,6 +4195,10 @@ function ReportPanelV2(): JSX.Element {
           onChange={(event) => setDraftFilter((old) => ({ ...old, transportCompany: event.target.value || null }))} />
         <Field name="reportEngineer" label="工程师" placeholder="全部工程师" help="留空表示全部工程师" value={draftFilter.engineer ?? ""}
           onChange={(event) => setDraftFilter((old) => ({ ...old, engineer: event.target.value || null }))} />
+        <div className="report-tag-filter full">
+          <GroupedTagPicker catalog={catalog} loading={catalogLoading} error={catalogError} selected={draftFilter.tagIds ?? []} onChange={(tagIds) => setDraftFilter((old) => ({ ...old, tagIds }))} onRetry={() => void onRetryCatalog()} legend="按项目分类标签筛选" />
+          <div className="report-tag-filter-footer"><span>{draftFilter.tagIds?.length ? `已选择 ${draftFilter.tagIds.length} 个标签，匹配任一标签` : "未选择标签，不限制报表结果"}</span><button className="text-action" type="button" disabled={!draftFilter.tagIds?.length} onClick={() => setDraftFilter((old) => ({ ...old, tagIds: [] }))}>清空标签筛选</button></div>
+        </div>
         <button className="button primary" disabled={Boolean(busy)}>{busy === "build" ? "正在计算…" : "实时计算报表"}</button>
       </form>
       {error && (
@@ -4298,6 +4467,7 @@ function layerTitle(layer: LayerState): string {
   if (layer.kind === "report") return "运营报表";
   if (layer.kind === "history") return "浏览往期与全部记录";
   if (layer.kind === "clean") return "清理全部业务数据";
+  if (layer.kind === "tags") return "项目分类标签库";
   if (layer.kind === "independent")
     return layer.module === "serial_address" ? "序列号地址更新" : "二维码申请";
   if (layer.kind === "invoice-edit") return "编辑掉票";
@@ -4322,6 +4492,7 @@ function layerDescription(
   if (layer.kind === "history") return "统一按类型、项目和日期查找业务记录";
   if (layer.kind === "reminder-all") return "按提醒日期查看全部项目与到期分类";
   if (layer.kind === "clean") return "先检查数量，再输入固定文本确认";
+  if (layer.kind === "tags") return "所有项目共用的分组与标签";
   if (layer.kind === "independent") return "独立模块 · 记录按页读取";
   if (layer.kind === "cancel") return "记录取消日期与原因（终态，不可恢复）";
   return project

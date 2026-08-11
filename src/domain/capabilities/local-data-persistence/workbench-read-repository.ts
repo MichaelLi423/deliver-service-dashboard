@@ -2,7 +2,7 @@ import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { formatCents } from '../../core/money';
 import { ValidationError } from '../../core/errors';
 import { assertValidBusinessDate, type BusinessDate } from '../../core/time';
-import type { ProjectStatus } from '../../../shared/ipc';
+import type { ProjectStatus, ProjectTagGroupSummaryDto } from '../../../shared/ipc';
 import { isProjectRegion } from '../../../shared/project-fields';
 import type {
   WorkbenchProjectRow,
@@ -430,6 +430,10 @@ export class WorkbenchReadRepository {
   // ---- 单项目详情 + 计数 ----
 
   projectDetail(projectId: string): WorkbenchV2ProjectDetailDto {
+    return this.withReadSnapshot(() => this.projectDetailInSnapshot(projectId));
+  }
+
+  private projectDetailInSnapshot(projectId: string): WorkbenchV2ProjectDetailDto {
     const row = prepareReadBigInt(
       this.db,
       `${PROJECT_BASE_SELECT} WHERE p.id = ? LIMIT 1`,
@@ -445,11 +449,14 @@ export class WorkbenchReadRepository {
 
     const counts = this.countsFor([String(row.id)]);
     const pendingShipTo = this.pendingShipToFor([this.customerNameOf(row)]);
-    const project = this.toProjectRow(row, counts.get(String(row.id)), pendingShipTo.get(this.customerNameOf(row)) ?? 0);
+    const tagSummary = this.tagSummaryFor([String(row.id)]).get(String(row.id));
+    const project = this.toProjectRow(row, counts.get(String(row.id)), pendingShipTo.get(this.customerNameOf(row)) ?? 0, tagSummary);
 
     return {
       businessRevision: readBusinessRevision(this.db),
       project,
+      tagIds: tagSummary?.tagIds ?? [],
+      groupedTags: tagSummary?.groupedTags ?? [],
       detail: {
         managerApprovalReason: nullString(row.manager_approval_reason),
         managerApprovalMissing: nullString(row.manager_approval_missing),
@@ -487,6 +494,10 @@ export class WorkbenchReadRepository {
   // ---- 单当前 tab 子记录分页 ----
 
   sectionPage(request: WorkbenchV2SectionPageRequest): WorkbenchV2SectionPageDto {
+    return this.withReadSnapshot(() => this.sectionPageInSnapshot(request));
+  }
+
+  private sectionPageInSnapshot(request: WorkbenchV2SectionPageRequest): WorkbenchV2SectionPageDto {
     const limit = pageLimit(request.limit);
     const spec = SECTION_SPECS[request.kind];
     // 往期/时间筛选：行查询用表别名、count 查询用表名（SQLite 不允许引用已别名表的原名）。
@@ -533,6 +544,10 @@ export class WorkbenchReadRepository {
   // ---- 独立模块分页 ----
 
   independentPage(request: WorkbenchV2IndependentPageRequest): WorkbenchV2IndependentPageDto {
+    return this.withReadSnapshot(() => this.independentPageInSnapshot(request));
+  }
+
+  private independentPageInSnapshot(request: WorkbenchV2IndependentPageRequest): WorkbenchV2IndependentPageDto {
     const limit = pageLimit(request.limit);
     const query = request.query?.trim();
 
@@ -646,6 +661,10 @@ export class WorkbenchReadRepository {
   // ---- lookup 分页 ----
 
   lookupPage(request: WorkbenchV2LookupPageRequest): WorkbenchV2LookupPageDto {
+    return this.withReadSnapshot(() => this.lookupPageInSnapshot(request));
+  }
+
+  private lookupPageInSnapshot(request: WorkbenchV2LookupPageRequest): WorkbenchV2LookupPageDto {
     const limit = pageLimit(request.limit);
     const query = request.query?.trim();
 
@@ -749,6 +768,10 @@ export class WorkbenchReadRepository {
   // ---- 跨项目历史有界分页（ora-1：#6） ----
 
   historyPage(request: WorkbenchV2HistoryPageRequest): WorkbenchV2HistoryPageDto {
+    return this.withReadSnapshot(() => this.historyPageInSnapshot(request));
+  }
+
+  private historyPageInSnapshot(request: WorkbenchV2HistoryPageRequest): WorkbenchV2HistoryPageDto {
     const limit = pageLimit(request.limit);
     const spec = HISTORY_SPECS[request.kind];
     // 往期/时间筛选：按各 kind 业务日期表达式（created_at 类用 substr 取日期部分，
@@ -800,6 +823,10 @@ export class WorkbenchReadRepository {
   // 字符串并追加 id 稳定 tie-breaker；与泳道（7.6）排序独立。
 
   reminderPage(request: WorkbenchV2ReminderPageRequest): WorkbenchV2ReminderPageDto {
+    return this.withReadSnapshot(() => this.reminderPageInSnapshot(request));
+  }
+
+  private reminderPageInSnapshot(request: WorkbenchV2ReminderPageRequest): WorkbenchV2ReminderPageDto {
     const limit = pageLimit(request.limit);
     const sort = request.sort === 'asc' ? 'asc' : 'desc';
     const orderDir = sort === 'asc' ? 'ASC' : 'DESC';
@@ -855,6 +882,10 @@ export class WorkbenchReadRepository {
   //    不得重算或改变该集合。本泳道升序不影响完整提醒视图默认降序（7.3）。
 
   reminderLanes(request: WorkbenchV2ReminderLanesRequest): WorkbenchV2ReminderLanesDto {
+    return this.withReadSnapshot(() => this.reminderLanesInSnapshot(request));
+  }
+
+  private reminderLanesInSnapshot(request: WorkbenchV2ReminderLanesRequest): WorkbenchV2ReminderLanesDto {
     const laneLimit = pageLimit(request.limit);
     const today = this.options.today;
     const windowDays = this.options.windowDays;
@@ -1198,7 +1229,7 @@ export class WorkbenchReadRepository {
     return row.customer_name === null || row.customer_name === undefined ? '客户名称待补' : String(row.customer_name);
   }
 
-  private toProjectRow(row: Row, counts: Counts | undefined, pendingShipTo: number): WorkbenchProjectRow {
+  private toProjectRow(row: Row, counts: Counts | undefined, pendingShipTo: number, tags?: { tagIds: readonly string[]; groupedTags: readonly ProjectTagGroupSummaryDto[] }): WorkbenchProjectRow {
     const c = counts ?? EMPTY_COUNTS;
     return {
       id: String(row.id),
@@ -1236,6 +1267,8 @@ export class WorkbenchReadRepository {
         qrUnmarked: c.qrUnmarked,
         repairs: c.repairsPending,
       },
+      tagIds: tags?.tagIds ?? [],
+      groupedTags: tags?.groupedTags ?? [],
       updatedAt: String(row.updated_at),
     };
   }
@@ -1322,9 +1355,27 @@ export class WorkbenchReadRepository {
     const projectIds = rows.map((r) => String(r.id));
     const counts = this.countsFor(projectIds);
     const pendingShipTo = this.pendingShipToFor(rows.map((r) => this.customerNameOf(r)));
+    const tags = this.tagSummaryFor(projectIds);
     return rows.map((r) =>
-      this.toProjectRow(r, counts.get(String(r.id)), pendingShipTo.get(this.customerNameOf(r)) ?? 0),
+      this.toProjectRow(r, counts.get(String(r.id)), pendingShipTo.get(this.customerNameOf(r)) ?? 0, tags.get(String(r.id))),
     );
+  }
+
+  /** 页内项目标签单次有界查询，按目录顺序聚合，避免项目行 N+1。 */
+  private tagSummaryFor(projectIds: string[]): Map<string, { tagIds: readonly string[]; groupedTags: readonly ProjectTagGroupSummaryDto[] }> {
+    const result = new Map<string, { tagIds: string[]; groupedTags: ProjectTagGroupSummaryDto[] }>();
+    if (!projectIds.length) return result;
+    const placeholders = projectIds.map(() => '?').join(',');
+    const rows = this.db.prepare(`SELECT a.project_id,g.id group_id,g.name group_name,d.id tag_id,d.name tag_name FROM project_tag_assignments a JOIN project_tag_definitions d ON d.id=a.tag_id JOIN project_tag_groups g ON g.id=d.group_id WHERE a.project_id IN (${placeholders}) ORDER BY a.project_id,g.sort_order,g.id,d.sort_order,d.id`).all(...projectIds) as Array<{project_id:string;group_id:string;group_name:string;tag_id:string;tag_name:string}>;
+    for (const row of rows) {
+      let entry = result.get(row.project_id);
+      if (!entry) { entry = { tagIds: [], groupedTags: [] }; result.set(row.project_id, entry); }
+      entry.tagIds.push(row.tag_id);
+      let group = entry.groupedTags.at(-1);
+      if (!group || group.groupId !== row.group_id) { group = { groupId: row.group_id, groupName: row.group_name, tagIds: [], tagNames: [] }; entry.groupedTags.push(group); }
+      (group.tagIds as string[]).push(row.tag_id); (group.tagNames as string[]).push(row.tag_name);
+    }
+    return result;
   }
 
   private qrTypesFor(requestIds: string[]): Map<string, readonly string[]> {
