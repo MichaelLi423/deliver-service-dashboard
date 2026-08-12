@@ -141,7 +141,7 @@ async function assertViewport(page: Page, width: 1024 | 1170 | 1190 | 1440, scre
   await page.screenshot({ path: screenshot, fullPage: true });
 }
 
-test('最新布局：主导航直接显示标签管理并打开现有标签库', async () => {
+test('最新布局：主导航直接显示标签库并打开现有标签库', async () => {
   const root = mkdtempSync(join(tmpdir(), 'rw-v2-tag-entry-'));
   const userData = join(root, 'user-data');
   let app: ElectronApplication | null = null;
@@ -149,10 +149,10 @@ test('最新布局：主导航直接显示标签管理并打开现有标签库',
     app = await electron.launch({ executablePath: executable, env: { ...process.env, WORKBENCH_E2E_USER_DATA_DIR: userData } });
     const page = await app.firstWindow();
     await initialize(page);
-    const tagManagement = page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '标签管理', exact: true });
-    await expect(tagManagement, '“标签管理”应直接显示在顶部主导航，无需打开“数据管理”').toBeVisible();
+    const tagManagement = page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '标签库', exact: true });
+    await expect(tagManagement, '“标签库”应直接显示在顶部主导航，无需打开“数据管理”').toBeVisible();
     await tagManagement.click();
-    await expect(page.getByRole('dialog', { name: '项目分类标签库' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '管理标签库' })).toBeVisible();
   } finally {
     await app?.close().catch(() => undefined);
     rmSync(root, { recursive: true, force: true });

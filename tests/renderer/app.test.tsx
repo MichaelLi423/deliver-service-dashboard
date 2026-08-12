@@ -173,14 +173,14 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.not.objectContaining({ limit: expect.anything() }));
   });
 
-  it('最新布局：顶部主导航直接显示标签管理并打开全局标签库', async () => {
+  it('最新布局：顶部主导航直接显示标签库并打开全局标签库', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     await screen.findByRole('heading', { name: /项目队列/ });
     const navigation = screen.getByRole('navigation', { name: '主导航' });
-    const tagManagement = within(navigation).getByRole('button', { name: '标签管理' });
+    const tagManagement = within(navigation).getByRole('button', { name: '标签库' });
     expect(tagManagement).toBeVisible();
     fireEvent.click(tagManagement);
-    const dialog = screen.getByRole('dialog', { name: '项目分类标签库' });
+    const dialog = screen.getByRole('dialog', { name: '管理标签库' });
     expect(await within(dialog).findByText('重点跟进')).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText(/分组名称/), { target: { value: '客户层级' } }); fireEvent.click(within(dialog).getByRole('button', { name: '创建分组' }));
     await waitFor(() => expect(api.v2TagMutate).toHaveBeenCalledWith({ command: 'create_group', payload: { name: '客户层级' } }));
@@ -251,12 +251,12 @@ describe('Oracle #10 bounded workbench renderer', () => {
       restoreFromBackup: vi.fn().mockImplementation(() => { restored = true; return Promise.resolve({ canceled: false, restored: true }); }),
     });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true }); vi.spyOn(window, 'confirm').mockReturnValue(true); render(<App />);
-    await screen.findByRole('region', { name: '客户 1' }); fireEvent.click(screen.getByRole('button', { name: '标签管理' }));
-    const oldLibrary = screen.getByRole('dialog', { name: '项目分类标签库' }); expect(await within(oldLibrary).findByText('旧目录标签')).toBeInTheDocument(); fireEvent.click(within(oldLibrary).getByRole('button', { name: '关闭' }));
+    await screen.findByRole('region', { name: '客户 1' }); fireEvent.click(screen.getByRole('button', { name: '标签库' }));
+    const oldLibrary = screen.getByRole('dialog', { name: '管理标签库' }); expect(await within(oldLibrary).findByText('旧目录标签')).toBeInTheDocument(); fireEvent.click(within(oldLibrary).getByRole('button', { name: '关闭' }));
     fireEvent.click(screen.getByRole('button', { name: '恢复备份' }));
     await waitFor(() => expect(api.v2TagCatalog).toHaveBeenCalledTimes(2));
-    await screen.findByRole('region', { name: '恢复客户' }); fireEvent.click(screen.getByRole('button', { name: '标签管理' }));
-    const library = screen.getByRole('dialog', { name: '项目分类标签库' }); expect(await within(library).findByText('恢复标签')).toBeInTheDocument(); expect(within(library).queryByText('旧目录标签')).not.toBeInTheDocument(); fireEvent.click(within(library).getByRole('button', { name: '关闭' }));
+    await screen.findByRole('region', { name: '恢复客户' }); fireEvent.click(screen.getByRole('button', { name: '标签库' }));
+    const library = screen.getByRole('dialog', { name: '管理标签库' }); expect(await within(library).findByText('恢复标签')).toBeInTheDocument(); expect(within(library).queryByText('旧目录标签')).not.toBeInTheDocument(); fireEvent.click(within(library).getByRole('button', { name: '关闭' }));
     fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
     const edit = screen.getByRole('dialog', { name: '编辑项目资料' }); expect(within(edit).getByRole('checkbox', { name: '恢复标签' })).toBeChecked(); fireEvent.change(within(edit).getByLabelText(/客户名称/), { target: { value: '恢复客户已核对' } }); fireEvent.click(within(edit).getByRole('button', { name: '保存项目资料' }));
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: { projectId: 'p-1', customerName: '恢复客户已核对' } }));
@@ -1429,5 +1429,142 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(within(invoiceTable).getByRole('button', { name: '撤销' })).toBeInTheDocument();
     expect(within(invoiceTable).queryByRole('button', { name: '删除' })).not.toBeInTheDocument();
     expect(within(within(invoiceTable).getAllByRole('row')[2]!).queryByRole('button', { name: /编辑|撤销|删除/ })).not.toBeInTheDocument();
+  });
+
+  describe('项目标签就近编辑', () => {
+    it('详情保持标签区域；无标签显示添加入口，已有标签显示编辑入口', async () => {
+      const api = mockApi();
+      Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+      render(<App />);
+      const detail = await screen.findByRole('region', { name: '客户 1' });
+      const tags = within(detail).getByRole('region', { name: '项目标签' });
+      expect(tags).toHaveTextContent('项目类型');
+      expect(within(tags).getByRole('button', { name: '编辑客户 1的项目标签' })).toBeInTheDocument();
+
+      fireEvent.click(within(screen.getByRole('grid', { name: '项目队列' })).getByRole('row', { name: /^客户 2 / }));
+      const customerTwoDetail = await screen.findByRole('region', { name: '客户 2' });
+      const emptyTags = await within(customerTwoDetail).findByRole('region', { name: '项目标签' });
+      expect(emptyTags).toHaveTextContent('尚未添加项目标签');
+      expect(within(emptyTags).getByRole('button', { name: '添加客户 2的项目标签' })).toBeInTheDocument();
+    });
+
+    it('队列标签入口固化行项目和草稿，不改变当前工作区；两个入口共享编辑器', async () => {
+      const api = mockApi();
+      Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+      render(<App />);
+      const workspace = await screen.findByRole('region', { name: '项目工作区' });
+      const queue = screen.getByRole('grid', { name: '项目队列' });
+      const trigger = within(queue).getByRole('button', { name: '编辑客户 2的项目标签' });
+      fireEvent.click(trigger);
+      const dialog = screen.getByRole('dialog', { name: '编辑项目标签' });
+      expect(dialog).toHaveTextContent('客户 2');
+      expect(within(dialog).getByRole('checkbox', { name: '搬迁' })).not.toBeChecked();
+      expect(workspace).toHaveTextContent('客户 1');
+      expect(within(queue).getByRole('row', { name: /^客户 1 / })).toHaveAttribute('aria-selected', 'true');
+      fireEvent.click(within(dialog).getByRole('checkbox', { name: 'PM' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: '保存标签' }));
+      await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: { projectId: 'p-2', tagIds: ['tag-pm'] } }));
+      expect(api.v2ProjectDetail).not.toHaveBeenCalledWith('p-2');
+
+      const detailTrigger = within(screen.getByRole('region', { name: '客户 1' })).getByRole('button', { name: '编辑客户 1的项目标签' });
+      fireEvent.click(detailTrigger);
+      expect(screen.getByRole('dialog', { name: '编辑项目标签' })).toHaveTextContent('客户 1');
+    });
+
+    it('标签保存只发送 tagIds，支持清空、改回原值和选中目标的详情刷新', async () => {
+      const api = mockApi();
+      Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+      render(<App />);
+      const detail = await screen.findByRole('region', { name: '客户 1' });
+      const trigger = within(detail).getByRole('button', { name: '编辑客户 1的项目标签' });
+      fireEvent.click(trigger);
+      const dialog = screen.getByRole('dialog', { name: '编辑项目标签' });
+      const move = within(dialog).getByRole('checkbox', { name: '搬迁' });
+      const icpms = within(dialog).getByRole('checkbox', { name: 'ICPMS' });
+      const save = within(dialog).getByRole('button', { name: '保存标签' });
+      expect(save).toBeDisabled();
+      fireEvent.click(move);
+      expect(save).not.toBeDisabled();
+      fireEvent.click(move);
+      expect(save).toBeDisabled();
+      fireEvent.click(move);
+      fireEvent.click(icpms);
+      fireEvent.click(save);
+      await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: { projectId: 'p-1', tagIds: [] } }));
+      await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledTimes(2));
+    });
+
+    it('目录加载、空和失败时阻止保存，并保持稳定的标签编辑结构', async () => {
+      let rejectCatalog!: (reason?: unknown) => void;
+      const pendingCatalog = new Promise<ProjectTagCatalogDto>((_, reject) => { rejectCatalog = reject; });
+      const api = mockApi({ v2TagCatalog: vi.fn().mockReturnValue(pendingCatalog) });
+      Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+      render(<App />);
+      const detail = await screen.findByRole('region', { name: '客户 1' });
+      fireEvent.click(within(detail).getByRole('button', { name: '编辑客户 1的项目标签' }));
+      const dialog = screen.getByRole('dialog', { name: '编辑项目标签' });
+      expect(within(dialog).getByRole('status')).toHaveTextContent('正在读取项目分类标签');
+      expect(within(dialog).getByRole('button', { name: '保存标签' })).toBeDisabled();
+      expect(dialog.querySelector('.project-tag-edit-scroll')).toBeInTheDocument();
+      rejectCatalog(new Error('目录读取失败'));
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('目录读取失败');
+      expect(within(dialog).getByRole('button', { name: '保存标签' })).toBeDisabled();
+    });
+
+    it('空目录给出管理指引；干净关闭归还焦点，脏 Escape 请求放弃确认', async () => {
+      const emptyCatalog = { ...tagCatalog, groups: [] };
+      const api = mockApi({ v2TagCatalog: vi.fn().mockResolvedValue(emptyCatalog) });
+      Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+      render(<App />);
+      const detail = await screen.findByRole('region', { name: '客户 1' });
+      const trigger = within(detail).getByRole('button', { name: '编辑客户 1的项目标签' });
+      fireEvent.click(trigger);
+      const dialog = screen.getByRole('dialog', { name: '编辑项目标签' });
+      expect(await within(dialog).findByText('标签库暂无内容。请取消后从顶部“标签库”进入“管理标签库”。')).toBeInTheDocument();
+      const cancel = within(dialog).getByRole('button', { name: '取消' });
+      await waitFor(() => expect(cancel).toHaveFocus());
+      fireEvent.keyDown(document, { key: 'Escape' });
+      await waitFor(() => expect(trigger).toHaveFocus());
+
+      const normalApi = mockApi();
+      Object.defineProperty(window, 'workbench', { value: normalApi, configurable: true });
+      cleanup();
+      render(<App />);
+      const normalDetail = await screen.findByRole('region', { name: '客户 1' });
+      fireEvent.click(within(normalDetail).getByRole('button', { name: '编辑客户 1的项目标签' }));
+      const editable = screen.getByRole('dialog', { name: '编辑项目标签' });
+      fireEvent.click(within(editable).getByRole('checkbox', { name: '搬迁' }));
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(await screen.findByRole('alertdialog', { name: '放弃本次修改？' })).toBeInTheDocument();
+    });
+
+    it('写入失败保留草稿可重试；写入成功后的刷新失败关闭并提示且不重复写入', async () => {
+      let writes = 0;
+      let failRefresh = false;
+      const api = mockApi({
+        v2Mutate: vi.fn().mockImplementation(() => {
+          writes += 1;
+          return writes === 1
+            ? Promise.reject(new Error('保存失败'))
+            : Promise.resolve({ businessRevision: 2, invalidated: ['projects', 'project:p-1'], changed: { projectId: 'p-1' } });
+        }),
+        v2ProjectPage: vi.fn().mockImplementation(() => failRefresh ? Promise.reject(new Error('刷新失败')) : Promise.resolve(page())),
+      });
+      Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+      render(<App />);
+      const detail = await screen.findByRole('region', { name: '客户 1' });
+      const trigger = within(detail).getByRole('button', { name: '编辑客户 1的项目标签' });
+      fireEvent.click(trigger);
+      const dialog = screen.getByRole('dialog', { name: '编辑项目标签' });
+      fireEvent.click(within(dialog).getByRole('checkbox', { name: '搬迁' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: '保存标签' }));
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('保存失败');
+      expect(within(dialog).getByRole('checkbox', { name: '搬迁' })).not.toBeChecked();
+      failRefresh = true;
+      fireEvent.click(within(dialog).getByRole('button', { name: '保存标签' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目标签' })).not.toBeInTheDocument());
+      expect(await screen.findByText('标签已保存，部分视图刷新失败，请使用页面中的重试操作重新读取。')).toHaveAttribute('role', 'alert');
+      expect(api.v2Mutate).toHaveBeenCalledTimes(2);
+    });
   });
 });

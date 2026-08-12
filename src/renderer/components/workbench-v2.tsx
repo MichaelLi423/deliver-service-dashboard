@@ -257,6 +257,14 @@ interface Filters {
 }
 type LayerState =
   | { kind: "new" | "quick" | "reminder" | "reminder-all" | "cancel" | "report" | "history" | "clean" | "tags" | "edit-project" | "correct-entry" }
+  | {
+      kind: "edit-project-tags";
+      projectId: string;
+      source: "detail" | "queue";
+      customerName: string;
+      identifier: string;
+      tagIds: readonly string[];
+    }
   | { kind: "action"; action: WorkbenchActionType }
   | { kind: "independent"; module: WorkbenchV2IndependentKind }
   | {
@@ -352,7 +360,9 @@ export function WorkbenchV2({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [toast, setToast] = useState("");
+  const [warningToast, setWarningToast] = useState("");
   const [layer, setLayer] = useState<LayerState | null>(null);
+  const [tagEditGuard, setTagEditGuard] = useState({ dirty: false, busy: false });
   const [historyImport, setHistoryImport] = useState(false);
   const [independentRefresh, setIndependentRefresh] = useState(0);
   const [reminderRefresh, setReminderRefresh] = useState(0);
@@ -420,6 +430,7 @@ export function WorkbenchV2({
     pageIndex: number,
     focusId?: string,
     filterOverride?: Filters,
+    propagateError = false,
   ): Promise<void> {
     const id = ++requests.current.projects;
     setLoading((old) => ({ ...old, projects: true }));
@@ -465,13 +476,14 @@ export function WorkbenchV2({
       });
     } catch (cause) {
       setError(messageOf(cause));
+      if (propagateError) throw cause;
     } finally {
       if (id === requests.current.projects)
         setLoading((old) => ({ ...old, projects: false }));
     }
   }
 
-  async function loadDetail(projectId: string): Promise<void> {
+  async function loadDetail(projectId: string, propagateError = false): Promise<void> {
     const id = ++requests.current.detail;
     setLoading((old) => ({ ...old, detail: true }));
     setDetailError("");
@@ -487,6 +499,7 @@ export function WorkbenchV2({
         setDetail(next);
     } catch (cause) {
       if (id === requests.current.detail) setDetailError(messageOf(cause));
+      if (propagateError) throw cause;
     } finally {
       if (id === requests.current.detail)
         setLoading((old) => ({ ...old, detail: false }));
@@ -614,6 +627,39 @@ export function WorkbenchV2({
       window.setTimeout(() => setToast(""), 2800);
     } catch (cause) {
       throw new Error(mutationErrorMessage(cause));
+    }
+  }
+
+  function showWarning(message: string): void {
+    setWarningToast(message);
+    window.setTimeout(() => setWarningToast(""), 4200);
+  }
+
+  async function saveProjectTags(projectId: string, tagIds: readonly string[]): Promise<void> {
+    const api = bridge();
+    if (!api) throw new Error("当前环境未连接主进程");
+    let result: Awaited<ReturnType<NonNullable<WorkbenchApi["v2Mutate"]>>>;
+    try {
+      result = await requireV2(api, "v2Mutate")(
+        updateProjectRequest({ projectId, tagIds }),
+      );
+      revision.current = Math.max(revision.current, result.businessRevision);
+    } catch (cause) {
+      throw new Error(mutationErrorMessage(cause));
+    }
+
+    try {
+      const jobs: Promise<void>[] = [
+        loadProjects(cursorStack.at(-1) ?? null, currentPageIndex, undefined, undefined, true),
+      ];
+      if (projectId === selectedId) jobs.push(loadDetail(projectId, true));
+      await Promise.all(jobs);
+      setLayer(null);
+      setToast("项目标签已保存");
+      window.setTimeout(() => setToast(""), 2800);
+    } catch {
+      setLayer(null);
+      showWarning("标签已保存，部分视图刷新失败，请使用页面中的重试操作重新读取。");
     }
   }
 
@@ -836,7 +882,7 @@ export function WorkbenchV2({
           </button>
           <button onClick={() => setLayer({ kind: "history" })}>浏览全部记录</button>
           <button onClick={() => setLayer({ kind: "report" })}>运营报表</button>
-          <button onClick={() => setLayer({ kind: "tags" })}>标签管理</button>
+          <button onClick={() => setLayer({ kind: "tags" })}>标签库</button>
           <details className="data-menu">
             <summary>数据管理</summary>
             <div>
@@ -852,7 +898,7 @@ export function WorkbenchV2({
               </button>
               <div className="data-menu-divider" />
               <button onClick={() => setLayer({ kind: "tags" })}>
-                项目分类标签库
+                管理标签库
               </button>
               <div className="data-menu-divider" />
               <button className="danger-text" onClick={() => setLayer({ kind: "clean" })}>
@@ -1157,18 +1203,39 @@ export function WorkbenchV2({
                       {new Date(project.updatedAt).toLocaleDateString("zh-CN")}
                     </td>
                     <td>
-                      <button
-                        className="text-action row-quick-action"
-                        aria-label={`为${project.customerName}快速记录`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          selectionPin.current = "";
-                          setSelectedId(project.id);
-                          setLayer({ kind: "quick" });
-                        }}
-                      >
-                        记录
-                      </button>
+                      <div className="queue-row-actions">
+                        <button
+                          className="text-action row-quick-action"
+                          aria-label={`为${project.customerName}快速记录`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            selectionPin.current = "";
+                            setSelectedId(project.id);
+                            setLayer({ kind: "quick" });
+                          }}
+                        >
+                          记录
+                        </button>
+                        <button
+                          className="text-action row-quick-action"
+                          aria-label={`编辑${project.customerName}的项目标签`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            event.currentTarget.focus();
+                            setTagEditGuard({ dirty: false, busy: false });
+                            setLayer({
+                              kind: "edit-project-tags",
+                              projectId: project.id,
+                              source: "queue",
+                              customerName: project.customerName,
+                              identifier: project.ecc || project.tempNo,
+                              tagIds: [...(project.tagIds ?? [])],
+                            });
+                          }}
+                        >
+                          标签
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1237,6 +1304,18 @@ export function WorkbenchV2({
             }}
             onAction={(action) => setLayer({ kind: "action", action })}
             onEditProject={() => setLayer({ kind: "edit-project" })}
+            onEditTags={() => {
+              if (!selected) return;
+              setTagEditGuard({ dirty: false, busy: false });
+              setLayer({
+                kind: "edit-project-tags",
+                projectId: selected.id,
+                source: "detail",
+                customerName: selected.customerName,
+                identifier: selected.ecc || selected.tempNo,
+                tagIds: [...(detail?.tagIds ?? selected.tagIds ?? [])],
+              });
+            }}
             onCorrectEntry={() => setLayer({ kind: "correct-entry" })}
             onCompleteEntry={() => setLayer({ kind: "action", action: "core" })}
             onNext={() => {
@@ -1263,12 +1342,25 @@ export function WorkbenchV2({
         </section>
       </main>
       {toast && <div className="toast success" role="status">{toast}</div>}
+      {warningToast && <div className="toast warning" role="alert">{warningToast}</div>}
       {layer && (
         <Layer
           title={layerTitle(layer)}
           description={layerDescription(layer, selected)}
+          className={layer.kind === "edit-project-tags" ? "project-tag-modal" : undefined}
+          initialFocusSelector={layer.kind === "edit-project-tags"
+            ? tagCatalogError
+              ? "[data-tag-picker-retry]"
+              : !tagCatalogLoading && !tagCatalog?.groups.length
+                ? "[data-tag-edit-cancel]"
+                : !tagCatalogLoading
+                  ? 'input[type="checkbox"]:not([disabled])'
+                  : undefined
+            : undefined}
           side={layer.kind === "independent" || layer.kind === "report" || layer.kind === "history" || layer.kind === "reminder-all" || layer.kind === "tags"}
           protectDirty={layerRequiresDirtyProtection(layer)}
+          controlledDirty={layer.kind === "edit-project-tags" ? tagEditGuard.dirty : undefined}
+          busy={layer.kind === "edit-project-tags" ? tagEditGuard.busy : false}
           resetDirtyKey={layer.kind === "tags" ? tagCatalog : undefined}
           onClose={() => setLayer(null)}
         >
@@ -1281,6 +1373,18 @@ export function WorkbenchV2({
               onSave={(payload) =>
                 mutate({ op: "create_project", payload }, "搬迁项目已创建")
               }
+            />
+          ) : layer.kind === "edit-project-tags" ? (
+            <ProjectTagEditForm
+              key={`${layer.source}:${layer.projectId}`}
+              initialTagIds={layer.tagIds}
+              catalog={tagCatalog}
+              catalogLoading={tagCatalogLoading}
+              catalogError={tagCatalogError}
+              onRetryCatalog={loadTagCatalog}
+              onGuardChange={setTagEditGuard}
+              onCancel={() => setLayer(null)}
+              onSave={(tagIds) => saveProjectTags(layer.projectId, tagIds)}
             />
           ) : layer.kind === "edit-project" && selected ? (
             <ProjectEditForm
@@ -1702,6 +1806,7 @@ function ProjectDetails({
   onRetry,
   onAction,
   onEditProject,
+  onEditTags,
   onCorrectEntry,
   onCompleteEntry,
   onNext,
@@ -1723,6 +1828,7 @@ function ProjectDetails({
   onRetry: () => void;
   onAction: (action: WorkbenchActionType) => void;
   onEditProject: () => void;
+  onEditTags: () => void;
   onCorrectEntry: () => void;
   onCompleteEntry: () => void;
   onNext: () => void;
@@ -1792,7 +1898,13 @@ function ProjectDetails({
           </div>
         )}
       </div>
-      <GroupedTags groups={detail?.groupedTags ?? project?.groupedTags} />
+      {project && (
+        <ProjectTagSection
+          projectName={project.customerName}
+          groups={detail?.groupedTags ?? project.groupedTags}
+          onEdit={onEditTags}
+        />
+      )}
       {project && (
         <div className="tabbar">
           <div role="tablist" aria-label="项目详情">
@@ -3439,6 +3551,7 @@ function GroupedTagPicker({
   onChange,
   onRetry,
   legend = "项目分类标签",
+  disabled = false,
 }: {
   catalog: ProjectTagCatalogDto | null;
   loading: boolean;
@@ -3447,17 +3560,18 @@ function GroupedTagPicker({
   onChange: (tagIds: string[]) => void;
   onRetry: () => void;
   legend?: string;
+  disabled?: boolean;
 }): JSX.Element {
   const selectedSet = new Set(selected);
   function toggle(tagId: string): void {
     onChange(selectedSet.has(tagId) ? selected.filter((id) => id !== tagId) : [...selected, tagId]);
   }
   return (
-    <fieldset className="tag-picker full">
+    <fieldset className="tag-picker full" disabled={disabled}>
       <legend>{legend}</legend>
       <p>可在同一组或不同组中多选；分类不会改变项目主状态。</p>
       {loading ? <div className="tag-catalog-state" role="status">正在读取项目分类标签…</div>
-        : error ? <div className="inline-error" role="alert">{error}<button className="text-action" type="button" onClick={onRetry}>重试</button></div>
+        : error ? <div className="inline-error" role="alert">{error}<button className="text-action" type="button" data-tag-picker-retry onClick={onRetry}>重试</button></div>
           : !catalog?.groups.length ? <div className="tag-catalog-state">标签库暂无内容，请先到“项目分类标签库”创建分组和标签。</div>
             : <div className="tag-picker-groups">{catalog.groups.map((group) => (
               <fieldset key={group.id} className="tag-picker-group">
@@ -3482,6 +3596,139 @@ function GroupedTags({ groups, compact = false }: { groups?: readonly ProjectTag
       <div>{group.tagNames.map((name, index) => <b key={group.tagIds[index] ?? name}>{name}</b>)}</div>
     </div>)}
   </div>;
+}
+
+function ProjectTagSection({
+  projectName,
+  groups,
+  onEdit,
+}: {
+  projectName: string;
+  groups?: readonly ProjectTagGroupSummaryDto[];
+  onEdit: () => void;
+}): JSX.Element {
+  const hasTags = Boolean(groups?.length);
+  return (
+    <section className={`project-tag-section ${hasTags ? "has-tags" : "is-empty"}`} aria-label="项目标签">
+      <div className="project-tag-section-head">
+        <div>
+          <span>项目标签</span>
+          {!hasTags && <p>尚未添加项目标签</p>}
+        </div>
+        <button
+          className="button small"
+          aria-label={`${hasTags ? "编辑" : "添加"}${projectName}的项目标签`}
+          onClick={(event) => {
+            event.currentTarget.focus();
+            onEdit();
+          }}
+        >
+          {hasTags ? "编辑标签" : "添加标签"}
+        </button>
+      </div>
+      {hasTags && <GroupedTags groups={groups} />}
+    </section>
+  );
+}
+
+function normalizedTagIds(catalog: ProjectTagCatalogDto, selected: readonly string[]): string[] {
+  return validCatalogTagIds(catalog, [...new Set(selected)]);
+}
+
+function sameTagSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((id) => rightSet.has(id));
+}
+
+function ProjectTagEditForm({
+  initialTagIds,
+  catalog,
+  catalogLoading,
+  catalogError,
+  onRetryCatalog,
+  onGuardChange,
+  onCancel,
+  onSave,
+}: TagCatalogProps & {
+  initialTagIds: readonly string[];
+  onGuardChange: (guard: { dirty: boolean; busy: boolean }) => void;
+  onCancel: () => void;
+  onSave: (tagIds: readonly string[]) => Promise<void>;
+}): JSX.Element {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([...initialTagIds]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const normalizedInitial = catalog ? normalizedTagIds(catalog, initialTagIds) : [];
+  const normalizedSelected = catalog ? normalizedTagIds(catalog, selectedTagIds) : [];
+  const dirty = Boolean(catalog) && !sameTagSet(normalizedInitial, normalizedSelected);
+  const unavailable = catalogLoading || Boolean(catalogError) || !catalog;
+
+  useEffect(() => {
+    onGuardChange({ dirty, busy });
+  }, [dirty, busy, onGuardChange]);
+
+  useEffect(() => {
+    if (catalogLoading) return;
+    const target = catalogError
+      ? formRef.current?.querySelector<HTMLElement>("[data-tag-picker-retry]")
+      : !catalog?.groups.length
+        ? formRef.current?.querySelector<HTMLElement>("[data-tag-edit-cancel]")
+        : formRef.current?.querySelector<HTMLElement>('input[type="checkbox"]:not([disabled])');
+    window.setTimeout(() => target?.focus(), 0);
+  }, [catalogLoading, catalogError, catalog]);
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!dirty || unavailable || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onSave(normalizedSelected);
+    } catch (cause) {
+      setError(messageOf(cause));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form ref={formRef} className="project-tag-edit" aria-busy={busy} onSubmit={(event) => void submit(event)}>
+      <div className="project-tag-edit-scroll">
+        <GroupedTagPicker
+          catalog={catalog}
+          loading={catalogLoading}
+          error={catalogError}
+          selected={selectedTagIds}
+          onChange={(tagIds) => { setSelectedTagIds(tagIds); setError(""); }}
+          onRetry={() => void onRetryCatalog()}
+          legend="选择项目标签"
+          disabled={busy}
+        />
+        {!catalogLoading && !catalogError && !catalog?.groups.length && (
+          <p className="tag-library-guidance">标签库暂无内容。请取消后从顶部“标签库”进入“管理标签库”。</p>
+        )}
+      </div>
+      {error && <div className="inline-error project-tag-edit-error" role="alert">{error}</div>}
+      <footer className="project-tag-edit-footer">
+        <span>已选择 <b>{normalizedSelected.length}</b> 个标签</span>
+        <div className="row-actions">
+          <button
+            className="button"
+            type="button"
+            disabled={busy}
+            data-tag-edit-cancel
+            onClick={onCancel}
+          >
+            取消
+          </button>
+          <button className="button primary" disabled={!dirty || unavailable || busy}>
+            {busy ? "正在保存…" : "保存标签"}
+          </button>
+        </div>
+      </footer>
+    </form>
+  );
 }
 
 function TagLibraryPanel({ catalog, loading, error, onRefresh }: { catalog: ProjectTagCatalogDto | null; loading: boolean; error: string; onRefresh: () => Promise<void> }): JSX.Element {
@@ -4306,22 +4553,31 @@ function layerRequiresDirtyProtection(layer: LayerState): boolean {
     "batch-edit",
     "damage-update",
     "tags",
+    "edit-project-tags",
   ].includes(layer.kind);
 }
 
 function Layer({
   title,
   description,
+  className,
+  initialFocusSelector,
   side = false,
   protectDirty = false,
+  controlledDirty,
+  busy = false,
   resetDirtyKey,
   onClose,
   children,
 }: {
   title: string;
   description: string;
+  className?: string;
+  initialFocusSelector?: string;
   side?: boolean;
   protectDirty?: boolean;
+  controlledDirty?: boolean;
+  busy?: boolean;
   resetDirtyKey?: unknown;
   onClose: () => void;
   children: ReactNode;
@@ -4330,11 +4586,19 @@ function Layer({
   const discardPanel = useRef<HTMLElement>(null);
   const discardTrigger = useRef<HTMLElement | null>(null);
   const dirty = useRef(false);
+  const controlledDirtyRef = useRef(controlledDirty);
+  const busyRef = useRef(busy);
+  const protectDirtyRef = useRef(protectDirty);
+  const onCloseRef = useRef(onClose);
   const discardOpenRef = useRef(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(
     document.activeElement as HTMLElement,
   );
+  controlledDirtyRef.current = controlledDirty;
+  busyRef.current = busy;
+  protectDirtyRef.current = protectDirty;
+  onCloseRef.current = onClose;
   useEffect(() => {
     dirty.current = false;
   }, [resetDirtyKey]);
@@ -4344,8 +4608,10 @@ function Layer({
     window.setTimeout(() => discardTrigger.current?.focus(), 0);
   }
   function requestClose(trigger?: HTMLElement | null): void {
-    if (!protectDirty || !dirty.current) {
-      onClose();
+    if (busyRef.current) return;
+    const hasChanges = controlledDirtyRef.current ?? dirty.current;
+    if (!protectDirtyRef.current || !hasChanges) {
+      onCloseRef.current();
       return;
     }
     discardTrigger.current = trigger ?? (document.activeElement as HTMLElement | null);
@@ -4363,16 +4629,18 @@ function Layer({
         ),
       );
     window.setTimeout(() => {
-      const preferred = root.querySelector<HTMLElement>(
-        '[autofocus],input:not([disabled]),select:not([disabled]),textarea:not([disabled])',
-      );
+      const preferred = (initialFocusSelector
+        ? root.querySelector<HTMLElement>(initialFocusSelector)
+        : null) ?? root.querySelector<HTMLElement>(
+          '[autofocus],input:not([disabled]),select:not([disabled]),textarea:not([disabled])',
+        );
       (preferred ?? focusables()[0])?.focus();
     }, 0);
     function key(event: globalThis.KeyboardEvent): void {
       if (event.key === "Escape") {
         event.preventDefault();
         if (discardOpenRef.current) closeDiscard();
-        else requestClose(document.activeElement as HTMLElement | null);
+        else if (!busyRef.current) requestClose(document.activeElement as HTMLElement | null);
         return;
       }
       if (event.key === "Tab") {
@@ -4396,7 +4664,7 @@ function Layer({
       document.removeEventListener("keydown", key);
       opener.current?.focus();
     };
-  }, [onClose, protectDirty]);
+  }, []);
   return (
     <div
       className={`overlay ${side ? "side" : ""}`}
@@ -4407,7 +4675,7 @@ function Layer({
     >
       <section
         ref={panel}
-        className={side ? "drawer wide-drawer" : "modal"}
+        className={`${side ? "drawer wide-drawer" : "modal"}${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="layer-title-v2"
@@ -4426,6 +4694,7 @@ function Layer({
           </div>
           <button
             className="icon-button"
+            disabled={busy}
             onClick={(event) => requestClose(event.currentTarget)}
             aria-label="关闭"
           >
@@ -4565,6 +4834,7 @@ function Empty({ title, copy }: { title: string; copy: string }): JSX.Element {
 function layerTitle(layer: LayerState): string {
   if (layer.kind === "new") return "新建搬迁项目";
   if (layer.kind === "edit-project") return "编辑项目资料";
+  if (layer.kind === "edit-project-tags") return "编辑项目标签";
   if (layer.kind === "correct-entry") return "更正进单/合同资料";
   if (layer.kind === "quick") return "快速记录";
   if (layer.kind === "reminder") return "维护项目提醒";
@@ -4573,7 +4843,7 @@ function layerTitle(layer: LayerState): string {
   if (layer.kind === "report") return "运营报表";
   if (layer.kind === "history") return "浏览往期与全部记录";
   if (layer.kind === "clean") return "清理全部业务数据";
-  if (layer.kind === "tags") return "项目分类标签库";
+  if (layer.kind === "tags") return "管理标签库";
   if (layer.kind === "independent")
     return layer.module === "serial_address" ? "序列号地址更新" : "二维码申请";
   if (layer.kind === "invoice-edit") return "编辑掉票";
@@ -4593,6 +4863,7 @@ function layerDescription(
 ): string {
   if (layer.kind === "new") return "四组资料在同一页完成";
   if (layer.kind === "edit-project") return project ? `${project.customerName} · 项目级资料` : "项目级资料";
+  if (layer.kind === "edit-project-tags") return `${layer.customerName} · ${layer.identifier}`;
   if (layer.kind === "correct-entry") return project ? `${project.customerName} · 已正式进单项目` : "已正式进单项目";
   if (layer.kind === "report") return "手工月份区间与有界导出";
   if (layer.kind === "history") return "统一按类型、项目和日期查找业务记录";
