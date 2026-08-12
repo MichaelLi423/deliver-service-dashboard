@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 /**
- * 场景→测试矩阵生成脚本（tasks 10.1）。
+ * 正式规格基线的场景→测试矩阵生成脚本。
  *
  * 职责：
- * 1. 扫描 openspec/changes/adjust-relocation-workbench-0810/specs 下各能力的 spec.md，
+ * 1. 扫描 openspec/specs 下各能力的 spec.md，
  *    提取每个能力的 Requirement / Scenario。
  * 2. 读取 docs/verification/scenario-map.mjs 登记表（场景→测试证据 + 状态/备注）。
  * 3. 校验登记表证据真实性：测试文件的关键词必须出现在 it()/test()/describe() 标题字面量；
  *    README 和说明文档证据可全文匹配。找不到证据的场景如实标记为“缺证据”，不谎称覆盖。
  * 4. 生成 docs/verification/scenario-test-matrix.md，包含汇总统计、按能力分组对照表。
- *    全部 spec 场景（含 history-import-wizard）已逐条登记真实测试证据；仅 Windows
- *    操作系统账户边界保持 pending（macOS 开发机不可验证，不伪造证据）。
- *    外部迁移 CLI 已删除：历史数据导入向导（import-wizard:*）是唯一入口，真实源
- *    迁移的旧 CLI dry-run 口径仅作为历史说明保留（docs/verification/迁移执行与运维说明.md）。
+ *
+ * active 或 archived change 的 delta 由各自的 `openspec validate <change> --strict`
+ * 验证；只有归档或同步进入 openspec/specs/ 的场景才进入本矩阵。
  *
  * 运行：npm run verify:matrix
  * 存在缺证据/证据无效时以非 0 退出，作为 CI 可执行校验。
@@ -22,7 +21,7 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
-const specsDir = join(repoRoot, 'openspec', 'changes', 'adjust-relocation-workbench-0810', 'specs');
+const specsDir = join(repoRoot, 'openspec', 'specs');
 const registryUrl = new URL('../docs/verification/scenario-map.mjs', import.meta.url);
 const outputPath = join(repoRoot, 'docs', 'verification', 'scenario-test-matrix.md');
 
@@ -128,9 +127,9 @@ for (const cap of caps) {
 
 const total = rows.length;
 const lines = [];
-lines.push('# 场景→测试矩阵（tasks 10.1）');
+lines.push('# 正式规格基线的场景→测试矩阵');
 lines.push('');
-lines.push('> 由 `npm run verify:matrix`（scripts/build-verification-matrix.mjs）自动生成。');
+lines.push('> 由 `npm run verify:matrix`（scripts/build-verification-matrix.mjs）自动生成，仅扫描 `openspec/specs/` 正式基线。');
 lines.push('> 登记表：`docs/verification/scenario-map.mjs`。脚本校验每一条证据（文件存在且标题关键词出现），');
 lines.push('> 找不到证据或证据无效时如实标记为缺口，不谎称覆盖。状态图例：✅ 有效证据 · ⏳ 待验证（真实源迁移/Windows）· ❌ 缺口。');
 lines.push('');

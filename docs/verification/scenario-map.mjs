@@ -348,7 +348,7 @@ export const scenarioMap = {
     },
     '创建自定义标签分组与标签': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '全局标签库可创建分组和组内标签，成功后刷新目录'],
+        ['tests/renderer/app.test.tsx', '最新布局：顶部主导航直接显示标签库并打开全局标签库'],
         ['tests/integration/project-tags.sqlite.test.ts', '重开 SQLite 后保留自定义目录与项目关联'],
       ],
     },
@@ -495,7 +495,7 @@ export const scenarioMap = {
       evidence: [
         ['tests/domain/relocation-execution.test.ts', '运输公司可选：未指定运输公司仍可保存，字段为空'],
         ['tests/domain/relocation-execution.test.ts', '不同批次不同运输公司'],
-        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈'],
       ],
     },
     '物流成交价大于合同预算价仅警告': {
@@ -980,7 +980,7 @@ export const scenarioMap = {
     '首批不足时继续向未来补列': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.6：首批不足 7 个不同日期继续向未来补列；超过 7 个时只取最早 7 个']] },
     '全量不足时不制造空列': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.6：同日归列、非连续日期只取有提醒的日期、首批最多 7 个日期、全量不足不制造空列']] },
     '每列内项目顺序稳定': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.6：列内 id 稳定 tie-breaker；按列分页携带 selectedDates 锁定日期集合、不重算不重读']] },
-    '1024px 下泳道内部横向滚动且键盘可达': { evidence: [['tests/interface/layout.test.ts', '提醒泳道在 1024 与 1440 保持可读最小列宽并只在容器内部横滚'], ['tests/interface/layout.test.ts', '泳道和全部可聚焦目标有清晰 focus-visible，reduced motion 不移除静态反馈']] },
+    '1024px 下泳道内部横向滚动且键盘可达': { evidence: [['tests/interface/layout.test.ts', '提醒泳道保留日期列头、列内加载和容器内横向滚动']] },
     '完整提醒视图保持独立默认排序': { evidence: [['tests/integration/workbench-todos.sqlite.test.ts', '任务7.3：切换升序立即生效；asc/desc 与泳道（7.6）排序独立']] },
     '手工创建项目提醒': {
       evidence: [
@@ -1846,10 +1846,10 @@ export const scenarioMap = {
     '筛选或搜索后重算总数与分页': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.5：过滤后 total 重算、cursor 与筛选状态绑定（筛选变化丢弃旧 cursor）、末页少于 20']] },
     '翻页时页内顺序稳定': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.5：固定每页 20（renderer 任意 limit 忽略）、翻页无重复无遗漏、游标稳定、total 正确']] },
     '最后一页允许少于 20 个项目': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.5：过滤后 total 重算、cursor 与筛选状态绑定（筛选变化丢弃旧 cursor）、末页少于 20']] },
-    '不展示错误的每页数量文案': { evidence: [['tests/interface/layout.test.ts', '项目队列明确固定每页20且不存在旧的每页最多50项文案']] },
-    '滚动时头部整体固定': { evidence: [['tests/interface/layout.test.ts', '单一页面滚动根下 topbar 与 command 按真实导航高度协同固定并保留滚动补偿']] },
-    '固定头部不遮挡内容': { evidence: [['tests/interface/layout.test.ts', '单一页面滚动根下 topbar 与 command 按真实导航高度协同固定并保留滚动补偿']] },
-    '不拦截键盘焦点': { evidence: [['e2e/workbench-v2-layout.spec.ts', 'Oracle #10 任务指挥台布局、150% 文本缩放与 sticky 深层表单焦点均不遮挡']] },
+    '不展示错误的每页数量文案': { evidence: [['tests/interface/layout.test.ts', '项目队列明确固定每页20且不存在旧文案']] },
+    '滚动时头部整体固定': { evidence: [['tests/interface/layout.test.ts', '只固定顶部导航，任务区保持紧凑并随页面滚动']] },
+    '固定头部不遮挡内容': { evidence: [['tests/interface/layout.test.ts', '只固定顶部导航，任务区保持紧凑并随页面滚动']] },
+    '不拦截键盘焦点': { evidence: [['e2e/workbench-v2-layout.spec.ts', '最新布局：提醒、全宽单一项目工作区、高密项目队列依次排列且详情不裁切']] },
     '进入工作台先处理项目提醒': {
       evidence: [
         ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
@@ -1929,7 +1929,7 @@ export const scenarioMap = {
     },
     '展示项目分类标签': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '编辑可替换标签，队列、详情、上下文按组展示且 DOM 顺序真实交换'],
+        ['tests/renderer/app.test.tsx', '详情保持标签区域；无标签显示添加入口，已有标签显示编辑入口'],
       ],
     },
     '点击项目选中并刷新上下文': {
@@ -1949,7 +1949,7 @@ export const scenarioMap = {
     },
     '单页分组呈现与对应字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签'],
         ['tests/renderer/app.test.tsx', '新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签'],
       ],
     },
@@ -1981,13 +1981,13 @@ export const scenarioMap = {
     },
     '填写服务单号要求工程师并同次创建开单': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈'],
       ],
       note: '单页录入中「服务单号必填工程师并同次保存」由领域测试 service-order-recording 3.10 覆盖，界面透传',
     },
     '可后补字段不无提示丢失且不自动生成提醒': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '保存意图分组实时展示摘要，并在正式进单合同金额为零时提示'],
       ],
     },
     '人工选择主状态并就地反馈': {
@@ -2018,29 +2018,29 @@ export const scenarioMap = {
     },
     '批次表单字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈'],
       ],
     },
     '物流费用并入批次表单': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈'],
       ],
     },
     '开单表单字段': {
       evidence: [
         ['tests/renderer/app.test.tsx', '开单记录 tab 读取 orders，并只展示四个服务单字段'],
-        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈'],
       ],
       note: '开单记录为原"上门活动"入口并入后的合并入口，表单展示开单日期、工程师、开单类型、服务单号',
     },
     '搬迁仪器表单二维码是否申请手工字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈'],
       ],
     },
     '损坏/维修表单合同金额 0 就地反馈': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈'],
       ],
     },
     '序列号地址更新与二维码申请独立模块入口': {
@@ -2094,12 +2094,12 @@ export const scenarioMap = {
     },
     '必填与可选标识及帮助': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签'],
       ],
     },
     '校验失败就地提示': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈'],
+        ['tests/renderer/app.test.tsx', '开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈'],
         ['tests/integration/workbench-facade.sqlite.test.ts', '人工主状态必须经过 lifecycle 校验并将拒绝原因返回界面层'],
       ],
     },
@@ -2153,32 +2153,32 @@ export const scenarioMap = {
     },
     'Escape 关闭当前层': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建项目未修改时可直接关闭，修改后 Escape 先确认是否放弃'],
       ],
     },
     '打开后焦点移至首字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建项目未修改时可直接关闭，修改后 Escape 先确认是否放弃'],
       ],
     },
     'label 关联可访问名称': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建项目明确保存意图与可后补字段，弹层首字段聚焦且 Escape 可关闭'],
+        ['tests/renderer/app.test.tsx', '新建项目未修改时可直接关闭，修改后 Escape 先确认是否放弃'],
       ],
     },
     '字号基线': {
       evidence: [
-        ['tests/interface/layout.test.ts', '正文与表格保持 14px 基线，辅助信息保持 12px'],
+        ['tests/interface/layout.test.ts', '正文、数据和控件使用统一的系统字体与 4px 间距基线'],
       ],
     },
     '层级与对比': {
       evidence: [
-        ['tests/interface/layout.test.ts', '正文与表格保持 14px 基线，辅助信息保持 12px'],
+        ['tests/interface/layout.test.ts', '正文、数据和控件使用统一的系统字体与 4px 间距基线'],
       ],
     },
     '多行文本行高可读': {
       evidence: [
-        ['tests/interface/layout.test.ts', '正文与表格保持 14px 基线，辅助信息保持 12px'],
+        ['tests/interface/layout.test.ts', '正文、数据和控件使用统一的系统字体与 4px 间距基线'],
       ],
     },
     '详情 tab 可切换展开': {
@@ -2213,28 +2213,28 @@ export const scenarioMap = {
     },
     '当前上下文不挤占主队列': {
       evidence: [
-        ['tests/interface/layout.test.ts', '1440 为主布局基准且上下文不遮挡队列'],
+        ['tests/interface/layout.test.ts', '纵向主流程先提供项目队列，再显示项目上下文与详情'],
       ],
     },
     '维护全局标签库': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '全局标签库可创建分组和组内标签，成功后刷新目录'],
+        ['tests/renderer/app.test.tsx', '最新布局：顶部主导航直接显示标签库并打开全局标签库'],
       ],
     },
     '按组多选并展示项目分类标签': {
       evidence: [
         ['tests/renderer/app.test.tsx', '新建项目按组键盘可达地同组与跨组多选，并提交全局自定义 tagIds'],
-        ['tests/renderer/app.test.tsx', '编辑可替换标签，队列、详情、上下文按组展示且 DOM 顺序真实交换'],
+        ['tests/renderer/app.test.tsx', '详情保持标签区域；无标签显示添加入口，已有标签显示编辑入口'],
       ],
     },
     '交换后的区域位置保持内容与联动': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '编辑可替换标签，队列、详情、上下文按组展示且 DOM 顺序真实交换'],
+        ['tests/renderer/app.test.tsx', '最新布局：提醒后先选择项目，再在下方工作区查看上下文与详情'],
       ],
     },
     '1440px 与 1024px 下布局可用': {
       evidence: [
-        ['e2e/workbench-v2-layout.spec.ts', 'Oracle #10 任务指挥台布局、150% 文本缩放与 sticky 深层表单焦点均不遮挡'],
+        ['e2e/workbench-v2-layout.spec.ts', '最新布局：提醒、全宽单一项目工作区、高密项目队列依次排列且详情不裁切'],
       ],
     },
     '1024px 宽下核心区域可操作': {
@@ -2249,7 +2249,7 @@ export const scenarioMap = {
     },
     '1440px 为主布局基准': {
       evidence: [
-        ['tests/interface/layout.test.ts', '1440 为主布局基准且上下文不遮挡队列'],
+        ['tests/interface/layout.test.ts', '纵向主流程先提供项目队列，再显示项目上下文与详情'],
       ],
     },
     '接近最小宽度不丢失主操作流': {
@@ -2317,7 +2317,7 @@ export const scenarioMap = {
     },
     "步骤状态反映当前校验结果": {
       evidence: [
-        ["tests/renderer/history-import-wizard.test.tsx", "已阻断"],
+        ["tests/renderer/history-import-wizard.test.tsx", "展示固定七步、账号、保存状态、问题状态与返回确认焦点"],
       ],
       note: "步骤状态按校验结果显示已阻断/通过/处理中",
     },
@@ -2407,7 +2407,7 @@ export const scenarioMap = {
     },
     "下载当前版本空白模板": {
       evidence: [
-        ["tests/renderer/history-import-wizard.test.tsx", "下载 Excel 模板"],
+        ["tests/renderer/history-import-wizard.test.tsx", "覆盖模板、文件/sheet、50k 进度取消和共用列映射"],
         ["tests/domain/import-template.test.ts", "生成单个工作簿：填写说明 + 七个业务 sheet"],
       ],
       note: "向导提供模板下载；模板生成器产出填写说明 + 七类业务 sheet",
@@ -2538,7 +2538,7 @@ export const scenarioMap = {
     },
     "定位时解除阻挡视图的筛选": {
       evidence: [
-        ["tests/renderer/history-import-virtual-grid.test.tsx", "定位时解除阻挡视图的筛选"],
+        ["tests/renderer/history-import-virtual-grid.test.tsx", "搜索、ECC/问题筛选和错误接口驱动 provider 并聚焦目标单元格"],
       ],
       note: "跳错误后按全部问题+空搜索重新读取窗口（不被既有筛选阻挡）",
     },
