@@ -21,11 +21,14 @@ describe('workbench-interface 桌面布局静态约束', () => {
     expect(css).toContain('@media(max-width:1100px)');
   });
 
-  it('纵向主流程先提供项目队列，再显示项目上下文与详情', () => {
+  it('纵向主流程依次显示提醒、单一项目工作区与项目队列', () => {
+    const reminders = renderer.indexOf('id="reminders"');
     const queue = renderer.indexOf('id="project-queue"');
     const workspace = renderer.indexOf('className="project-workspace"');
-    expect(queue).toBeGreaterThan(0);
-    expect(workspace).toBeGreaterThan(queue);
+    expect(reminders).toBeGreaterThan(0);
+    expect(workspace).toBeGreaterThan(reminders);
+    expect(queue).toBeGreaterThan(workspace);
+    expect(renderer.match(/className="project-workspace"/g)).toHaveLength(1);
     expect(css).not.toContain('.workspace{display:grid;grid-template-columns:minmax(0,1fr) 330px');
     expect(css).not.toContain('.context{position:sticky');
   });

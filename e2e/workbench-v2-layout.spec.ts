@@ -57,8 +57,6 @@ async function assertViewport(page: Page, width: 1024 | 1170 | 1190 | 1440, scre
       topbarPosition: topbar ? getComputedStyle(topbar).position : '',
       topbarTop: topbar?.getBoundingClientRect().top ?? 999,
       commandPosition: command ? getComputedStyle(command).position : '',
-      commandTop: command?.getBoundingClientRect().top ?? 999,
-      topbarHeight: topbar?.getBoundingClientRect().height ?? 0,
       laneOverflow: lanes ? getComputedStyle(lanes).overflowX : '',
       laneScrollWidth: lanes?.scrollWidth ?? 0,
       laneClientWidth: lanes?.clientWidth ?? 0,
@@ -81,9 +79,7 @@ async function assertViewport(page: Page, width: 1024 | 1170 | 1190 | 1440, scre
   expect(layout.filtersOverflow).toBeLessThanOrEqual(1);
   expect(layout.topbarPosition).toBe('sticky');
   expect(layout.topbarTop).toBeGreaterThanOrEqual(-1);
-  expect(layout.commandPosition).toBe('sticky');
-  expect(layout.commandTop).toBeGreaterThanOrEqual(layout.topbarHeight - 1);
-  expect(layout.commandTop).toBeLessThanOrEqual(layout.topbarHeight + 1);
+  expect(layout.commandPosition).toBe('static');
   expect(layout.laneOverflow).toMatch(/auto|scroll/);
   expect(layout.laneCount).toBe(7);
   expect(layout.domOrder).toBe(true);
@@ -119,24 +115,20 @@ async function assertViewport(page: Page, width: 1024 | 1170 | 1190 | 1440, scre
     rootScrollTop: document.scrollingElement?.scrollTop ?? -1,
     bodyScrollTop: document.body.scrollTop,
     topbar: document.querySelector<HTMLElement>('.topbar')?.getBoundingClientRect().top ?? 999,
-    command: document.querySelector<HTMLElement>('.command')?.getBoundingClientRect().top ?? 999,
-    topbarHeight: document.querySelector<HTMLElement>('.topbar')?.getBoundingClientRect().height ?? 0,
   }));
   expect(sticky.windowScrollY).toBeGreaterThan(0);
   expect(sticky.rootScrollTop).toBe(sticky.windowScrollY);
   expect(sticky.bodyScrollTop).toBe(0);
   expect(sticky.topbar).toBeGreaterThanOrEqual(-1);
-  expect(sticky.command).toBeGreaterThanOrEqual(sticky.topbarHeight - 1);
-  expect(sticky.command).toBeLessThanOrEqual(sticky.topbarHeight + 1);
   await page.getByRole('button', { name: '项目队列' }).click();
-  const queue = page.getByRole('region', { name: /高密项目队列/ });
+  const queue = page.getByRole('region', { name: /^项目队列(?: \d+)?$/ });
   await expect(queue).toBeFocused();
   const focusSeam = await queue.evaluate((node) => ({
     targetTop: node.getBoundingClientRect().top,
-    commandBottom: document.querySelector<HTMLElement>('.command')?.getBoundingClientRect().bottom ?? 999,
+    topbarBottom: document.querySelector<HTMLElement>('.topbar')?.getBoundingClientRect().bottom ?? 999,
   }));
-  expect(focusSeam.targetTop).toBeGreaterThanOrEqual(focusSeam.commandBottom - 1);
-  await expect(page.getByRole('heading', { name: /高密项目队列/ })).toBeVisible();
+  expect(focusSeam.targetTop).toBeGreaterThanOrEqual(focusSeam.topbarBottom - 1);
+  await expect(page.getByRole('heading', { name: /^项目队列(?: \d+)?$/ })).toBeVisible();
   await expect(page.getByText(/第 1–7 项 \/ 共 7 项/)).toBeVisible();
   await page.screenshot({ path: screenshot, fullPage: true });
 }
@@ -198,7 +190,7 @@ async function assertHistoryDrawer(page: Page, width: 820 | 1024, screenshot: st
   await dialog.getByRole('button', { name: '关闭' }).click();
 }
 
-async function assertDeepFormFocusBelowSticky(app: ElectronApplication, page: Page): Promise<void> {
+async function assertDeepFormFocusBelowTopbar(app: ElectronApplication, page: Page): Promise<void> {
   await page.setViewportSize({ width: 1024, height: 768 });
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1.5);
@@ -221,13 +213,13 @@ async function assertDeepFormFocusBelowSticky(app: ElectronApplication, page: Pa
       zoomedViewportWidth: window.innerWidth,
       targetTop: target.top,
       targetBottom: target.bottom,
-      commandBottom: command?.getBoundingClientRect().bottom ?? 0,
+      topbarBottom: document.querySelector<HTMLElement>('.topbar')?.getBoundingClientRect().bottom ?? 0,
       commandWrapped: Boolean(intro && actions && actions.top >= intro.bottom - 1),
     };
   });
   expect(seam.zoomedViewportWidth).toBeLessThanOrEqual(700);
   expect(seam.commandWrapped).toBe(true);
-  expect(seam.targetTop).toBeGreaterThanOrEqual(seam.commandBottom - 1);
+  expect(seam.targetTop).toBeGreaterThanOrEqual(seam.topbarBottom - 1);
   expect(seam.targetBottom).toBeLessThanOrEqual(768 + 1);
   await dialog.getByRole('button', { name: '关闭' }).click();
   await app.evaluate(({ BrowserWindow }) => {
@@ -235,7 +227,7 @@ async function assertDeepFormFocusBelowSticky(app: ElectronApplication, page: Pa
   });
 }
 
-test('最新布局：提醒、全宽单一项目工作区、高密项目队列依次排列且详情不裁切', async ({}, testInfo) => {
+test('最新布局：提醒、全宽单一项目工作区、项目队列依次排列且详情不裁切', async ({}, testInfo) => {
   const root = mkdtempSync(join(tmpdir(), 'rw-v2-layout-'));
   const userData = join(root, 'user-data');
   let app: ElectronApplication | null = null;
@@ -252,7 +244,7 @@ test('最新布局：提醒、全宽单一项目工作区、高密项目队列�
     await assertIndependentDrawer(page, 820, testInfo.outputPath('serial-address-drawer-820.png'));
     await assertHistoryDrawer(page, 1024, testInfo.outputPath('history-drawer-1024.png'));
     await assertHistoryDrawer(page, 820, testInfo.outputPath('history-drawer-820.png'));
-    await assertDeepFormFocusBelowSticky(app, page);
+    await assertDeepFormFocusBelowTopbar(app, page);
   } finally {
     await app?.close().catch(() => undefined);
     rmSync(root, { recursive: true, force: true });

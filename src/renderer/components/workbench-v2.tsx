@@ -1047,6 +1047,72 @@ export function WorkbenchV2({
           </div>
           <ReminderLanes refreshToken={reminderRefresh} onSelect={selectReminder} />
         </section>
+        <section className="project-workspace" aria-label="项目工作区">
+          <ProjectContext
+            project={selected}
+            detail={detail}
+            loading={loading.detail}
+            onQuick={() => setLayer({ kind: "quick" })}
+            onReminder={() => setLayer({ kind: "reminder" })}
+            onCancel={() => setLayer({ kind: "cancel" })}
+            onStatus={(status) => void mutate(
+              { op: "adjust_status", projectId: selectedId, status },
+              "项目主状态已通过生命周期校验并更新",
+            )}
+          />
+          <ProjectDetails
+            project={selected}
+            detail={detail}
+            tab={tab}
+            section={sectionPage}
+            loading={loading.detail || loading.section}
+            error={detailError}
+            pageIndex={currentSectionIndex}
+            onTab={setTab}
+            onRetry={() => {
+              if (!selectedId) return;
+              const kind = TAB_SECTION[tab];
+              if (kind) void loadSection(selectedId, kind, sectionCursors.at(-1) ?? null);
+              else void loadDetail(selectedId);
+            }}
+            onAction={(action) => setLayer({ kind: "action", action })}
+            onEditProject={() => setLayer({ kind: "edit-project" })}
+            onEditTags={() => {
+              if (!selected) return;
+              setTagEditGuard({ dirty: false, busy: false });
+              setLayer({
+                kind: "edit-project-tags",
+                projectId: selected.id,
+                source: "detail",
+                customerName: selected.customerName,
+                identifier: selected.ecc || selected.tempNo,
+                tagIds: [...(detail?.tagIds ?? selected.tagIds ?? [])],
+              });
+            }}
+            onCorrectEntry={() => setLayer({ kind: "correct-entry" })}
+            onCompleteEntry={() => setLayer({ kind: "action", action: "core" })}
+            onNext={() => {
+              if (!sectionPage?.nextCursor || !selectedId) return;
+              const next = [...sectionCursors, sectionPage.nextCursor];
+              setSectionCursors(next);
+              void loadSection(selectedId, TAB_SECTION[tab]!, sectionPage.nextCursor);
+            }}
+            onPrevious={() => {
+              if (sectionCursors.length <= 1 || !selectedId) return;
+              const next = sectionCursors.slice(0, -1);
+              setSectionCursors(next);
+              void loadSection(selectedId, TAB_SECTION[tab]!, next.at(-1) ?? null);
+            }}
+            onInvoiceEdit={(invoice) => setLayer({ kind: "invoice-edit", invoice })}
+            onInvoiceRevoke={(invoice) => setLayer({ kind: "invoice-revoke", invoice })}
+            onBatchEdit={(batch) => setLayer({ kind: "batch-edit", batch })}
+            onDamageUpdate={(damage) => setLayer({ kind: "damage-update", damage })}
+            onDelete={(kind, id) => {
+              if (!window.confirm("删除后无法恢复，确认删除这条记录？")) return;
+              void deleteRecord({ kind, id } as DeleteInput, "记录已删除").catch((cause) => setDetailError(messageOf(cause)));
+            }}
+          />
+        </section>
         <section
           id="project-queue"
           tabIndex={-1}
@@ -1056,7 +1122,7 @@ export function WorkbenchV2({
           <div className="panel-head queue-heading">
             <div>
               <h2 id="queue-title">项目队列 {projectPage?.total ?? 0}</h2>
-              <p>选择项目后，下方工作区会显示对应资料与记录</p>
+              <p>选择项目后，上方工作区会显示对应资料与记录</p>
             </div>
             <span className="queue-range" aria-live="polite">
               {notice}
@@ -1273,72 +1339,6 @@ export function WorkbenchV2({
               下一页
             </button>
           </div>
-        </section>
-        <section className="project-workspace" aria-label="项目工作区">
-          <ProjectContext
-            project={selected}
-            detail={detail}
-            loading={loading.detail}
-            onQuick={() => setLayer({ kind: "quick" })}
-            onReminder={() => setLayer({ kind: "reminder" })}
-            onCancel={() => setLayer({ kind: "cancel" })}
-            onStatus={(status) => void mutate(
-              { op: "adjust_status", projectId: selectedId, status },
-              "项目主状态已通过生命周期校验并更新",
-            )}
-          />
-          <ProjectDetails
-            project={selected}
-            detail={detail}
-            tab={tab}
-            section={sectionPage}
-            loading={loading.detail || loading.section}
-            error={detailError}
-            pageIndex={currentSectionIndex}
-            onTab={setTab}
-            onRetry={() => {
-              if (!selectedId) return;
-              const kind = TAB_SECTION[tab];
-              if (kind) void loadSection(selectedId, kind, sectionCursors.at(-1) ?? null);
-              else void loadDetail(selectedId);
-            }}
-            onAction={(action) => setLayer({ kind: "action", action })}
-            onEditProject={() => setLayer({ kind: "edit-project" })}
-            onEditTags={() => {
-              if (!selected) return;
-              setTagEditGuard({ dirty: false, busy: false });
-              setLayer({
-                kind: "edit-project-tags",
-                projectId: selected.id,
-                source: "detail",
-                customerName: selected.customerName,
-                identifier: selected.ecc || selected.tempNo,
-                tagIds: [...(detail?.tagIds ?? selected.tagIds ?? [])],
-              });
-            }}
-            onCorrectEntry={() => setLayer({ kind: "correct-entry" })}
-            onCompleteEntry={() => setLayer({ kind: "action", action: "core" })}
-            onNext={() => {
-              if (!sectionPage?.nextCursor || !selectedId) return;
-              const next = [...sectionCursors, sectionPage.nextCursor];
-              setSectionCursors(next);
-              void loadSection(selectedId, TAB_SECTION[tab]!, sectionPage.nextCursor);
-            }}
-            onPrevious={() => {
-              if (sectionCursors.length <= 1 || !selectedId) return;
-              const next = sectionCursors.slice(0, -1);
-              setSectionCursors(next);
-              void loadSection(selectedId, TAB_SECTION[tab]!, next.at(-1) ?? null);
-            }}
-            onInvoiceEdit={(invoice) => setLayer({ kind: "invoice-edit", invoice })}
-            onInvoiceRevoke={(invoice) => setLayer({ kind: "invoice-revoke", invoice })}
-            onBatchEdit={(batch) => setLayer({ kind: "batch-edit", batch })}
-            onDamageUpdate={(damage) => setLayer({ kind: "damage-update", damage })}
-            onDelete={(kind, id) => {
-              if (!window.confirm("删除后无法恢复，确认删除这条记录？")) return;
-              void deleteRecord({ kind, id } as DeleteInput, "记录已删除").catch((cause) => setDetailError(messageOf(cause)));
-            }}
-          />
         </section>
       </main>
       {toast && <div className="toast success" role="status">{toast}</div>}

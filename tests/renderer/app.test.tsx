@@ -199,7 +199,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'create_project', payload: expect.objectContaining({ tagIds: ['tag-move', 'tag-pm', 'tag-custom'] }) })));
   });
 
-  it('最新布局：提醒后先选择项目，再在下方工作区查看上下文与详情', async () => {
+  it('最新布局：提醒、项目工作区与项目队列依次显示，队列选择共享工作区状态', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     const queue = await screen.findByRole('region', { name: /项目队列/ });
     const reminders = screen.getByRole('region', { name: /项目提醒快速处理/ });
@@ -207,8 +207,8 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const context = within(workspace).getByRole('complementary', { name: '当前上下文' });
     const detailTabs = within(workspace).getByRole('tablist', { name: '项目详情' });
     const detail = within(workspace).getByRole('region', { name: '客户 1' });
-    expect(reminders.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(queue.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(reminders.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(workspace.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(context.compareDocumentPosition(detailTabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     for (const region of [queue, detail, context]) { expect(within(region).getByLabelText('项目分类标签')).toHaveTextContent('项目类型'); expect(within(region).getByLabelText('项目分类标签')).toHaveTextContent('ICPMS'); }
     fireEvent.click(within(detail).getByRole('button', { name: '编辑项目资料' })); const dialog = screen.getByRole('dialog', { name: '编辑项目资料' }); fireEvent.click(within(dialog).getByRole('checkbox', { name: '搬迁' })); fireEvent.click(within(dialog).getByRole('checkbox', { name: '重点跟进' })); fireEvent.click(within(dialog).getByRole('button', { name: '保存项目资料' }));
