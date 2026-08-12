@@ -130,7 +130,7 @@ const ACTIONS: Array<{
   {
     type: "instrument",
     label: "搬迁仪器",
-    help: "名称、型号、序列号、UPS 与二维码标记",
+    help: "名称、型号、序列号与 UPS",
   },
   { type: "order", label: "开单记录", help: "记录开单日期、工程师、类型和服务单号" },
   {
@@ -1624,9 +1624,6 @@ function ProjectContext({
           {project.nonBlocking.pendingShipTo > 0 && (
             <span className="tag neutral">Account ID 待处理 {project.nonBlocking.pendingShipTo}</span>
           )}
-          {project.nonBlocking.qrUnmarked > 0 && (
-            <span className="tag neutral">二维码待标记 {project.nonBlocking.qrUnmarked}</span>
-          )}
           {project.nonBlocking.repairs > 0 && (
             <span className="tag warning">损坏/维修 {project.nonBlocking.repairs}</span>
           )}
@@ -2058,7 +2055,7 @@ function SectionTable({
 
 function sectionColumns(kind: WorkbenchV2SectionKind): string[] {
   return kind === "instruments"
-    ? ["name", "manufacturer", "model", "serviceLevel", "serialNo", "batchId", "ups", "qrRequested"]
+    ? ["name", "manufacturer", "model", "serviceLevel", "serialNo", "batchId", "ups"]
     : kind === "batches"
       ? [
           "planTransportDate",
@@ -2096,7 +2093,6 @@ function columnLabel(key: string): string {
         serialNo: "序列号",
         batchId: "物流费用记录",
         ups: "UPS",
-        qrRequested: "二维码是否申请",
         planTransportDate: "运输日期",
         transportCompany: "运输公司",
         budgetPrice: "合同预算价",
@@ -2289,7 +2285,6 @@ function InstrumentRecordForm({
           serialNo: String(data.get("serialNo") || "").trim(),
           serviceLevel: String(data.get("serviceLevel") || "").trim(),
           ups: data.get("ups") === "true",
-          qrRequested: data.get("qrRequested") === "true",
         },
       });
     } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); }
@@ -2315,7 +2310,6 @@ function InstrumentRecordForm({
             <Field name="serialNo" label="序列号" optional />
             <Field name="serviceLevel" label="服务级别" optional />
             <Select name="ups" label="UPS" required options={[["false", "否"], ["true", "是"]]} />
-            <Select name="qrRequested" label="二维码是否申请" required help="仅标记是否申请，不保存二维码地址。" options={[["false", "否"], ["true", "是"]]} />
           </div>
           {error && <div className="inline-error" role="alert">{error}</div>}
           <div className="form-footer"><span>保存一台仪器</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存记录"}</button></div>

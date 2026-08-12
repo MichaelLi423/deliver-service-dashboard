@@ -410,6 +410,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.click(screen.getByRole('tab', { name: '搬迁仪器' }));
     const table = (await screen.findByRole('columnheader', { name: '仪器产商' })).closest('table')!;
     expect(within(table).getByRole('columnheader', { name: '服务级别' })).toBeInTheDocument();
+    expect(within(table).queryByRole('columnheader', { name: '二维码是否申请' })).not.toBeInTheDocument();
     expect(table).toHaveTextContent('产商 0'); expect(table).toHaveTextContent('金牌');
   });
 
@@ -476,7 +477,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(context).toHaveTextContent('未进单先执行');
     expect(context).toHaveTextContent('先联系现场');
     expect(context).toHaveTextContent('Account ID 待处理 2');
-    expect(context).toHaveTextContent('二维码待标记 1');
+    expect(context).not.toHaveTextContent('二维码待标记');
     expect(context).toHaveTextContent('损坏/维修 3');
     expect(context).toHaveTextContent('2026-08-08');
     expect(context).not.toHaveTextContent('09:00');
@@ -676,6 +677,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
       expect(menu).not.toHaveTextContent('实际物流费用');
       expect(within(menu).queryByRole('button', { name: '二维码申请' })).not.toBeInTheDocument();
       expect(within(menu).getByText(/二维码申请位于独立导航/)).toBeInTheDocument();
+      if (label === '搬迁仪器') expect(menu).toHaveTextContent('名称、型号、序列号与 UPS');
       fireEvent.click(within(menu).getByText(label, { selector: 'strong' }).closest('button')!);
       const form = screen.getByRole('dialog');
       expect(form.querySelectorAll('input,select').length, label).toBeGreaterThan(0);
@@ -683,7 +685,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     }
   });
 
-  it('开单、合并批次、仪器二维码与损坏维修表单给出对应字段约束和就地反馈', async () => {
+  it('开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     let dialog = await openQuickAction('开单记录');
     const orderNo = within(dialog).getByRole('textbox', { name: /服务单号.*必填/ }); const engineer = within(dialog).getByRole('textbox', { name: /工程师.*必填/ });
@@ -710,7 +712,12 @@ describe('Oracle #10 bounded workbench renderer', () => {
       },
     })));
     dialog = await openQuickAction('搬迁仪器');
-    expect(within(dialog).getByRole('combobox', { name: /二维码是否申请.*必填/ })).toHaveAccessibleDescription(/不保存二维码地址/);
+    expect(within(dialog).queryByLabelText(/二维码是否申请/)).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/仪器名称.*必填/), { target: { value: '质谱仪' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({
+      op: 'submit_action', action: expect.objectContaining({ type: 'instrument', values: expect.not.objectContaining({ qrRequested: expect.anything() }) }),
+    })));
     fireEvent.keyDown(document, { key: 'Escape' });
     dialog = await openQuickAction('损坏/维修事项');
     expect(within(dialog).getByRole('spinbutton', { name: /备件金额.*必填/ })).toHaveAccessibleDescription(/合同金额为 0 时占比不可计算/);
