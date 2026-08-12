@@ -20,6 +20,31 @@
 
 ## ADDED Requirements
 
+### Requirement: 正式规格基线的验证矩阵来源与证据校验
+
+`npm run verify:matrix` SHALL 仅扫描正式基线 `openspec/specs/` 中的能力规格以生成场景→测试矩阵，且 SHALL NOT 自动扫描或合并 active 或 archived change 的 delta。每个正式基线场景的登记证据 SHALL 指向存在的测试或文档；测试证据关键词 SHALL 出现在当前 `it()`、`test()` 或 `describe()` 标题字面量中。active change 的 delta SHALL 由 `openspec validate <change> --strict` 独立验证，并仅在归档或同步进入正式基线后纳入验证矩阵。
+
+#### Scenario: 验证矩阵只读取正式规格基线
+
+- **GIVEN** 仓库同时存在正式规格基线及 active 或 archived change 的 delta
+- **WHEN** 运行 `npm run verify:matrix`
+- **THEN** 系统仅从 `openspec/specs/` 提取能力、Requirement 和 Scenario
+- **AND** active 或 archived change 的 delta 不会自动出现在生成矩阵中
+
+#### Scenario: 测试标题演进后证据仍可校验
+
+- **GIVEN** 正式基线场景已登记测试证据且测试标题已演进
+- **WHEN** 登记关键词更新为当前测试标题中的真实文字并运行 `npm run verify:matrix`
+- **THEN** 系统将该场景标记为有效证据
+- **AND** 不匹配当前测试标题字面量的登记仍被标记为证据无效
+
+#### Scenario: Active delta 通过严格 OpenSpec 验证
+
+- **GIVEN** 一个 active change 包含尚未同步到正式基线的规格 delta
+- **WHEN** 运行 `openspec validate <change> --strict`
+- **THEN** 系统独立验证该 change 的规划制品
+- **AND** 该 delta 在归档或同步到正式基线前不要求验证矩阵登记
+
 ### Requirement: 项目详情与队列的项目标签就近编辑入口
 
 工作台 SHALL 在项目详情的项目分类标签区域提供明确的编辑入口；当项目尚未关联任何分类标签时，该区域 SHALL 提供添加标签入口。高密度项目队列 SHALL 提供项目标签快捷入口，负责人使用该入口时系统 SHALL 以该行项目为标签编辑目标，且该操作 SHALL NOT 触发行点击、改变当前选中项目或打开其他项目详情。队列 SHALL NOT 在表格内展开全部项目标签，系统 SHALL NOT 为项目标签分配提供批量操作、右键菜单或混入快速记录的入口。

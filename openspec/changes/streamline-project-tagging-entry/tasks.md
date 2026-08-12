@@ -33,4 +33,10 @@
 
 - [x] 6.1 运行受影响 renderer 测试文件的 focused Vitest 命令，确认项目详情、队列、共享标签编辑层、保存/失败处理和标签库命名覆盖所有规格场景。
 - [x] 6.2 运行 `npm run typecheck`，确认 renderer 状态、组件与测试变更通过 TypeScript 检查。
-- [ ] 6.3 运行适用的 OpenSpec 验证及 `npm run verify:matrix`，确认变更制品有效且规格场景证据矩阵保持通过。
+- [x] 6.3 运行适用的 OpenSpec 验证及 `npm run verify:matrix`，确认变更制品有效且规格场景证据矩阵保持通过。
+
+## 7. 正式规格验证矩阵
+
+- [x] 7.1 将 `scripts/build-verification-matrix.mjs` 的规格扫描路径改为正式基线 `openspec/specs/`，移除对旧 change 的硬编码，且不自动扫描 active 或 archived change delta。
+- [x] 7.2 更新 `docs/verification/scenario-map.mjs` 中因测试标题演进而失效的正式基线场景证据关键词；不为尚未进入正式基线的本 change 13 个场景添加映射。
+- [x] 7.3 运行 `npm run verify:matrix` 生成正式基线矩阵并确认通过，同时运行适用的严格 OpenSpec 验证。
