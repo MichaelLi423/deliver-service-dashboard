@@ -38,5 +38,14 @@
 ## 7. 正式规格验证矩阵
 
 - [x] 7.1 将 `scripts/build-verification-matrix.mjs` 的规格扫描路径改为正式基线 `openspec/specs/`，移除对旧 change 的硬编码，且不自动扫描 active 或 archived change delta。
-- [x] 7.2 更新 `docs/verification/scenario-map.mjs` 中因测试标题演进而失效的正式基线场景证据关键词；不为尚未进入正式基线的本 change 13 个场景添加映射。
+- [x] 7.2 更新 `docs/verification/scenario-map.mjs` 中因测试标题演进而失效的正式基线场景证据关键词；不为本 change 的 ADDED Requirements 下尚未同步到正式基线的 17 个场景添加映射。
 - [x] 7.3 运行 `npm run verify:matrix` 生成正式基线矩阵并确认通过，同时运行适用的严格 OpenSpec 验证。
+
+## 8. 修复规划后的实现与验证
+
+- [x] 8.1 实现项目标签编辑层的统一关闭守卫：脏草稿的 Esc、取消、遮罩和关闭按钮都先显示“放弃本次修改？”确认；继续编辑保留草稿，确认放弃才关闭并归还焦点；干净草稿直接关闭，busy 时全部禁止关闭。
+- [x] 8.2 将项目详情和队列标签入口的窄窗口按钮高度固定为至少 40px，并保留完整文字、焦点样式与可访问名称。
+- [x] 8.3 规范化验证矩阵 capability 路径分隔符，保证 Windows 与 macOS 对正式基线 spec 文件派生相同 key。
+- [x] 8.4 新增或更新 focused 测试，覆盖脏草稿的 Escape/取消/遮罩/关闭按钮确认与继续编辑、干净直接关闭、busy 禁止关闭、焦点归还、非当前选中目标保存后不刷新上下文/详情、内部滚动及窄窗口 40px 按钮高度。
+- [x] 8.5 新增或更新验证矩阵路径测试，模拟 Windows 与 macOS 分隔符并确认 capability 映射一致；不得为本 change 的 ADDED Requirements 下尚未同步到正式基线的 17 个场景增加映射。
+- [x] 8.6 运行适用 focused 测试、`npm run typecheck`、`npm run verify:matrix`、`openspec validate streamline-project-tagging-entry --strict` 与 `git diff --check`，确认修复和规划制品均通过。

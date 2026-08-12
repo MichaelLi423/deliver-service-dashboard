@@ -1455,6 +1455,9 @@ describe('Oracle #10 bounded workbench renderer', () => {
       const workspace = await screen.findByRole('region', { name: '项目工作区' });
       const queue = screen.getByRole('grid', { name: '项目队列' });
       const trigger = within(queue).getByRole('button', { name: '编辑客户 2的项目标签' });
+      const projectPageCallsBeforeSave = vi.mocked(api.v2ProjectPage!).mock.calls.length;
+      const currentProjectDetailCallsBeforeSave = vi.mocked(api.v2ProjectDetail!).mock.calls
+        .filter(([projectId]) => projectId === 'p-1').length;
       fireEvent.click(trigger);
       const dialog = screen.getByRole('dialog', { name: '编辑项目标签' });
       expect(dialog).toHaveTextContent('客户 2');
@@ -1464,7 +1467,11 @@ describe('Oracle #10 bounded workbench renderer', () => {
       fireEvent.click(within(dialog).getByRole('checkbox', { name: 'PM' }));
       fireEvent.click(within(dialog).getByRole('button', { name: '保存标签' }));
       await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: { projectId: 'p-2', tagIds: ['tag-pm'] } }));
+      await waitFor(() => expect(vi.mocked(api.v2ProjectPage!).mock.calls.length).toBeGreaterThan(projectPageCallsBeforeSave));
       expect(api.v2ProjectDetail).not.toHaveBeenCalledWith('p-2');
+      expect(vi.mocked(api.v2ProjectDetail!).mock.calls.filter(([projectId]) => projectId === 'p-1')).toHaveLength(currentProjectDetailCallsBeforeSave);
+      expect(workspace).toHaveTextContent('客户 1');
+      expect(within(queue).getByRole('row', { name: /^客户 1 / })).toHaveAttribute('aria-selected', 'true');
 
       const detailTrigger = within(screen.getByRole('region', { name: '客户 1' })).getByRole('button', { name: '编辑客户 1的项目标签' });
       fireEvent.click(detailTrigger);
@@ -1536,6 +1543,79 @@ describe('Oracle #10 bounded workbench renderer', () => {
       fireEvent.click(within(editable).getByRole('checkbox', { name: '搬迁' }));
       fireEvent.keyDown(document, { key: 'Escape' });
       expect(await screen.findByRole('alertdialog', { name: '放弃本次修改？' })).toBeInTheDocument();
+    });
+
+    it.each([
+      ['取消', (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))],
+      ['Escape', () => fireEvent.keyDown(document, { key: 'Escape' })],
+      ['遮罩', () => fireEvent.mouseDown(document.querySelector('.overlay')!)],
+      ['关闭图标', (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }))],
+    ])('脏草稿经%s关闭时确认放弃，继续编辑保留草稿并恢复关闭控件焦点', async (_channel, close) => {
+      render(<App />);
+      const detail = await screen.findByRole('region', { name: '客户 1' });
+      const opener = within(detail).getByRole('button', { name: '编辑客户 1的项目标签' });
+      fireEvent.click(opener);
+      const dialog = screen.getByRole('dialog', { name: '编辑项目标签' });
+      const changed = within(dialog).getByRole('checkbox', { name: '搬迁' });
+      fireEvent.click(changed);
+      close(dialog);
+      const guard = await screen.findByRole('alertdialog', { name: '放弃本次修改？' });
+      const continueEditing = within(guard).getByRole('button', { name: '继续编辑' });
+      fireEvent.click(continueEditing);
+      expect(changed).not.toBeChecked();
+      await waitFor(() => expect(document.activeElement).toBe(
+        _channel === '取消' ? within(dialog).getByRole('button', { name: '取消' })
+          : _channel === '关闭图标' ? within(dialog).getByRole('button', { name: '关闭' })
+            : changed,
+      ));
+      close(dialog);
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '放弃修改' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目标签' })).not.toBeInTheDocument());
+      expect(opener).toHaveFocus();
+    });
+
+    it('干净草稿四种关闭渠道直接关闭；提交中四渠道均不能关闭', async () => {
+      let resolveSave!: (value: { businessRevision: number; invalidated: string[]; changed: { projectId: string } }) => void;
+      const api = mockApi({ v2Mutate: vi.fn().mockImplementation(() => new Promise((resolve) => { resolveSave = resolve; })) });
+      Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+      render(<App />);
+      const detail = await screen.findByRole('region', { name: '客户 1' });
+      const opener = within(detail).getByRole('button', { name: '编辑客户 1的项目标签' });
+      for (const close of [
+        () => fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' })),
+        () => fireEvent.keyDown(document, { key: 'Escape' }),
+        () => fireEvent.mouseDown(document.querySelector('.overlay')!),
+        () => fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' })),
+      ]) {
+        fireEvent.click(opener);
+        close();
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目标签' })).not.toBeInTheDocument());
+      }
+      fireEvent.click(opener);
+      const dialog = screen.getByRole('dialog', { name: '编辑项目标签' });
+      fireEvent.click(within(dialog).getByRole('checkbox', { name: '搬迁' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: '保存标签' }));
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: '正在保存…' })).toBeDisabled());
+      fireEvent.keyDown(document, { key: 'Escape' });
+      fireEvent.mouseDown(document.querySelector('.overlay')!);
+      fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
+      expect(screen.getByRole('dialog', { name: '编辑项目标签' })).toBeInTheDocument();
+      expect(screen.queryByRole('alertdialog', { name: '放弃本次修改？' })).not.toBeInTheDocument();
+      resolveSave({ businessRevision: 2, invalidated: ['projects'], changed: { projectId: 'p-1' } });
+    });
+
+    it('标签分配只提供单项目文字入口，不提供批量、右键、快速记录或表格内 picker', async () => {
+      render(<App />);
+      const queue = await screen.findByRole('grid', { name: '项目队列' });
+      expect(within(queue).queryByRole('button', { name: /批量.*标签|标签.*批量/ })).not.toBeInTheDocument();
+      expect(within(queue).queryByRole('menu')).not.toBeInTheDocument();
+      expect(within(queue).queryByRole('checkbox')).not.toBeInTheDocument();
+      const quick = screen.getAllByRole('button', { name: '快速记录' })[0]!;
+      fireEvent.click(quick);
+      const quickMenu = screen.getByRole('dialog');
+      expect(within(quickMenu).queryByRole('button', { name: /标签/ })).not.toBeInTheDocument();
+      expect(within(quickMenu).queryByRole('checkbox', { name: /搬迁|PM|ICPMS|重点跟进/ })).not.toBeInTheDocument();
     });
 
     it('写入失败保留草稿可重试；写入成功后的刷新失败关闭并提示且不重复写入', async () => {

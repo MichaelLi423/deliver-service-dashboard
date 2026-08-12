@@ -17,7 +17,7 @@
  * 存在缺证据/证据无效时以非 0 退出，作为 CI 可执行校验。
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -27,10 +27,15 @@ const outputPath = join(repoRoot, 'docs', 'verification', 'scenario-test-matrix.
 
 const { scenarioMap } = await import(registryUrl.href);
 
+/** 从 spec 文件路径提取跨平台稳定的 capability key。 */
+export function capabilityFromSpecPath(filePath) {
+  return basename(dirname(filePath.replaceAll('\\', '/')));
+}
+
 /** 解析单份 spec 文件。 */
 function parseSpec(filePath) {
   const content = readFileSync(filePath, 'utf-8');
-  const capability = relative(specsDir, filePath).split('/')[0];
+  const capability = capabilityFromSpecPath(filePath);
   const requirements = [];
   let current = null;
   for (const line of content.split('\n')) {
@@ -92,41 +97,42 @@ function validateEvidence(evidence) {
   return issues.length === 0 ? { valid: true } : { valid: false, detail: issues.join('；') };
 }
 
-const caps = listSpecFiles().map(parseSpec);
-const rows = [];
-let covered = 0;
-let pending = 0;
-let gap = 0;
+function main() {
+  const caps = listSpecFiles().map(parseSpec);
+  const rows = [];
+  let covered = 0;
+  let pending = 0;
+  let gap = 0;
 
-for (const cap of caps) {
-  const registry = scenarioMap[cap.capability] ?? {};
-  for (const req of cap.requirements) {
-    for (const scenario of req.scenarios) {
-      const entry = registry[scenario];
-      let status = 'unregistered';
-      if (entry) {
-        const check = validateEvidence(entry.evidence);
-        status = check.valid ? 'covered' : 'invalid-evidence';
-        if (entry.status === 'pending' && status === 'covered') status = 'pending';
+  for (const cap of caps) {
+    const registry = scenarioMap[cap.capability] ?? {};
+    for (const req of cap.requirements) {
+      for (const scenario of req.scenarios) {
+        const entry = registry[scenario];
+        let status = 'unregistered';
+        if (entry) {
+          const check = validateEvidence(entry.evidence);
+          status = check.valid ? 'covered' : 'invalid-evidence';
+          if (entry.status === 'pending' && status === 'covered') status = 'pending';
+        }
+        rows.push({
+          capability: cap.capability,
+          requirement: req.title,
+          scenario,
+          status,
+          evidence: entry?.evidence ?? [],
+          note: entry?.note ?? '',
+          issues: status === 'invalid-evidence' ? validateEvidence(entry.evidence).detail : '',
+        });
+        if (status === 'covered') covered += 1;
+        else if (status === 'pending') pending += 1;
+        else gap += 1;
       }
-      rows.push({
-        capability: cap.capability,
-        requirement: req.title,
-        scenario,
-        status,
-        evidence: entry?.evidence ?? [],
-        note: entry?.note ?? '',
-        issues: status === 'invalid-evidence' ? validateEvidence(entry.evidence).detail : '',
-      });
-      if (status === 'covered') covered += 1;
-      else if (status === 'pending') pending += 1;
-      else gap += 1;
     }
   }
-}
 
-const total = rows.length;
-const lines = [];
+  const total = rows.length;
+  const lines = [];
 lines.push('# 正式规格基线的场景→测试矩阵');
 lines.push('');
 lines.push('> 由 `npm run verify:matrix`（scripts/build-verification-matrix.mjs）自动生成，仅扫描 `openspec/specs/` 正式基线。');
@@ -183,10 +189,15 @@ if (invalid.length > 0) {
   lines.push('');
 }
 
-writeFileSync(outputPath, lines.join('\n'), 'utf-8');
-console.log(`矩阵已生成: ${relative(repoRoot, outputPath)}`);
-console.log(`汇总: 总场景 ${total}，有效证据 ${covered}，待验证 ${pending}，缺口 ${gap}`);
-if (invalid.length > 0) {
-  console.error(`缺口: ${invalid.length} 个场景缺少有效证据或未登记`);
-  process.exit(1);
+  writeFileSync(outputPath, lines.join('\n'), 'utf-8');
+  console.log(`矩阵已生成: ${relative(repoRoot, outputPath)}`);
+  console.log(`汇总: 总场景 ${total}，有效证据 ${covered}，待验证 ${pending}，缺口 ${gap}`);
+  if (invalid.length > 0) {
+    console.error(`缺口: ${invalid.length} 个场景缺少有效证据或未登记`);
+    process.exitCode = 1;
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
 }

@@ -1849,7 +1849,7 @@ export const scenarioMap = {
     '不展示错误的每页数量文案': { evidence: [['tests/interface/layout.test.ts', '项目队列明确固定每页20且不存在旧文案']] },
     '滚动时头部整体固定': { evidence: [['tests/interface/layout.test.ts', '只固定顶部导航，任务区保持紧凑并随页面滚动']] },
     '固定头部不遮挡内容': { evidence: [['tests/interface/layout.test.ts', '只固定顶部导航，任务区保持紧凑并随页面滚动']] },
-    '不拦截键盘焦点': { evidence: [['e2e/workbench-v2-layout.spec.ts', '最新布局：提醒、全宽单一项目工作区、高密项目队列依次排列且详情不裁切']] },
+    '不拦截键盘焦点': { evidence: [['e2e/workbench-v2-layout.spec.ts', '最新布局：提醒、全宽单一项目工作区、项目队列依次排列且详情不裁切']] },
     '进入工作台先处理项目提醒': {
       evidence: [
         ['tests/renderer/app.test.tsx', '任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色'],
@@ -2213,7 +2213,7 @@ export const scenarioMap = {
     },
     '当前上下文不挤占主队列': {
       evidence: [
-        ['tests/interface/layout.test.ts', '纵向主流程先提供项目队列，再显示项目上下文与详情'],
+        ['tests/interface/layout.test.ts', '纵向主流程依次显示提醒、单一项目工作区与项目队列'],
       ],
     },
     '维护全局标签库': {
@@ -2229,12 +2229,17 @@ export const scenarioMap = {
     },
     '交换后的区域位置保持内容与联动': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '最新布局：提醒后先选择项目，再在下方工作区查看上下文与详情'],
+        ['tests/renderer/app.test.tsx', '最新布局：提醒、项目工作区与项目队列依次显示，队列选择共享工作区状态'],
+      ],
+    },
+    '项目工作区不重复组件或状态': {
+      evidence: [
+        ['tests/interface/layout.test.ts', '纵向主流程依次显示提醒、单一项目工作区与项目队列'],
       ],
     },
     '1440px 与 1024px 下布局可用': {
       evidence: [
-        ['e2e/workbench-v2-layout.spec.ts', '最新布局：提醒、全宽单一项目工作区、高密项目队列依次排列且详情不裁切'],
+        ['e2e/workbench-v2-layout.spec.ts', '最新布局：提醒、全宽单一项目工作区、项目队列依次排列且详情不裁切'],
       ],
     },
     '1024px 宽下核心区域可操作': {
@@ -2249,7 +2254,12 @@ export const scenarioMap = {
     },
     '1440px 为主布局基准': {
       evidence: [
-        ['tests/interface/layout.test.ts', '纵向主流程先提供项目队列，再显示项目上下文与详情'],
+        ['e2e/workbench-v2-layout.spec.ts', '最新布局：提醒、全宽单一项目工作区、项目队列依次排列且详情不裁切'],
+      ],
+    },
+    '1190px 与 1170px 中间宽度保持可用': {
+      evidence: [
+        ['e2e/workbench-v2-layout.spec.ts', '最新布局：提醒、全宽单一项目工作区、项目队列依次排列且详情不裁切'],
       ],
     },
     '接近最小宽度不丢失主操作流': {

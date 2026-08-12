@@ -4,6 +4,7 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type MutableRefObject,
   type ReactNode,
   type CSSProperties,
 } from "react";
@@ -373,6 +374,7 @@ export function WorkbenchV2({
   const requests = useRef({ projects: 0, detail: 0, section: 0, overview: 0 });
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const importTrigger = useRef<HTMLButtonElement>(null);
+  const layerCloseRequest = useRef<(trigger?: HTMLElement | null) => void>(() => undefined);
   /** 提醒跳转/新建成功后钉住的目标项目：即使不在当前页也不被 loadProjects 重置选中。 */
   const selectionPin = useRef("");
 
@@ -1269,7 +1271,7 @@ export function WorkbenchV2({
                       {new Date(project.updatedAt).toLocaleDateString("zh-CN")}
                     </td>
                     <td>
-                      <div className="queue-row-actions">
+                      <div className="queue-row-actions queue-entry-actions">
                         <button
                           className="text-action row-quick-action"
                           aria-label={`为${project.customerName}快速记录`}
@@ -1361,6 +1363,7 @@ export function WorkbenchV2({
           protectDirty={layerRequiresDirtyProtection(layer)}
           controlledDirty={layer.kind === "edit-project-tags" ? tagEditGuard.dirty : undefined}
           busy={layer.kind === "edit-project-tags" ? tagEditGuard.busy : false}
+          requestCloseRef={layerCloseRequest}
           resetDirtyKey={layer.kind === "tags" ? tagCatalog : undefined}
           onClose={() => setLayer(null)}
         >
@@ -1383,7 +1386,7 @@ export function WorkbenchV2({
               catalogError={tagCatalogError}
               onRetryCatalog={loadTagCatalog}
               onGuardChange={setTagEditGuard}
-              onCancel={() => setLayer(null)}
+              onCancel={(trigger) => layerCloseRequest.current(trigger)}
               onSave={(tagIds) => saveProjectTags(layer.projectId, tagIds)}
             />
           ) : layer.kind === "edit-project" && selected ? (
@@ -3609,7 +3612,7 @@ function ProjectTagSection({
 }): JSX.Element {
   const hasTags = Boolean(groups?.length);
   return (
-    <section className={`project-tag-section ${hasTags ? "has-tags" : "is-empty"}`} aria-label="项目标签">
+    <section className={`project-tag-section detail-tag-entry ${hasTags ? "has-tags" : "is-empty"}`} aria-label="项目标签">
       <div className="project-tag-section-head">
         <div>
           <span>项目标签</span>
@@ -3653,7 +3656,7 @@ function ProjectTagEditForm({
 }: TagCatalogProps & {
   initialTagIds: readonly string[];
   onGuardChange: (guard: { dirty: boolean; busy: boolean }) => void;
-  onCancel: () => void;
+  onCancel: (trigger: HTMLElement) => void;
   onSave: (tagIds: readonly string[]) => Promise<void>;
 }): JSX.Element {
   const formRef = useRef<HTMLFormElement>(null);
@@ -3718,7 +3721,7 @@ function ProjectTagEditForm({
             type="button"
             disabled={busy}
             data-tag-edit-cancel
-            onClick={onCancel}
+            onClick={(event) => onCancel(event.currentTarget)}
           >
             取消
           </button>
@@ -4566,6 +4569,7 @@ function Layer({
   protectDirty = false,
   controlledDirty,
   busy = false,
+  requestCloseRef,
   resetDirtyKey,
   onClose,
   children,
@@ -4578,6 +4582,7 @@ function Layer({
   protectDirty?: boolean;
   controlledDirty?: boolean;
   busy?: boolean;
+  requestCloseRef?: MutableRefObject<(trigger?: HTMLElement | null) => void>;
   resetDirtyKey?: unknown;
   onClose: () => void;
   children: ReactNode;
@@ -4585,6 +4590,8 @@ function Layer({
   const panel = useRef<HTMLElement>(null);
   const discardPanel = useRef<HTMLElement>(null);
   const discardTrigger = useRef<HTMLElement | null>(null);
+  const lastPanelFocus = useRef<HTMLElement | null>(null);
+  const restoreDiscardFocus = useRef(false);
   const dirty = useRef(false);
   const controlledDirtyRef = useRef(controlledDirty);
   const busyRef = useRef(busy);
@@ -4604,8 +4611,8 @@ function Layer({
   }, [resetDirtyKey]);
   function closeDiscard(): void {
     discardOpenRef.current = false;
+    restoreDiscardFocus.current = true;
     setDiscardOpen(false);
-    window.setTimeout(() => discardTrigger.current?.focus(), 0);
   }
   function requestClose(trigger?: HTMLElement | null): void {
     if (busyRef.current) return;
@@ -4614,11 +4621,27 @@ function Layer({
       onCloseRef.current();
       return;
     }
-    discardTrigger.current = trigger ?? (document.activeElement as HTMLElement | null);
+    const requested = trigger ?? (document.activeElement as HTMLElement | null);
+    discardTrigger.current = requested && panel.current?.contains(requested)
+      ? requested
+      : lastPanelFocus.current;
     discardOpenRef.current = true;
     setDiscardOpen(true);
     window.setTimeout(() => discardPanel.current?.querySelector<HTMLElement>("button")?.focus(), 0);
   }
+  useEffect(() => {
+    if (discardOpen || !restoreDiscardFocus.current) return;
+    restoreDiscardFocus.current = false;
+    const target = discardTrigger.current;
+    window.requestAnimationFrame(() => {
+      if (target?.isConnected && !target.matches(":disabled")) target.focus();
+    });
+  }, [discardOpen]);
+  useEffect(() => {
+    if (!requestCloseRef) return;
+    requestCloseRef.current = (trigger) => requestClose(trigger ?? document.activeElement as HTMLElement | null);
+    return () => { requestCloseRef.current = () => undefined; };
+  }, [requestCloseRef]);
   useEffect(() => {
     const root = panel.current;
     if (!root) return;
@@ -4670,7 +4693,7 @@ function Layer({
       className={`overlay ${side ? "side" : ""}`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget)
-          requestClose(event.currentTarget as HTMLElement);
+          requestClose(document.activeElement as HTMLElement | null);
       }}
     >
       <section
@@ -4680,11 +4703,16 @@ function Layer({
         aria-modal="true"
         aria-labelledby="layer-title-v2"
         aria-hidden={discardOpen || undefined}
-        onInputCapture={() => {
-          if (protectDirty) dirty.current = true;
+        onFocusCapture={(event) => {
+          lastPanelFocus.current = event.target as HTMLElement;
         }}
-        onChangeCapture={() => {
+        onInputCapture={(event) => {
           if (protectDirty) dirty.current = true;
+          lastPanelFocus.current = event.target as HTMLElement;
+        }}
+        onChangeCapture={(event) => {
+          if (protectDirty) dirty.current = true;
+          lastPanelFocus.current = event.target as HTMLElement;
         }}
       >
         <header className="layer-head">

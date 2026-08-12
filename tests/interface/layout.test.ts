@@ -90,6 +90,20 @@ describe('workbench-interface 桌面布局静态约束', () => {
     expect(css).toContain('.discard-guard{position:fixed');
   });
 
+  it('标签编辑弹窗固定头尾，仅中部选择区内部滚动并隔离滚动链', () => {
+    expect(css).toContain('.project-tag-modal{width:min(720px,calc(100vw - 32px));max-height:min(760px,calc(100dvh - 48px));display:flex;flex-direction:column;overflow:hidden}');
+    expect(css).toContain('.project-tag-modal .layer-head{flex:0 0 auto}');
+    expect(css).toContain('.project-tag-edit-scroll{min-height:0;overflow-y:auto;overscroll-behavior:contain');
+    expect(css).toContain('.project-tag-edit-footer{flex:0 0 auto;display:flex');
+  });
+
+  it('760px 下详情和队列标签入口保留稳定类、完整文字按钮及 40px 最小高度', () => {
+    expect(renderer).toContain('detail-tag-entry');
+    expect(renderer).toContain('queue-entry-actions');
+    expect(css).toContain('.detail-tag-entry .project-tag-section-head .button{width:100%;min-height:40px}');
+    expect(css).toContain('.queue-entry-actions .row-quick-action{min-height:40px}');
+  });
+
   it('主要加载区提供可见反馈且保留 reduced motion 降级', () => {
     expect(renderer).toContain('正在读取工作台概况…');
     expect(css).toContain('.queue-table-wrap[aria-busy="true"]:before');
