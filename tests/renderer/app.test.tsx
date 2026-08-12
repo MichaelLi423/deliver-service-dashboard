@@ -1545,6 +1545,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
       expect(await screen.findByRole('alertdialog', { name: '放弃本次修改？' })).toBeInTheDocument();
     });
 
+    describe('脏草稿关闭先确认放弃', () => {
     it.each([
       ['取消', (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))],
       ['Escape', () => fireEvent.keyDown(document, { key: 'Escape' })],
@@ -1572,6 +1573,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
       fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '放弃修改' }));
       await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目标签' })).not.toBeInTheDocument());
       expect(opener).toHaveFocus();
+    });
     });
 
     it('干净草稿四种关闭渠道直接关闭；提交中四渠道均不能关闭', async () => {

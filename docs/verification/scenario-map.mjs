@@ -1826,6 +1826,23 @@ export const scenarioMap = {
 
   // ─────────────────────────── workbench-interface ────────────────────────
   'workbench-interface': {
+    '验证矩阵只读取正式规格基线': { evidence: [['scripts/build-verification-matrix.mjs', '仅扫描 `openspec/specs/` 正式基线']] },
+    '测试标题演进后证据仍可校验': { evidence: [['scripts/build-verification-matrix.mjs', '测试源码仅匹配测试标题']] },
+    'Active delta 通过严格 OpenSpec 验证': { evidence: [['scripts/build-verification-matrix.mjs', 'active 或 archived change 的 delta 由各自的 `openspec validate <change> --strict`']] },
+    '跨平台解析正式基线 capability 路径': { evidence: [['tests/interface/build-verification-matrix.test.ts', '对 macOS 与 Windows 风格 spec 路径生成相同 capability key']] },
+    '从详情编辑已有项目标签': { evidence: [['tests/renderer/app.test.tsx', '详情保持标签区域；无标签显示添加入口，已有标签显示编辑入口']] },
+    '无标签项目显示添加入口': { evidence: [['tests/renderer/app.test.tsx', '详情保持标签区域；无标签显示添加入口，已有标签显示编辑入口']] },
+    '从队列快捷入口编辑对应行项目': { evidence: [['tests/renderer/app.test.tsx', '队列标签入口固化行项目和草稿，不改变当前工作区；两个入口共享编辑器']] },
+    '排除非就近录入方式与表格标签展开': { evidence: [['tests/renderer/app.test.tsx', '标签分配只提供单项目文字入口，不提供批量、右键、快速记录或表格内 picker']] },
+    '两个入口打开相同编辑流程并加载现有标签': { evidence: [['tests/renderer/app.test.tsx', '队列标签入口固化行项目和草稿，不改变当前工作区；两个入口共享编辑器']] },
+    '按分组调整选择后仅保存标签': { evidence: [['tests/renderer/app.test.tsx', '标签保存只发送 tagIds，支持清空、改回原值和选中目标的详情刷新']] },
+    '无变化时不可提交': { evidence: [['tests/renderer/app.test.tsx', '标签保存只发送 tagIds，支持清空、改回原值和选中目标的详情刷新']] },
+    '保存成功按选中目标刷新相关展示并反馈': { evidence: [['tests/renderer/app.test.tsx', '标签保存只发送 tagIds，支持清空、改回原值和选中目标的详情刷新']] },
+    '保存失败保留可重试状态': { evidence: [['tests/renderer/app.test.tsx', '写入失败保留草稿可重试；写入成功后的刷新失败关闭并提示且不重复写入']] },
+    '脏草稿关闭先确认放弃': { evidence: [['tests/renderer/app.test.tsx', '脏草稿关闭先确认放弃']] },
+    '干净草稿直接关闭且 busy 禁止关闭': { evidence: [['tests/renderer/app.test.tsx', '干净草稿四种关闭渠道直接关闭；提交中四渠道均不能关闭']] },
+    '内容在流程内部滚动': { evidence: [['tests/interface/layout.test.ts', '标签编辑弹窗固定头尾，仅中部选择区内部滚动并隔离滚动链']] },
+    '窄窗口下入口收纳但保持可用': { evidence: [['tests/interface/layout.test.ts', '760px 下详情和队列标签入口保留稳定类、完整文字按钮及 40px 最小高度']] },
     '待掉票金额仅计入有效关联事实': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '孤立排除：引用不存在项目的掉票/合同事实不计入指标']] },
     '无项目时指标显示 0': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '零项目为 0：仅孤立/脏财务事实（无任何项目）时 pendingAmount 必为 0']] },
     '保持有效项目财务口径': { evidence: [['tests/integration/financial-closure.sqlite.test.ts', '已完成余额纳入：已完成项目仍有有效待掉票余额时按 final − 有效掉票计入'], ['tests/integration/financial-closure.sqlite.test.ts', '已取消排除：仅已取消项目存在时 pendingAmount 为 0（口径不改动为仅活跃项目）']] },

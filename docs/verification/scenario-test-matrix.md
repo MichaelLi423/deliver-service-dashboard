@@ -9,8 +9,8 @@
 | 指标 | 数量 |
 | --- | --- |
 | 能力 spec 数 | 15 |
-| ADDED Requirements 场景总数 | 565 |
-| 有有效测试证据（✅） | 565 |
+| ADDED Requirements 场景总数 | 582 |
+| 有有效测试证据（✅） | 582 |
 | 待验证（⏳，真实源迁移 / Windows 验证） | 0 |
 | 缺证据 / 证据无效（❌） | 0 |
 
@@ -538,6 +538,23 @@
 | 生命周期吞吐 | 不提供流入流出与自动瓶颈提示 | ✅ | `tests/renderer/app.test.tsx`「任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色」 | 生命周期吞吐精简：不提供流入流出（inflow/outflow）节奏指标与自动瓶颈提示（客户最终反馈 2026-08-10） |
 | 项目分类标签库维护与按组多选展示 | 维护全局标签库 | ✅ | `tests/renderer/app.test.tsx`「最新布局：顶部主导航直接显示标签库并打开全局标签库」 |  |
 | 项目分类标签库维护与按组多选展示 | 按组多选并展示项目分类标签 | ✅ | `tests/renderer/app.test.tsx`「新建项目按组键盘可达地同组与跨组多选，并提交全局自定义 tagIds」<br>`tests/renderer/app.test.tsx`「详情保持标签区域；无标签显示添加入口，已有标签显示编辑入口」 |  |
+| 正式规格基线的验证矩阵来源与证据校验 | 验证矩阵只读取正式规格基线 | ✅ | `scripts/build-verification-matrix.mjs`「仅扫描 `openspec/specs/` 正式基线」 |  |
+| 正式规格基线的验证矩阵来源与证据校验 | 测试标题演进后证据仍可校验 | ✅ | `scripts/build-verification-matrix.mjs`「测试源码仅匹配测试标题」 |  |
+| 正式规格基线的验证矩阵来源与证据校验 | Active delta 通过严格 OpenSpec 验证 | ✅ | `scripts/build-verification-matrix.mjs`「active 或 archived change 的 delta 由各自的 `openspec validate <change> --strict`」 |  |
+| 正式规格基线的验证矩阵来源与证据校验 | 跨平台解析正式基线 capability 路径 | ✅ | `tests/interface/build-verification-matrix.test.ts`「对 macOS 与 Windows 风格 spec 路径生成相同 capability key」 |  |
+| 项目详情与队列的项目标签就近编辑入口 | 从详情编辑已有项目标签 | ✅ | `tests/renderer/app.test.tsx`「详情保持标签区域；无标签显示添加入口，已有标签显示编辑入口」 |  |
+| 项目详情与队列的项目标签就近编辑入口 | 无标签项目显示添加入口 | ✅ | `tests/renderer/app.test.tsx`「详情保持标签区域；无标签显示添加入口，已有标签显示编辑入口」 |  |
+| 项目详情与队列的项目标签就近编辑入口 | 从队列快捷入口编辑对应行项目 | ✅ | `tests/renderer/app.test.tsx`「队列标签入口固化行项目和草稿，不改变当前工作区；两个入口共享编辑器」 |  |
+| 项目详情与队列的项目标签就近编辑入口 | 排除非就近录入方式与表格标签展开 | ✅ | `tests/renderer/app.test.tsx`「标签分配只提供单项目文字入口，不提供批量、右键、快速记录或表格内 picker」 |  |
+| 共享的轻量项目标签编辑流程 | 两个入口打开相同编辑流程并加载现有标签 | ✅ | `tests/renderer/app.test.tsx`「队列标签入口固化行项目和草稿，不改变当前工作区；两个入口共享编辑器」 |  |
+| 共享的轻量项目标签编辑流程 | 按分组调整选择后仅保存标签 | ✅ | `tests/renderer/app.test.tsx`「标签保存只发送 tagIds，支持清空、改回原值和选中目标的详情刷新」 |  |
+| 共享的轻量项目标签编辑流程 | 无变化时不可提交 | ✅ | `tests/renderer/app.test.tsx`「标签保存只发送 tagIds，支持清空、改回原值和选中目标的详情刷新」 |  |
+| 共享的轻量项目标签编辑流程 | 保存成功按选中目标刷新相关展示并反馈 | ✅ | `tests/renderer/app.test.tsx`「标签保存只发送 tagIds，支持清空、改回原值和选中目标的详情刷新」 |  |
+| 共享的轻量项目标签编辑流程 | 保存失败保留可重试状态 | ✅ | `tests/renderer/app.test.tsx`「写入失败保留草稿可重试；写入成功后的刷新失败关闭并提示且不重复写入」 |  |
+| 项目标签编辑流程的可访问关闭与窄窗口可用性 | 脏草稿关闭先确认放弃 | ✅ | `tests/renderer/app.test.tsx`「脏草稿关闭先确认放弃」 |  |
+| 项目标签编辑流程的可访问关闭与窄窗口可用性 | 干净草稿直接关闭且 busy 禁止关闭 | ✅ | `tests/renderer/app.test.tsx`「干净草稿四种关闭渠道直接关闭；提交中四渠道均不能关闭」 |  |
+| 项目标签编辑流程的可访问关闭与窄窗口可用性 | 内容在流程内部滚动 | ✅ | `tests/interface/layout.test.ts`「标签编辑弹窗固定头尾，仅中部选择区内部滚动并隔离滚动链」 |  |
+| 项目标签编辑流程的可访问关闭与窄窗口可用性 | 窄窗口下入口收纳但保持可用 | ✅ | `tests/interface/layout.test.ts`「760px 下详情和队列标签入口保留稳定类、完整文字按钮及 40px 最小高度」 |  |
 | 当前上下文 | 随选中项目更新上下文 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
 | 当前上下文 | 展示状态异常与当前项目提醒 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
 | 当前上下文 | 展示项目分类标签 | ✅ | `tests/renderer/app.test.tsx`「详情保持标签区域；无标签显示添加入口，已有标签显示编辑入口」 |  |
