@@ -975,11 +975,11 @@ export function WorkbenchV2({
         </div>
       </header>
       <main id="main" className="page">
-        <section className="command" aria-label="任务指挥台">
+        <section className="command" aria-label="今日工作台">
           <div>
-            <p className="overline">任务指挥台</p>
-            <h1>先处理提醒，再连续推进项目</h1>
-            <p>提醒由负责人手工维护；空字段不会自动生成提醒。</p>
+            <p className="overline">今日工作台</p>
+            <h1>把每一次搬迁，推进得更稳</h1>
+            <p>提醒、队列和关键事项，都在这里。</p>
           </div>
           <div className="row-actions">
             <button
@@ -1096,9 +1096,9 @@ export function WorkbenchV2({
           <div className="panel-head">
             <div>
               <h2 id="reminder-title">
-                项目提醒快速处理 {overview?.reminderTotal ?? 0}
+                待办提醒 {overview?.reminderTotal ?? 0}
               </h2>
-              <p>按业务日期分列，同日项目集中处理</p>
+              <p>按提醒日期查看需要跟进的项目</p>
             </div>
             <button
               className="text-action"

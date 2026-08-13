@@ -156,7 +156,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
     render(<App />);
     expect(
-      await screen.findByRole('heading', { name: '先处理提醒，再连续推进项目' }),
+      await screen.findByRole('heading', { name: '把每一次搬迁，推进得更稳' }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '首次使用初始化' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '登录本地工作台' })).not.toBeInTheDocument();
@@ -223,7 +223,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   it('最新布局：提醒、项目工作区与项目队列依次显示，队列选择共享工作区状态', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     const queue = await screen.findByRole('region', { name: /项目队列/ });
-    const reminders = screen.getByRole('region', { name: /项目提醒快速处理/ });
+    const reminders = screen.getByRole('region', { name: /待办提醒/ });
     const workspace = screen.getByRole('region', { name: '项目工作区' });
     const context = within(workspace).getByRole('complementary', { name: '当前上下文' });
     const detailTabs = within(workspace).getByRole('tablist', { name: '项目详情' });
@@ -475,13 +475,14 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
   it('任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色', async () => {
     render(<App />);
-    expect(await screen.findByRole('heading', { name: '先处理提醒，再连续推进项目' })).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: '关键运营指标' })).toHaveTextContent('活跃搬迁项目99900');
+    expect(await screen.findByRole('heading', { name: '把每一次搬迁，推进得更稳' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '今日工作台' })).toHaveTextContent('提醒、队列和关键事项，都在这里。');
+    await waitFor(() => expect(screen.getByRole('region', { name: '关键运营指标' })).toHaveTextContent('活跃搬迁项目99900'));
     const lifecycle = screen.getByRole('region', { name: '生命周期吞吐' });
     expect(lifecycle).not.toHaveTextContent('当前瓶颈');
     expect(within(lifecycle).getByRole('button', { name: /待进单.*20000/ })).toHaveClass('stage', 'not-entered');
     expect(within(lifecycle).queryByText('客户 1')).not.toBeInTheDocument();
-    expect(screen.getByRole('region', { name: /项目提醒快速处理/ })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '待办提醒 200' })).toHaveTextContent('按提醒日期查看需要跟进的项目');
     expect(screen.getByRole('grid', { name: '项目队列' })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: '当前上下文' })).toHaveClass('entered');
     expect(within(screen.getByRole('grid', { name: '项目队列' })).getByRole('row', { name: /^客户 1 / })).toHaveClass('project-status-executing');
@@ -503,7 +504,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(context).toHaveTextContent('2026-08-08');
     expect(context).not.toHaveTextContent('09:00');
     expect(within(context).getByLabelText('金额闭环')).toHaveTextContent('待掉票USD 60,000.00');
-    fireEvent.click(within(screen.getByRole('region', { name: /项目提醒快速处理/ })).getByRole('button', { name: /客户 1/ }));
+    fireEvent.click(within(screen.getByRole('region', { name: /待办提醒/ })).getByRole('button', { name: /客户 1/ }));
     await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ reminder: 'any', query: 'ECC-000001' })));
     expect(screen.getByRole('region', { name: /项目队列/ })).toHaveFocus();
   });
@@ -1321,7 +1322,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     render(<App />);
     await screen.findByRole('heading', { name: /项目队列/ });
 
-    fireEvent.click(within(screen.getByRole('region', { name: /项目提醒快速处理/ })).getByRole('button', { name: /跨页客户/ }));
+    fireEvent.click(within(screen.getByRole('region', { name: /待办提醒/ })).getByRole('button', { name: /跨页客户/ }));
 
     // 原症状：详情请求失败 + 项目不在当前页时，整个面板（含错误与重试）消失。
     expect(await screen.findByText('详情读取失败')).toBeInTheDocument();
