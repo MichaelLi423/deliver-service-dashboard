@@ -3,7 +3,7 @@
 > **培训夹具，不是产品 OpenSpec change。**
 > 本目录位于 `docs/training/vibe-coding/` 下，是静态教学材料；openspec CLI 只扫描仓库根目录 `openspec/changes/`，**不会把本包当作活动产品 change 扫描**。本包没有任何产品批准、合入或发布语义。
 
-本包为《Vibe Coding》课程新版 PPT 回放提供**完整教学叙事材料**：用 proposal / spec / tasks / evidence 还原"提醒临期窗口配置入口"这条演示需求在远端培训分支上的完整开发闭环。全部内容冻结于 green-final `d304bd5` 当时的教学叙事，不随当前 HEAD 的 OpenSpec 归档继续漂移。
+本包为《Vibe Coding》课程浏览器课件回放提供**完整教学叙事材料**：用 proposal / spec / tasks / evidence 还原"提醒临期窗口配置入口"这条演示需求在远端培训分支上的完整开发闭环。全部内容冻结于 green-final `d304bd5` 当时的教学叙事，不随当前 HEAD 的 OpenSpec 归档继续漂移。
 
 ## 为什么放在培训目录
 
@@ -30,7 +30,7 @@
 
 ## 如何在课件中使用
 
-- 新版 PPT 回放引用本包作为"当时文档长什么样"的静态证据，替代向 HEAD 中的 `openspec/` 现场查找（避免归档漂移影响演示）。
+- 浏览器课件回放引用本包作为"当时文档长什么样"的静态证据，替代向 HEAD 中的 `openspec/` 现场查找（避免归档漂移影响演示）。
 - 与现有课件材料配合：四阶段切换与现场命令以 [../demo-runbook.md](../demo-runbook.md) 为准，讲解卡与证据卡以 [../presenter-preparation.md](../presenter-preparation.md) 为准，环境准备以 [../environment-checklist.md](../environment-checklist.md) 为准。
 - 本包五个文件对应闭环环节：proposal（需求澄清产物）→ spec（规范）→ tasks（最小步骤）→ evidence（验证证据与边界）。注意：本包**没有 design.md**（当时该 change 未产生 design 文档）；evidence.md 是**课程自定义的证据文件，不是标准 OpenSpec artifact**（标准 artifacts 为 proposal/spec/tasks/design）。
 - 术语以课程词汇表 [../CONTEXT.md](../CONTEXT.md) 为准（培训夹具、四阶段快照、预设失败、质量双门等）；业务领域语言以仓库根目录 [../../../../CONTEXT.md](../../../../CONTEXT.md) 为准。

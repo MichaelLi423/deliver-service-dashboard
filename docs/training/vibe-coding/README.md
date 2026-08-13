@@ -42,7 +42,8 @@
 | [review-report.md](./review-report.md) | 历史代码评审记录（培训夹具证据，非当前产品评审） |
 | [verify-report.md](./verify-report.md) | 历史规范核对记录（培训夹具证据） |
 | [training-change/README.md](./training-change/README.md) | 培训夹具材料包（静态教学叙事材料，非产品 change） |
-| [slides/README.md](./slides/README.md) | 演示文稿生成与字体说明（PPTX/PDF 生成脚本） |
+| [slides/index.html](./slides/index.html) | 可离线直接打开的 34 页浏览器幻灯片 |
+| [slides/README.md](./slides/README.md) | 演讲操作与验证说明 |
 
 业务领域术语以仓库根目录 [CONTEXT.md](../../../CONTEXT.md) 为准；上下文关系见 [CONTEXT-MAP.md](../../../CONTEXT-MAP.md)。
 

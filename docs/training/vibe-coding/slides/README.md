@@ -1,39 +1,24 @@
-# Vibe Coding 培训幻灯片
+# Vibe Coding 浏览器幻灯片
 
-34 页、90 分钟、16:9，面向技术混合受众。课程采用全部静态回放，不要求学员跟做。
+34 页、90 分钟，面向中文技术混合受众。课件是一个零依赖 HTML 文件，可离线演讲；所有 Agent 输出均为依据已核验步骤和历史输出摘要重新排版的静态重构材料，不是原始界面截图，也不是现场 Agent 输出。
 
-## 生成
+## 打开
 
-```bash
-python3 -m venv /tmp/vibe-slides-venv
-/tmp/vibe-slides-venv/bin/pip install -r requirements.txt
-/tmp/vibe-slides-venv/bin/python generate_slides.py
-```
+直接用现代浏览器打开 [`index.html`](./index.html)，`file://` 下即可完整使用，无需安装依赖、启动服务或联网。
 
-建议将虚拟环境放在项目目录外。Windows 请使用等价的临时目录与虚拟环境命令。
+建议演讲前使用 1366×768 或更高分辨率打开，按 `F` 进入全屏，并跳到页 10、19、26、32 检查本机字体换行。演讲前关闭通知和其他敏感窗口。
 
-如需同时生成逐页 PNG 与 contact sheet：
+## 操作
 
-```bash
-VIBE_SLIDES_PREVIEW_DIR=/tmp/vibe-slides-preview \
-  /tmp/vibe-slides-venv/bin/python generate_slides.py
-```
+- 下一页：`ArrowRight`、`PageDown`、`Space` 或“下一页”按钮；
+- 上一页：`ArrowLeft`、`PageUp` 或“上一页”按钮；
+- 首尾页：`Home` / `End`；
+- 全屏：`F` 进入或退出，`Escape` 退出；
+- 触控设备：横向滑动；
+- 深链：URL hash 使用 `#slide-10` 形式，刷新后保持当前页。
 
-脚本从同一内容与布局模型生成：
+页面底部显示进度和当前/总页码。按钮支持键盘焦点；系统启用“减少动态效果”时会关闭转场动画。浏览器打印会按 16:9 逐页分页。
 
-- `vibe-coding-training.pptx`：文字和几何图形可编辑；
-- `vibe-coding-training.pdf`：内容一致的固定渲染播放兜底。
+## 验证
 
-## 设计系统
-
-新版采用“编辑式演讲稿 / 工作材料册”语言：暖白纸面、墨黑正文、历史输出摘要的静态重构材料、规范摘录、审阅批注与证据账本。版式使用 1600×900 的 12 列网格（左右 96、列宽 88、沟槽 32）和 8px 垂直基线。绿色只表示已验证，红色只表示失败或人工确认，黄色只表示提问与注意。
-
-## 字体
-
-- PPTX 中文字体设置为 `Microsoft YaHei`，英文和数字为 `Aptos`，代码为 `Aptos Mono`。字体不嵌入；缺失时 PowerPoint 会使用系统替代字体，播放前应复查换行与基线。
-- PDF 和 PNG 默认寻找 PingFang、思源黑体或 Noto CJK。可通过 `VIBE_SLIDES_CJK_FONT` 指定 `.ttf`、`.otf` 或 `.ttc`。
-- TTC 字体索引可由 `VIBE_SLIDES_CJK_REGULAR_INDEX`、`VIBE_SLIDES_CJK_MEDIUM_INDEX`、`VIBE_SLIDES_CJK_BOLD_INDEX` 覆盖。
-
-## PDF 限制
-
-Pillow 使用指定中文字体固定渲染每页，ReportLab 将页面封装为 PDF，因此 PDF 不依赖 PowerPoint 或 LibreOffice。PDF 页面为高分辨率整页图，不提供可选择文本；需要编辑时使用 PPTX。
+演讲前在桌面与手机宽度检查首、中、末页及信息密集页，确认没有横向滚动或关键内容裁切。结构检查应确认：恰好 34 个 `section.slide`、ID 唯一、每页均有标题、控制按钮和键盘脚本存在。

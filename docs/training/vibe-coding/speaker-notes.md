@@ -92,7 +92,7 @@
 
 **31:00–33:00 页 19 安装/配置/权限**
 
-> 安装示例：`npx oh-my-opencode-slim@latest install`，然后登录、刷新，`ping all agents` 检查各角色就绪。三个必须讲的边界：配置路径（默认用户级配置 `~/.config/opencode/oh-my-opencode-slim.json(c)`，项目级 `.opencode/oh-my-opencode-slim.json` 只是可选的覆盖——不要笼统说"统一写进项目配置"）；权限（安装和运行会读写配置、调用模型，看清它请求什么再批准；安装不会创建 agent 目录）；成本（Council 这类多模型投票角色会明显增加 token 消耗）。两个环境变量：后台编排依赖 `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true`，整体禁用 `OH_MY_OPENCODE_SLIM_DISABLE=1`——不用时关掉。高级命令放手册，不放主 PPT。
+> 安装示例：`npx oh-my-opencode-slim@latest install`，然后登录、刷新，`ping all agents` 检查各角色就绪。三个必须讲的边界：配置路径（默认用户级配置 `~/.config/opencode/oh-my-opencode-slim.json(c)`，项目级 `.opencode/oh-my-opencode-slim.json` 只是可选的覆盖——不要笼统说"统一写进项目配置"）；权限（安装和运行会读写配置、调用模型，看清它请求什么再批准；安装不会创建 agent 目录）；成本（Council 这类多模型投票角色会明显增加 token 消耗）。两个环境变量：后台编排依赖 `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true`，整体禁用 `OH_MY_OPENCODE_SLIM_DISABLE=1`——不用时关掉。高级命令放手册，不放主课件。
 
 **33:00–35:00 页 20 agents 分工与最小用法**
 

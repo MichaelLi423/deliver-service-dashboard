@@ -49,7 +49,7 @@
   - **配置路径**：默认用户级配置 `~/.config/opencode/oh-my-opencode-slim.json(c)`；项目级 `.opencode/oh-my-opencode-slim.json` 是**可选**的项目覆盖，不是唯一落点，不要说"统一写进项目配置"。
   - **权限**：安装和运行会读写用户级配置、调用模型，看清请求什么再批准；安装**不会**创建 agent 目录。
   - **成本**：Council 等多模型投票角色会明显增加 token 消耗，心里要有数。
-  - **开关**：后台编排依赖环境变量 `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true`；整体禁用 `OH_MY_OPENCODE_SLIM_DISABLE=1`，不用时关掉。高级命令放讲师手册，不进主 PPT。
+  - **开关**：后台编排依赖环境变量 `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true`；整体禁用 `OH_MY_OPENCODE_SLIM_DISABLE=1`，不用时关掉。高级命令放讲师手册，不进主课件。
 - 本课演示主要用单 Agent 流程，编排只做概念定位。
 
 ## OpenSpec：是什么 / 为什么 / 怎么用

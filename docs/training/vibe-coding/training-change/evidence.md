@@ -1,6 +1,6 @@
 # 培训验证证据与边界（夹具）
 
-> 证据来自 green-final `d304bd5` 当时在 macOS arm64 开发机上的记录，已回填到课件材料（阶段证据见 [../demo-runbook.md](../demo-runbook.md)，证据卡见 [../presenter-preparation.md](../presenter-preparation.md)，核对映射见 [../verify-report.md](../verify-report.md)，评审记录见 [../review-report.md](../review-report.md)）。本文件冻结这些数字与边界，供新版 PPT 回放引用，不随当前 HEAD 演进。
+> 证据来自 green-final `d304bd5` 当时在 macOS arm64 开发机上的记录，已回填到课件材料（阶段证据见 [../demo-runbook.md](../demo-runbook.md)，证据卡见 [../presenter-preparation.md](../presenter-preparation.md)，核对映射见 [../verify-report.md](../verify-report.md)，评审记录见 [../review-report.md](../review-report.md)）。本文件冻结这些数字与边界，供浏览器课件回放引用，不随当前 HEAD 演进。
 
 ## 阶段证据（当时记录）
 
