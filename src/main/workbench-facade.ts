@@ -1044,7 +1044,10 @@ export class WorkbenchFacade {
         case 'order': {
           // 合并服务单四字段后 UI 不再传 customerName：relocation/certification/
           // parts_by_mail/pm 四种类型都从当前项目关联客户派生客户单位。
-          // 领域规则保持不变：仅 relocation 关联 projectId，其余三类独立保存。
+          // 项目上下文中的四类开单均归档关联当前项目并显示在该项目 orders
+          // section；非 relocation 的项目关联仅为归档/查询关系，不进入搬迁
+          // 生命周期。无项目上下文时（projectId 为空）非搬迁开单独立保存，
+          // relocation 仍由领域服务强制要求项目。
           const orderType = text(v.orderType) as 'relocation' | 'certification' | 'parts_by_mail' | 'pm';
           let orderCustomerName = text(v.customerName);
           const orderProject = projectId ? this.projects.findById(projectId) : undefined;
@@ -1057,7 +1060,7 @@ export class WorkbenchFacade {
           if (orderCustomerName === '') {
             throw new ValidationError('CUSTOMER_NAME_REQUIRED', '开单客户信息从项目客户读取失败，请先关联客户');
           }
-          new ServiceOrderService(this.orders, this.projects).recordOrder({orderType,serviceOrderNo:text(v.serviceOrderNo),orderedAt:businessDate(v.orderedAt,'开单日期') ?? '',engineer:text(v.engineer),customerName:orderCustomerName,projectId:orderType==='relocation'?projectId:null,note:optional(v.note)},actor); break;
+          new ServiceOrderService(this.orders, this.projects).recordOrder({orderType,serviceOrderNo:text(v.serviceOrderNo),orderedAt:businessDate(v.orderedAt,'开单日期') ?? '',engineer:text(v.engineer),customerName:orderCustomerName,projectId:projectId || null,note:optional(v.note)},actor); break;
         }
         case 'logistics': {
           // 与快速 batch 同口径：物流成交价必填但允许显式 0（缺失/空串报错，不静默当 0）。

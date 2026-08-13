@@ -112,6 +112,44 @@ describe('service-order-recording SQLite 集成（3.12）', () => {
     }
   });
 
+  it('非搬迁开单可选归档关联项目：listByProject 可见、关闭重开保留、工作量不依赖项目', () => {
+    const dir = makeTempDir();
+    try {
+      const ctx = openService(dir);
+      const project = createPendingProject();
+      ctx.projects.save(project);
+      const beforeStatus = project.status;
+      const beforeEntryAt = project.entryAt;
+
+      const certification = ctx.orderService.recordOrder(
+        { orderType: 'certification', serviceOrderNo: 'ORD-301', engineer: '工程师甲', customerName: '客户A', projectId: project.id },
+        ACTOR,
+      );
+      // 无项目独立保存路径保持可用
+      const pm = ctx.orderService.recordOrder(
+        { orderType: 'pm', serviceOrderNo: 'ORD-302', engineer: '工程师乙', customerName: '客户B' },
+        ACTOR,
+      );
+
+      // 归档关联不进入搬迁生命周期：项目状态与进单状态不变
+      expect(ctx.projects.findById(project.id)!.status).toBe(beforeStatus);
+      expect(ctx.projects.findById(project.id)!.entryAt).toBe(beforeEntryAt);
+
+      closeDatabase(ctx.db);
+      const reopened = openService(dir);
+      expect(reopened.orders.findById(certification.id)?.projectId).toBe(project.id);
+      expect(reopened.orders.findById(pm.id)?.projectId).toBeNull();
+      expect(reopened.orders.listByProject(project.id)).toHaveLength(1);
+      // 工作量按唯一服务单号计数，有项目归档与无项目独立开单均计入
+      const counts = reopened.orderService.countWorkload();
+      expect(counts.find((c) => c.orderType === 'certification')?.count).toBe(1);
+      expect(counts.find((c) => c.orderType === 'pm')?.count).toBe(1);
+      closeDatabase(reopened.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
+
   it('独立搬迁开单默认当天并保存账号归属快照', () => {
     const dir = makeTempDir();
     try {

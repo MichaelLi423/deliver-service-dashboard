@@ -1,8 +1,9 @@
 /**
  * service-order-recording 能力（四类开单记录）。
  *
- * - 开单区分搬迁、认证、单寄备件、PM 四类业务；搬迁开单关联搬迁项目，
- *   认证/单寄备件/PM 开单独立保存、不进入搬迁项目生命周期。
+ * - 开单区分搬迁、认证、单寄备件、PM 四类业务；搬迁开单关联搬迁项目；
+ *   认证/单寄备件/PM 开单可独立保存（无项目），亦可归档关联项目（仅归档/
+ *   查询关系），均不进入搬迁项目生命周期。
  * - 非空服务单号全局唯一、四类业务共用唯一空间（TBD-21），
  *   唯一性由 SQLite 部分唯一索引（WHERE service_order_no IS NOT NULL）落实。
  * - 开单工作量按唯一服务单号计数（规则见 tasks 7.4）。
@@ -25,7 +26,7 @@ export interface ServiceOrder {
   engineer: string;
   /** 客户单位（必填）。 */
   customerName: string;
-  /** 搬迁开单关联的搬迁项目（内部 ID）；其余三类为空。 */
+  /** 项目归档关联（内部 ID）：搬迁开单必填；认证/单寄备件/PM 可选（仅归档/查询关系，不进入搬迁生命周期）。 */
   projectId: string | null;
   /** 备注可选。 */
   note: string | null;

@@ -9,8 +9,8 @@
 | 指标 | 数量 |
 | --- | --- |
 | 能力 spec 数 | 15 |
-| ADDED Requirements 场景总数 | 582 |
-| 有有效测试证据（✅） | 582 |
+| ADDED Requirements 场景总数 | 585 |
+| 有有效测试证据（✅） | 585 |
 | 待验证（⏳，真实源迁移 / Windows 验证） | 0 |
 | 缺证据 / 证据无效（❌） | 0 |
 
@@ -459,6 +459,9 @@
 | Requirement | Scenario | 状态 | 测试证据 | 备注 |
 | --- | --- | --- | --- | --- |
 | 四类开单与项目关联 | 搬迁开单关联项目 | ✅ | `tests/domain/service-order-recording.test.ts`「搬迁开单关联对应搬迁项目」 |  |
+| 四类开单与项目关联 | 非搬迁开单归档关联当前项目 | ✅ | `tests/domain/service-order-recording.test.ts`「非搬迁开单可关联项目（仅归档/查询关系），不进入搬迁生命周期」<br>`tests/integration/service-order-recording.sqlite.test.ts`「非搬迁开单可选归档关联项目：listByProject 可见、关闭重开保留、工作量不依赖项目」 |  |
+| 四类开单与项目关联 | 非搬迁开单无项目时独立保存 | ✅ | `tests/domain/service-order-recording.test.ts`「认证开单独立保存、不进入搬迁项目生命周期」<br>`tests/integration/service-order-recording.sqlite.test.ts`「非搬迁开单可选归档关联项目：listByProject 可见、关闭重开保留、工作量不依赖项目」 |  |
+| 四类开单与项目关联 | 非搬迁开单关联不存在的项目被拒 | ✅ | `tests/domain/service-order-recording.test.ts`「非搬迁开单关联不存在的项目时拒绝」 |  |
 | 四类开单与项目关联 | 认证开单独立保存 | ✅ | `tests/domain/service-order-recording.test.ts`「认证开单独立保存、不进入搬迁项目生命周期」 |  |
 | 四类开单与项目关联 | 单寄备件开单独立保存 | ✅ | `tests/domain/service-order-recording.test.ts`「单寄备件开单独立保存」 |  |
 | 四类开单与项目关联 | PM 开单独立保存 | ✅ | `tests/domain/service-order-recording.test.ts`「PM 开单独立保存」 |  |

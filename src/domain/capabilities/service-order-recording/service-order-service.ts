@@ -14,8 +14,9 @@ import type { ServiceOrderRepository } from './service-order-repositories';
 /**
  * service-order-recording 领域服务（tasks 3.8~3.10）。
  *
- * - 3.8 四类开单：搬迁开单关联搬迁项目；认证/单寄备件/PM 开单独立保存、
- *   不进入搬迁项目生命周期；开单时间未填默认当前时间（TBD-22）。
+ * - 3.8 四类开单：搬迁开单关联搬迁项目；认证/单寄备件/PM 开单可独立保存
+ *   （无项目），亦可在项目上下文中归档关联当前项目——该关联仅为归档/查询
+ *   关系，不进入搬迁项目生命周期；开单时间未填默认当前时间（TBD-22）。
  * - 3.9 非空服务单号全局唯一、四类共用唯一空间（TBD-21）；开单不改变项目
  *   进单状态与主状态；开单工作量按唯一服务单号计数并按四类业务分组。
  * 所有手工事实绑定当前登录账号归属（design D12）。项目补齐不创建开单；全部开单
@@ -33,7 +34,7 @@ export interface ServiceOrderInput {
   engineer: string;
   /** 客户单位（必填）。 */
   customerName: string;
-  /** 搬迁开单关联的搬迁项目（内部 ID）；其余三类不得提供。 */
+  /** 项目归档关联（内部 ID）：搬迁开单必填；认证/单寄备件/PM 可选（仅归档/查询关系，不进入搬迁生命周期）。 */
   projectId?: string | null;
   /** 备注可选。 */
   note?: string | null;
@@ -55,7 +56,8 @@ export class ServiceOrderService {
   /**
    * 手工登记开单记录。
    * - 搬迁开单必须关联一个已存在的搬迁项目。
-   * - 认证/单寄备件/PM 开单独立保存、不得关联搬迁项目生命周期。
+   * - 认证/单寄备件/PM 开单可独立保存；提供 projectId 时仅作归档/查询关联
+   *   （验证项目存在），不进入搬迁项目生命周期。
    */
   recordOrder(input: ServiceOrderInput, actor: ActorSnapshot): ServiceOrder {
     if (!(ORDER_TYPES as readonly string[]).includes(input.orderType)) {
@@ -75,11 +77,13 @@ export class ServiceOrderService {
       if (this.projects && !this.projects.findById(projectId)) {
         throw new ValidationError('PROJECT_NOT_FOUND', `搬迁项目不存在: ${projectId}`);
       }
-    } else if (input.projectId !== undefined && input.projectId !== null) {
-      throw new ValidationError(
-        'NON_RELOCATION_ORDER_NO_PROJECT',
-        '认证/单寄备件/PM 开单独立保存，不关联搬迁项目生命周期',
-      );
+    } else if (input.projectId) {
+      // 认证/单寄备件/PM：可选项目归档关联（仅归档/查询关系，不进入搬迁生命周期）。
+      // 提供时验证项目存在；未提供（缺省/空）保持独立保存。
+      projectId = input.projectId;
+      if (this.projects && !this.projects.findById(projectId)) {
+        throw new ValidationError('PROJECT_NOT_FOUND', `项目不存在: ${projectId}`);
+      }
     }
 
     const orderedAt = input.orderedAt ?? this.today();

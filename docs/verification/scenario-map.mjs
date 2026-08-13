@@ -541,6 +541,23 @@ export const scenarioMap = {
         ['tests/domain/service-order-recording.test.ts', '搬迁开单关联对应搬迁项目'],
       ],
     },
+    '非搬迁开单归档关联当前项目': {
+      evidence: [
+        ['tests/domain/service-order-recording.test.ts', '非搬迁开单可关联项目（仅归档/查询关系），不进入搬迁生命周期'],
+        ['tests/integration/service-order-recording.sqlite.test.ts', '非搬迁开单可选归档关联项目：listByProject 可见、关闭重开保留、工作量不依赖项目'],
+      ],
+    },
+    '非搬迁开单无项目时独立保存': {
+      evidence: [
+        ['tests/domain/service-order-recording.test.ts', '认证开单独立保存、不进入搬迁项目生命周期'],
+        ['tests/integration/service-order-recording.sqlite.test.ts', '非搬迁开单可选归档关联项目：listByProject 可见、关闭重开保留、工作量不依赖项目'],
+      ],
+    },
+    '非搬迁开单关联不存在的项目被拒': {
+      evidence: [
+        ['tests/domain/service-order-recording.test.ts', '非搬迁开单关联不存在的项目时拒绝'],
+      ],
+    },
     '认证开单独立保存': {
       evidence: [
         ['tests/domain/service-order-recording.test.ts', '认证开单独立保存、不进入搬迁项目生命周期'],

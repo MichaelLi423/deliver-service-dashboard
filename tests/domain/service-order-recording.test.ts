@@ -86,20 +86,45 @@ describe('四类开单与项目关联（3.8）', () => {
     expect(order.orderType).toBe('pm');
   });
 
-  it('非搬迁开单提供 projectId 时拒绝', () => {
+  it('非搬迁开单可关联项目（仅归档/查询关系），不进入搬迁生命周期', () => {
+    const { orderService, projects } = setup();
+    const project = createPendingProject();
+    projects.save(project);
+    const beforeStatus = project.status;
+    const beforeEntryAt = project.entryAt;
+
+    const order = orderService.recordOrder(
+      {
+        orderType: 'pm',
+        serviceOrderNo: 'ORD-005',
+        engineer: '工程师',
+        customerName: '客户',
+        projectId: project.id,
+      },
+      ACTOR,
+    );
+    expect(order.projectId).toBe(project.id); // 归档关联：出现在该项目归档/查询中
+    // 归档关联不进入搬迁生命周期：项目实体未被修改
+    expect(projects.findById(project.id)!.status).toBe(beforeStatus);
+    expect(projects.findById(project.id)!.entryAt).toBe(beforeEntryAt);
+    // 工作量按唯一服务单号计数，不依赖项目
+    expect(orderService.countWorkload().find((c) => c.orderType === 'pm')?.count).toBe(1);
+  });
+
+  it('非搬迁开单关联不存在的项目时拒绝', () => {
     const { orderService } = setup();
     expect(() =>
       orderService.recordOrder(
         {
-          orderType: 'pm',
-          serviceOrderNo: 'ORD-005',
+          orderType: 'certification',
+          serviceOrderNo: 'ORD-005B',
           engineer: '工程师',
           customerName: '客户',
-          projectId: 'p-1',
+          projectId: 'not-exist',
         },
         ACTOR,
       ),
-    ).toThrow(/不关联搬迁项目生命周期/);
+    ).toThrow(/项目不存在/);
   });
 
   it('搬迁开单引用不存在的项目时拒绝', () => {

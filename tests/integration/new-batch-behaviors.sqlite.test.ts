@@ -580,7 +580,7 @@ describe('项目页 repair:"open" 伪筛选 + overview 开放维修项目数（E
 });
 
 describe('服务单快速动作 customerName 从项目客户读取 + 物流成交价允许 0', () => {
-  it('type=order 不传 customerName：四种类型都从项目客户派生客户单位，仅 relocation 关联项目', async () => {
+  it('type=order 不传 customerName：四种类型都从项目客户派生客户单位并关联当前项目', async () => {
     const { facade, db, projectId } = await makeFacade();
     // relocation：客户从项目读取，关联 projectId
     facade.v2Mutate({
@@ -595,7 +595,8 @@ describe('服务单快速动作 customerName 从项目客户读取 + 物流成�
     expect(order.customerName).toBe('新批次客户'); // 从项目客户读取
     expect(order.projectId).toBe(projectId);
 
-    // 其余三类：客户同样从项目客户派生，但保持领域规则——不关联 projectId（独立保存）
+    // 其余三类：客户同样从项目客户派生，并归档关联当前项目（仅归档/查询关系，
+    // 不进入搬迁生命周期）——DB 中 project_id 为当前项目
     for (const [orderType, no] of [
       ['certification', 'SO-NO-CUST-2'],
       ['parts_by_mail', 'SO-NO-CUST-3'],
@@ -611,8 +612,15 @@ describe('服务单快速动作 customerName 从项目客户读取 + 物流成�
         project_id: string | null;
       };
       expect(row.customer_name).toBe('新批次客户'); // 客户从项目读取/派生
-      expect(row.project_id).toBeNull(); // 非 relocation 不关联搬迁项目（领域规则）
+      expect(row.project_id).toBe(projectId); // 归档关联当前项目（修复前为 null，被丢弃）
     }
+    // 四类开单都显示在该项目 orders section
+    const section = facade.v2SectionPage({ projectId, kind: 'orders' });
+    expect(section.total).toBe(4);
+    const nos = (section.rows as Array<Extract<ReturnType<WorkbenchFacade['v2SectionPage']>['rows'][number], { kind: 'orders' }>>)
+      .map((r) => r.serviceOrderNo)
+      .sort();
+    expect(nos).toEqual(['SO-NO-CUST-2', 'SO-NO-CUST-3', 'SO-NO-CUST-4', 'SO-NO-CUSTOMER']);
     // 项目既无客户又未提供 customerName 时明确报错
     const dir = makeTempDir('new-batch-order-');
     dirs.push(dir);
@@ -632,6 +640,30 @@ describe('服务单快速动作 customerName 从项目客户读取 + 物流成�
         action: { type: 'order', projectId: pid2, values: { orderType: 'certification', serviceOrderNo: 'SO-NO-CUST-5', orderedAt: '2026-08-11', engineer: '工程师甲' } },
       }),
     ).toThrow(/客户信息从项目客户读取失败/);
+  });
+
+  it('无项目上下文提交非搬迁开单仍独立保存（project_id 为空），工作量不依赖项目', async () => {
+    const { facade, db } = await makeFacade();
+    // 不带 payload.projectId：独立保存路径（customerName 由调用方提供）
+    facade.v2Mutate({
+      op: 'submit_action',
+      action: { type: 'order', values: { orderType: 'certification', serviceOrderNo: 'SO-IND-001', orderedAt: '2026-08-11', engineer: '工程师甲', customerName: '独立客户' } },
+    });
+    const row = db.prepare('SELECT project_id, customer_name FROM service_orders WHERE service_order_no = ?').get('SO-IND-001') as {
+      project_id: string | null;
+      customer_name: string;
+    };
+    expect(row.project_id).toBeNull(); // 无项目 → 独立保存
+    expect(row.customer_name).toBe('独立客户');
+    // 归档关联（有项目）与独立保存（无项目）的开单均计入工作量
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId: facade.v2ProjectPage({}).projects[0]!.id,
+      action: { type: 'order', values: { orderType: 'certification', serviceOrderNo: 'SO-IND-002', orderedAt: '2026-08-11', engineer: '工程师乙', customerName: '独立客户乙' } },
+    });
+    expect(
+      db.prepare('SELECT COUNT(*) AS n FROM service_orders').get() as { n: number },
+    ).toMatchObject({ n: 2 });
   });
 
   it('批量快速记录：物流成交价允许 0，预算价仍必须 > 0', async () => {
