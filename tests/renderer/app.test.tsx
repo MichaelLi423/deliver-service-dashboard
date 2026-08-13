@@ -225,14 +225,15 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const queue = await screen.findByRole('region', { name: /项目队列/ });
     const reminders = screen.getByRole('region', { name: /待办提醒/ });
     const workspace = screen.getByRole('region', { name: '项目工作区' });
-    const context = within(workspace).getByRole('complementary', { name: '当前上下文' });
+    const context = await within(workspace).findByRole('complementary', { name: '当前上下文' });
     const detailTabs = within(workspace).getByRole('tablist', { name: '项目详情' });
     const detail = within(workspace).getByRole('region', { name: '客户 1' });
     expect(reminders.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(workspace.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(context.compareDocumentPosition(detailTabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     for (const region of [queue, detail, context]) { expect(within(region).getByLabelText('项目分类标签')).toHaveTextContent('项目类型'); expect(within(region).getByLabelText('项目分类标签')).toHaveTextContent('ICPMS'); }
-    fireEvent.click(within(detail).getByRole('button', { name: '编辑项目资料' })); const dialog = screen.getByRole('dialog', { name: '编辑项目资料' }); fireEvent.click(within(dialog).getByRole('checkbox', { name: '搬迁' })); fireEvent.click(within(dialog).getByRole('checkbox', { name: '重点跟进' })); fireEvent.click(within(dialog).getByRole('button', { name: '保存项目资料' }));
+    expect(within(detail).queryByRole('tab', { name: '项目总览' })).not.toBeInTheDocument(); expect(within(detail).getByRole('tab', { name: '搬迁仪器' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(within(detail).getByRole('button', { name: '编辑客户 1的项目标签' })); const dialog = screen.getByRole('dialog', { name: '编辑项目标签' }); fireEvent.click(within(dialog).getByRole('checkbox', { name: '搬迁' })); fireEvent.click(within(dialog).getByRole('checkbox', { name: '重点跟进' })); fireEvent.click(within(dialog).getByRole('button', { name: '保存标签' }));
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: { projectId: 'p-1', tagIds: ['tag-icpms', 'tag-custom'] } }));
     const firstRow = within(queue).getByRole('row', { name: /^客户 1 / }); fireEvent.keyDown(firstRow, { key: 'ArrowDown' }); await waitFor(() => expect(workspace).toHaveTextContent('客户 2'));
     fireEvent.click(within(reminders).getByRole('button', { name: /客户 1/ }));
@@ -274,12 +275,12 @@ describe('Oracle #10 bounded workbench renderer', () => {
     Object.defineProperty(window, 'workbench', { value: api, configurable: true }); vi.spyOn(window, 'confirm').mockReturnValue(true); render(<App />);
     await screen.findByRole('region', { name: '客户 1' }); fireEvent.click(screen.getByRole('button', { name: '标签库' }));
     const oldLibrary = screen.getByRole('dialog', { name: '管理标签库' }); expect(await within(oldLibrary).findByText('旧目录标签')).toBeInTheDocument(); fireEvent.click(within(oldLibrary).getByRole('button', { name: '关闭' }));
-    fireEvent.click(screen.getByRole('button', { name: '恢复备份' }));
+    fireEvent.click(screen.getByRole('button', { name: '数据管理' })); fireEvent.click(screen.getByRole('button', { name: '恢复备份' }));
     await waitFor(() => expect(api.v2TagCatalog).toHaveBeenCalledTimes(2));
     await screen.findByRole('region', { name: '恢复客户' }); fireEvent.click(screen.getByRole('button', { name: '标签库' }));
     const library = screen.getByRole('dialog', { name: '管理标签库' }); expect(await within(library).findByText('恢复标签')).toBeInTheDocument(); expect(within(library).queryByText('旧目录标签')).not.toBeInTheDocument(); fireEvent.click(within(library).getByRole('button', { name: '关闭' }));
     fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
-    const edit = screen.getByRole('dialog', { name: '编辑项目资料' }); expect(within(edit).getByRole('checkbox', { name: '恢复标签' })).toBeChecked(); fireEvent.change(within(edit).getByLabelText(/客户名称/), { target: { value: '恢复客户已核对' } }); fireEvent.click(within(edit).getByRole('button', { name: '保存项目资料' }));
+    const edit = screen.getByRole('dialog', { name: '编辑项目资料' }); expect(within(edit).queryByText('项目分类标签')).not.toBeInTheDocument(); expect(within(edit).queryByRole('checkbox', { name: '恢复标签' })).not.toBeInTheDocument(); fireEvent.change(within(edit).getByLabelText(/客户名称/), { target: { value: '恢复客户已核对' } }); fireEvent.click(within(edit).getByRole('button', { name: '保存项目资料' }));
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: { projectId: 'p-1', customerName: '恢复客户已核对' } }));
   });
 
@@ -391,9 +392,11 @@ describe('Oracle #10 bounded workbench renderer', () => {
     resolvers[1]!(page([project(999)], null, 1, 2)); expect((await screen.findAllByText('客户 999')).length).toBeGreaterThan(0); resolvers[0]!(page(firstProjects, 'cursor-2', 100_000, 1)); await new Promise((resolve) => setTimeout(resolve, 0)); expect(within(screen.getByRole('grid')).queryByText('客户 1')).not.toBeInTheDocument();
   });
 
-  it('详情 tab 按需加载，项目总览不读取 section', async () => {
-    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledWith('p-1')); expect(api.v2SectionPage).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('tab', { name: '搬迁仪器' })); await waitFor(() => expect(api.v2SectionPage).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p-1', kind: 'instruments', limit: 50 })));
+  it('详情默认打开搬迁仪器并按需切换 section，不再显示项目总览 tab', async () => {
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledWith('p-1'));
+    expect(screen.queryByRole('tab', { name: '项目总览' })).not.toBeInTheDocument(); expect(screen.getByRole('tab', { name: '搬迁仪器' })).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => expect(api.v2SectionPage).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p-1', kind: 'instruments', limit: 50 })));
+    fireEvent.click(screen.getByRole('tab', { name: '开单记录' })); await waitFor(() => expect(api.v2SectionPage).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p-1', kind: 'orders', limit: 50 })));
   });
 
   it('开单记录 tab 读取 orders，并只展示四个服务单字段', async () => {
@@ -419,18 +422,16 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(table).toHaveTextContent('2026/8/8');
   });
 
-  it('项目总览按语义分组完整展示资料，并紧凑展示六类关联登记数量', async () => {
+  it('Tab 上方常显关键摘要，完整项目资料默认折叠且保留全部分组与关联统计', async () => {
     render(<App />);
     await screen.findByRole('heading', { name: /项目队列/ });
     const row = await screen.findByRole('row', { name: /^客户 1 / });
     fireEvent.click(within(row).getByText('客户 1'));
-    for (const group of ['基础资料', '搬迁安排', '设备与合同']) {
-      expect(screen.getByRole('region', { name: group })).toBeInTheDocument();
-    }
-    expect(screen.getByRole('region', { name: '基础资料' })).toHaveTextContent('客户名称客户 1');
-    expect(screen.getByRole('region', { name: '搬迁安排' })).toHaveTextContent('旧址地址待补');
-    expect(screen.getByRole('region', { name: '设备与合同' })).toHaveTextContent('合同开始日期待补');
-    const facts = screen.getByRole('region', { name: '关联登记事实' });
+    const detail = screen.getByRole('region', { name: '客户 1' }); const summary = within(detail).getByLabelText('项目关键资料'); expect(summary).toHaveTextContent('项目状态执行中'); expect(summary).toHaveTextContent('地址流向待补 → 待补');
+    const profile = within(detail).getByText('完整项目资料').closest('details')!; expect(profile).not.toHaveAttribute('open'); expect(profile.compareDocumentPosition(within(detail).getByRole('tablist', { name: '项目详情' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const group of ['基础资料', '搬迁安排', '设备与合同']) expect(within(profile).getByRole('region', { name: group })).toBeInTheDocument();
+    expect(within(profile).getByRole('region', { name: '基础资料' })).toHaveTextContent('客户名称客户 1'); expect(within(profile).getByRole('region', { name: '搬迁安排' })).toHaveTextContent('旧址地址待补'); expect(within(profile).getByRole('region', { name: '设备与合同' })).toHaveTextContent('合同开始日期待补');
+    const facts = within(profile).getByRole('region', { name: '关联登记事实' });
     for (const label of ['物流费用登记1 条', '搬迁仪器1 台', '上门活动1 条', '开单记录1 条', '损坏/维修事项0 条', '掉票记录1 条']) expect(facts).toHaveTextContent(label);
     expect(screen.queryByText(/序列号地址更新与二维码申请在独立模块按需加载/)).not.toBeInTheDocument();
     expect(screen.queryByText(/选择项目后，上方工作区会显示对应资料与记录/)).not.toBeInTheDocument();

@@ -99,7 +99,6 @@ function focusWorkbenchSection(id: "reminders" | "project-queue"): void {
 }
 
 const TABS = [
-  "项目总览",
   "搬迁仪器",
   "物流费用登记",
   "开单记录",
@@ -346,7 +345,7 @@ export function WorkbenchV2({
   const [detail, setDetail] = useState<WorkbenchV2ProjectDetailDto | null>(
     null,
   );
-  const [tab, setTab] = useState<DetailTab>("项目总览");
+  const [tab, setTab] = useState<DetailTab>("搬迁仪器");
   const [sectionPage, setSectionPage] =
     useState<WorkbenchV2SectionPageDto | null>(null);
   const [sectionCursors, setSectionCursors] = useState<Array<string | null>>([
@@ -592,7 +591,7 @@ export function WorkbenchV2({
     setDetail(null);
     setSectionPage(null);
     setSectionCursors([null]);
-    setTab("项目总览");
+    setTab("搬迁仪器");
     if (selectedId) void loadDetail(selectedId);
   }, [selectedId]);
   useEffect(() => {
@@ -600,7 +599,7 @@ export function WorkbenchV2({
     setSectionPage(null);
     setSectionCursors([null]);
     if (selectedId && kind) void loadSection(selectedId, kind, null);
-  }, [tab]);
+  }, [tab, selectedId]);
 
   async function refreshInvalidated(
     tags: readonly WorkbenchV2InvalidateTag[],
@@ -845,7 +844,7 @@ export function WorkbenchV2({
         setDetail(null);
         setSectionPage(null);
         setSectionCursors([null]);
-        setTab("项目总览");
+        setTab("搬迁仪器");
         setToast("备份已恢复，数据已重新加载");
         window.setTimeout(() => setToast(""), 2800);
         void Promise.all([loadOverview(), loadProjects(null, 0), loadTagCatalog()]);
@@ -1453,11 +1452,6 @@ export function WorkbenchV2({
               mode="project"
               project={selected}
               detail={detail?.detail ?? null}
-              initialTagIds={detail?.tagIds ?? selected.tagIds ?? []}
-              catalog={tagCatalog}
-              catalogLoading={tagCatalogLoading}
-              catalogError={tagCatalogError}
-              onRetryCatalog={loadTagCatalog}
               onSave={(payload) =>
                 mutate(updateProjectRequest(payload), "项目资料已更新")
               }
@@ -1467,11 +1461,6 @@ export function WorkbenchV2({
               mode="entry"
               project={selected}
               detail={detail?.detail ?? null}
-              initialTagIds={detail?.tagIds ?? selected.tagIds ?? []}
-              catalog={tagCatalog}
-              catalogLoading={tagCatalogLoading}
-              catalogError={tagCatalogError}
-              onRetryCatalog={loadTagCatalog}
               onSave={(payload) =>
                 mutate(updateProjectRequest(payload), "进单与合同资料已更正")
               }
@@ -1961,11 +1950,45 @@ function ProjectDetails({
         )}
       </div>
       {project && (
-        <ProjectTagSection
-          projectName={project.customerName}
-          groups={detail?.groupedTags ?? project.groupedTags}
-          onEdit={onEditTags}
-        />
+        <>
+          <div className="detail-command-bar" role="region" aria-label="项目标签">
+            <div className="detail-command-tags">
+              <span>项目标签</span>
+              <GroupedTags groups={detail?.groupedTags ?? project.groupedTags} compact />
+              {!(detail?.groupedTags ?? project.groupedTags)?.length && <small>尚未添加项目标签</small>}
+            </div>
+            <div className="row-actions">
+              <button className="button small" aria-label={`${(detail?.groupedTags ?? project.groupedTags)?.length ? "编辑" : "添加"}${project.customerName}的项目标签`} onClick={(event) => { event.currentTarget.focus(); onEditTags(); }}>{(detail?.groupedTags ?? project.groupedTags)?.length ? "编辑标签" : "添加标签"}</button>
+              <button className="button small" onClick={onEditProject}>编辑项目资料</button>
+              {project.formallyEntered ? (
+                <button className="button small" onClick={onCorrectEntry}>更正进单/合同资料</button>
+              ) : (
+                <button className="button primary small" onClick={onCompleteEntry}>补齐进单核心资料</button>
+              )}
+            </div>
+          </div>
+          <div className="detail-summary" aria-label="项目关键资料">
+            {[
+              ["项目状态", STATUS_LABEL[project.status]],
+              ["地址流向", `${detail?.detail?.oldSiteAddress || "待补"} → ${detail?.detail?.newSiteAddress || "待补"}`],
+              ["计划上门", detail?.detail?.planVisitAt || "待补"],
+              ["计划运输", detail?.detail?.planTransportAt || "待补"],
+              ["计划装机", detail?.detail?.plannedInstallAt || "待补"],
+              ["场地 / 暂存", `${detail?.detail?.siteConfirmed ? "场地已确认" : "场地未确认"} · ${detail?.detail?.isTemporaryStorage === null || detail?.detail?.isTemporaryStorage === undefined ? "暂存未填写" : detail.detail.isTemporaryStorage ? "需要暂存" : "无需暂存"}`],
+            ].map(([label, value]) => <div key={label}><span>{label}</span><strong className={String(value).includes("待补") || String(value).includes("未填写") ? "is-missing" : undefined}>{value}</strong></div>)}
+          </div>
+          <details className="project-profile">
+            <summary>完整项目资料</summary>
+            <div className="overview-groups">
+              {[
+                ["基础资料", [["客户名称", project.customerName], ["ECC / 临时编号", project.ecc || project.tempNo], ["所属区域", `${project.region || "待补"}${project.regionNeedsAdjustment ? "（待调整）" : ""}`], ["主状态", STATUS_LABEL[project.status]], ["进单日期", project.entryAt ? businessDate(project.entryAt) : "待进单"], ["项目备注", detail?.detail?.projectNote || "无"]]],
+                ["搬迁安排", [["旧址地址", detail?.detail?.oldSiteAddress || "待补"], ["新址地址", detail?.detail?.newSiteAddress || "待补"], ["计划上门日期", detail?.detail?.planVisitAt || "待补"], ["计划运输日期", detail?.detail?.planTransportAt || "待补"], ["场地确认", detail?.detail?.siteConfirmed ? "是" : "否"], ["是否暂存", detail?.detail?.isTemporaryStorage === null || detail?.detail?.isTemporaryStorage === undefined ? "未填写" : detail.detail.isTemporaryStorage ? "是" : "否"], ["暂存地址", detail?.detail?.temporaryStorageAddress || "待补"], ["计划装机日期", detail?.detail?.plannedInstallAt || "待补"], ["实际装机完成日期", detail?.detail?.actualInstallDoneAt || "待补"]]],
+                ["设备与合同", [["暂定仪器名称", detail?.detail?.temporaryInstrumentName || "待补"], ["暂定仪器数量", detail?.detail?.temporaryInstrumentCount === null || detail?.detail?.temporaryInstrumentCount === undefined ? "待补" : `${detail.detail.temporaryInstrumentCount} 台`], ["暂定型号", detail?.detail?.temporaryInstrumentModel || "待补"], ["UPS", detail?.detail?.temporaryHasUps === null || detail?.detail?.temporaryHasUps === undefined ? "未填写" : detail.detail.temporaryHasUps ? "是" : "否"], ["合同开始日期", detail?.detail?.contractStartDate || "待补"], ["合同截止日期", detail?.detail?.contractEndDate || "待补"]]],
+              ].map(([group, fields]) => <section className="overview-group" aria-labelledby={`profile-${group}`} key={group as string}><h3 id={`profile-${group}`}>{group as string}</h3><dl>{(fields as string[][]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd className={["待补", "未填写", "待进单"].includes(value!) ? "is-missing" : undefined}>{value}</dd></div>)}</dl></section>)}
+            </div>
+            <section className="overview-records" aria-labelledby="profile-records-title"><h3 id="profile-records-title">关联登记事实</h3><dl>{recordFacts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></section>
+          </details>
+        </>
       )}
       {project && (
         <div className="tabbar">
@@ -2047,72 +2070,6 @@ function ProjectDetails({
               onDelete={onDelete}
             />
           </div>
-        ) : tab === "项目总览" ? (
-          <div className="project-overview">
-            <div className="overview-edit-actions" aria-label="项目资料维护">
-              <div>
-                <strong>项目资料维护</strong>
-                <span>仅维护项目、地点、联系人和执行准备，不编辑仪器、序列号或服务单。</span>
-              </div>
-              <div className="row-actions">
-                <button className="button" onClick={onEditProject}>编辑项目资料</button>
-                {project.formallyEntered ? (
-                  <button className="button" onClick={onCorrectEntry}>更正进单/合同资料</button>
-                ) : (
-                  <button className="button primary" onClick={onCompleteEntry}>补齐进单核心资料</button>
-                )}
-              </div>
-            </div>
-            <div className="overview-groups">
-              {[
-                ["基础资料", [
-                  ["客户名称", project.customerName],
-                  ["ECC / 临时编号", project.ecc || project.tempNo],
-                  ["所属区域", `${project.region || "待补"}${project.regionNeedsAdjustment ? "（待调整）" : ""}`],
-                  ["主状态", STATUS_LABEL[project.status]],
-                  ["进单日期", project.entryAt ? businessDate(project.entryAt) : "待进单"],
-                  ["项目备注", detail?.detail?.projectNote || "无"],
-                ]],
-                ["搬迁安排", [
-                  ["旧址地址", detail?.detail?.oldSiteAddress || "待补"],
-                  ["新址地址", detail?.detail?.newSiteAddress || "待补"],
-                  ["计划上门日期", detail?.detail?.planVisitAt || "待补"],
-                  ["计划运输日期", detail?.detail?.planTransportAt || "待补"],
-                  ["场地确认", detail?.detail?.siteConfirmed ? "是" : "否"],
-                  ["是否暂存", detail?.detail?.isTemporaryStorage === null || detail?.detail?.isTemporaryStorage === undefined ? "未填写" : detail.detail.isTemporaryStorage ? "是" : "否"],
-                  ["暂存地址", detail?.detail?.temporaryStorageAddress || "待补"],
-                  ["计划装机日期", detail?.detail?.plannedInstallAt || "待补"],
-                  ["实际装机完成日期", detail?.detail?.actualInstallDoneAt || "待补"],
-                ]],
-                ["设备与合同", [
-                  ["暂定仪器名称", detail?.detail?.temporaryInstrumentName || "待补"],
-                  ["暂定仪器数量", detail?.detail?.temporaryInstrumentCount === null || detail?.detail?.temporaryInstrumentCount === undefined ? "待补" : `${detail.detail.temporaryInstrumentCount} 台`],
-                  ["暂定型号", detail?.detail?.temporaryInstrumentModel || "待补"],
-                  ["UPS", detail?.detail?.temporaryHasUps === null || detail?.detail?.temporaryHasUps === undefined ? "未填写" : detail.detail.temporaryHasUps ? "是" : "否"],
-                  ["合同开始日期", detail?.detail?.contractStartDate || "待补"],
-                  ["合同截止日期", detail?.detail?.contractEndDate || "待补"],
-                ]],
-              ].map(([group, fields]) => (
-                <section className="overview-group" aria-labelledby={`overview-${group}`} key={group as string}>
-                  <h3 id={`overview-${group}`}>{group as string}</h3>
-                  <dl>
-                    {(fields as string[][]).map(([label, value]) => (
-                      <div key={label}>
-                        <dt>{label}</dt>
-                        <dd className={["待补", "未填写", "待进单"].includes(value!) ? "is-missing" : undefined}>{value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </section>
-              ))}
-            </div>
-            <section className="overview-records" aria-labelledby="overview-records-title">
-              <h3 id="overview-records-title">关联登记事实</h3>
-              <dl>
-                {recordFacts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
-              </dl>
-            </section>
-          </div>
         ) : (
           <SectionTable
             page={section}
@@ -2124,7 +2081,7 @@ function ProjectDetails({
           />
         )}
       </div>
-      {project && tab !== "项目总览" && (
+      {project && (
         <div className="section-pagination">
           <button
             className="button"
@@ -3616,10 +3573,6 @@ function validCatalogTagIds(catalog: ProjectTagCatalogDto, selected: readonly st
   return catalog.groups.flatMap((group) => group.tags.map((tag) => tag.id)).filter((tagId) => selectedSet.has(tagId));
 }
 
-function sameStringList(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
 function GroupedTagPicker({
   catalog,
   loading,
@@ -3673,39 +3626,6 @@ function GroupedTags({ groups, compact = false }: { groups?: readonly ProjectTag
       <div>{group.tagNames.map((name, index) => <b key={group.tagIds[index] ?? name}>{name}</b>)}</div>
     </div>)}
   </div>;
-}
-
-function ProjectTagSection({
-  projectName,
-  groups,
-  onEdit,
-}: {
-  projectName: string;
-  groups?: readonly ProjectTagGroupSummaryDto[];
-  onEdit: () => void;
-}): JSX.Element {
-  const hasTags = Boolean(groups?.length);
-  return (
-    <section className={`project-tag-section detail-tag-entry ${hasTags ? "has-tags" : "is-empty"}`} aria-label="项目标签">
-      <div className="project-tag-section-head">
-        <div>
-          <span>项目标签</span>
-          {!hasTags && <p>尚未添加项目标签</p>}
-        </div>
-        <button
-          className="button small"
-          aria-label={`${hasTags ? "编辑" : "添加"}${projectName}的项目标签`}
-          onClick={(event) => {
-            event.currentTarget.focus();
-            onEdit();
-          }}
-        >
-          {hasTags ? "编辑标签" : "添加标签"}
-        </button>
-      </div>
-      {hasTags && <GroupedTags groups={groups} />}
-    </section>
-  );
 }
 
 function normalizedTagIds(catalog: ProjectTagCatalogDto, selected: readonly string[]): string[] {
@@ -3869,24 +3789,17 @@ function ProjectEditForm({
   mode,
   project,
   detail,
-  initialTagIds,
-  catalog,
-  catalogLoading,
-  catalogError,
-  onRetryCatalog,
   onSave,
-}: TagCatalogProps & {
+}: {
   mode: "project" | "entry";
   project: WorkbenchProjectRow;
   detail: NonNullable<WorkbenchV2ProjectDetailDto["detail"]> | null;
-  initialTagIds: readonly string[];
   onSave: (payload: ProjectUpdatePayload) => Promise<void>;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [region, setRegion] = useState(project.region ?? "");
-  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([...initialTagIds]);
   const nullable = (data: FormData, name: string): string | null => {
     const value = String(data.get(name) ?? "").trim();
     return value || null;
@@ -3926,11 +3839,6 @@ function ProjectEditForm({
       addIfChanged("temporaryInstrumentName", nullable(data, "temporaryInstrumentName"), detail?.temporaryInstrumentName ?? null);
       addIfChanged("temporaryInstrumentModel", nullable(data, "temporaryInstrumentModel"), detail?.temporaryInstrumentModel ?? null);
       addIfChanged("temporaryHasUps", data.get("temporaryHasUps") === "" ? null : data.get("temporaryHasUps") === "true", detail?.temporaryHasUps ?? null);
-      if (catalog) {
-        const currentTagIds = validCatalogTagIds(catalog, selectedTagIds);
-        const initialCatalogTagIds = validCatalogTagIds(catalog, initialTagIds);
-        if (!sameStringList(currentTagIds, initialCatalogTagIds)) patch.tagIds = currentTagIds;
-      }
     } else {
       addIfChanged("ecc", nullable(data, "ecc"), project.ecc);
       addIfChanged("entryAt", nullable(data, "entryAt"), businessDate(project.entryAt) || null);
@@ -3981,8 +3889,14 @@ function ProjectEditForm({
       </form>
     );
   }
+  const projectFormKey = detail ? `project-edit-project-${project.id}-ready` : `project-edit-project-${project.id}-pending`;
   return (
-    <form className="project-edit-form" onSubmit={(event) => void submit(event)} onChange={() => setNotice("")}>
+    <form
+      key={projectFormKey}
+      className="project-edit-form"
+      onSubmit={(event) => void submit(event)}
+      onChange={() => setNotice("")}
+    >
       <p className="notice">维护项目级资料；暂定范围不会生成仪器记录，可后补。逐台仪器、序列号和服务单请在各自业务入口维护。</p>
       <div className="edit-form-sections">
         <fieldset className="edit-form-section">
@@ -4027,12 +3941,11 @@ function ProjectEditForm({
             </label>
           </div>
         </fieldset>
-        <GroupedTagPicker catalog={catalog} loading={catalogLoading} error={catalogError} selected={selectedTagIds} onChange={setSelectedTagIds} onRetry={() => void onRetryCatalog()} />
       </div>
       {error && <div className="inline-error" role="alert">{error}</div>}
       {notice && <p className="notice" role="status">{notice}</p>}
       <div className="form-footer">
-        <span>保存后刷新当前项目总览。</span>
+        <span>保存后刷新当前项目资料。</span>
         <button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存项目资料"}</button>
       </div>
     </form>
