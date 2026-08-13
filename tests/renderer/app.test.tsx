@@ -279,7 +279,9 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2TagCatalog).toHaveBeenCalledTimes(2));
     await screen.findByRole('region', { name: '恢复客户' }); fireEvent.click(screen.getByRole('button', { name: '标签库' }));
     const library = screen.getByRole('dialog', { name: '管理标签库' }); expect(await within(library).findByText('恢复标签')).toBeInTheDocument(); expect(within(library).queryByText('旧目录标签')).not.toBeInTheDocument(); fireEvent.click(within(library).getByRole('button', { name: '关闭' }));
-    fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
+    const editProject = screen.getByRole('button', { name: '编辑项目资料' });
+    await waitFor(() => expect(editProject).not.toBeDisabled());
+    fireEvent.click(editProject);
     const edit = screen.getByRole('dialog', { name: '编辑项目资料' }); expect(within(edit).queryByText('项目分类标签')).not.toBeInTheDocument(); expect(within(edit).queryByRole('checkbox', { name: '恢复标签' })).not.toBeInTheDocument(); fireEvent.change(within(edit).getByLabelText(/客户名称/), { target: { value: '恢复客户已核对' } }); fireEvent.click(within(edit).getByRole('button', { name: '保存项目资料' }));
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: { projectId: 'p-1', customerName: '恢复客户已核对' } }));
   });
@@ -1158,7 +1160,9 @@ describe('Oracle #10 bounded workbench renderer', () => {
     });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     await screen.findByRole('region', { name: '预填客户' });
-    fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
+    const editProject = screen.getByRole('button', { name: '编辑项目资料' });
+    await waitFor(() => expect(editProject).not.toBeDisabled());
+    fireEvent.click(editProject);
     const dialog = screen.getByRole('dialog', { name: '编辑项目资料' });
     expect(within(dialog).getByRole('group', { name: '基本信息' })).toBeInTheDocument();
     expect(within(dialog).getByRole('group', { name: '地点与联系人' })).toBeInTheDocument();
@@ -1209,7 +1213,9 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(loaded.detail!.temporaryInstrumentCount).toBe(12);
     expect(row).not.toHaveProperty('temporaryInstrumentCount');
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
+    const editProject = screen.getByRole('button', { name: '编辑项目资料' });
+    await waitFor(() => expect(editProject).not.toBeDisabled());
+    fireEvent.click(editProject);
     const dialog = screen.getByRole('dialog', { name: '编辑项目资料' });
     for (const name of ['基本信息', '地点与联系人', '暂定范围', '执行准备']) expect(within(dialog).getByRole('group', { name })).toBeInTheDocument();
     expect(within(dialog).getByLabelText(/暂定仪器名称/)).toHaveValue('质谱仪');
@@ -1256,6 +1262,52 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(overviewRegion).toHaveTextContent('暂定仪器名称待补'));
     expect(overviewRegion).toHaveTextContent('UPS未填写');
     expect(api.v2Mutate).not.toHaveBeenCalledWith(expect.objectContaining({ op: 'submit_action', action: expect.objectContaining({ type: 'instrument' }) }));
+  });
+
+  it('项目 detail 未就绪时禁用编辑资料，加载完成后可打开并回显字段', async () => {
+    let resolveDetail!: (value: WorkbenchV2ProjectDetailDto) => void;
+    const row = { ...project(1), customerName: '延迟详情客户' };
+    const loaded = detailOf(row);
+    loaded.detail = { ...loaded.detail!, temporaryInstrumentName: '延迟质谱仪', temporaryInstrumentCount: 6 };
+    const api = mockApi({
+      v2ProjectPage: vi.fn().mockResolvedValue(page([row], null, 1)),
+      v2ProjectDetail: vi.fn().mockImplementation(() => new Promise<WorkbenchV2ProjectDetailDto>((resolve) => { resolveDetail = resolve; })),
+    });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+    render(<App />);
+    await screen.findByRole('heading', { name: /项目队列/ });
+    await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledWith('p-1'));
+    const edit = screen.getByRole('button', { name: '编辑项目资料' });
+    expect(edit).toBeDisabled();
+    expect(edit).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(edit);
+    expect(screen.queryByRole('dialog', { name: '编辑项目资料' })).not.toBeInTheDocument();
+    resolveDetail(loaded);
+    await waitFor(() => expect(edit).not.toBeDisabled());
+    fireEvent.click(edit);
+    const dialog = screen.getByRole('dialog', { name: '编辑项目资料' });
+    expect(within(dialog).getByLabelText(/暂定仪器名称/)).toHaveValue('延迟质谱仪');
+    expect(within(dialog).getByLabelText(/暂定仪器数量/)).toHaveValue(6);
+  });
+
+  it('编辑资料打开后无关 section 刷新不会清空未保存输入', async () => {
+    let resolveSection!: (value: WorkbenchV2SectionPageDto) => void;
+    const api = mockApi({
+      v2SectionPage: vi.fn().mockImplementation(() => new Promise<WorkbenchV2SectionPageDto>((resolve) => { resolveSection = resolve; })),
+    });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+    render(<App />);
+    const detail = await screen.findByRole('region', { name: '客户 1' });
+    const edit = within(detail).getByRole('button', { name: '编辑项目资料' });
+    await waitFor(() => expect(edit).not.toBeDisabled());
+    fireEvent.click(edit);
+    const dialog = screen.getByRole('dialog', { name: '编辑项目资料' });
+    const customer = within(dialog).getByLabelText(/客户名称/);
+    fireEvent.change(customer, { target: { value: '尚未保存的客户名称' } });
+    resolveSection(section('instruments', 'p-1'));
+    await waitFor(() => expect(api.v2SectionPage).toHaveBeenCalled());
+    expect(customer).toHaveValue('尚未保存的客户名称');
+    expect(screen.getByRole('dialog', { name: '编辑项目资料' })).toBeInTheDocument();
   });
 
   it('正式进单项目谨慎更正进单合同资料，预填金额并在错误时保留表单反馈', async () => {

@@ -1124,6 +1124,7 @@ export function WorkbenchV2({
           <ProjectDetails
             project={selected}
             detail={detail}
+            detailReady={Boolean(selected && detail?.project?.id === selected.id)}
             tab={tab}
             section={sectionPage}
             loading={loading.detail || loading.section}
@@ -1137,7 +1138,10 @@ export function WorkbenchV2({
               else void loadDetail(selectedId);
             }}
             onAction={(action) => setLayer({ kind: "action", action })}
-            onEditProject={() => setLayer({ kind: "edit-project" })}
+            onEditProject={() => {
+              if (!selected || detail?.project?.id !== selected.id) return;
+              setLayer({ kind: "edit-project" });
+            }}
             onEditTags={() => {
               if (!selected) return;
               setTagEditGuard({ dirty: false, busy: false });
@@ -1848,6 +1852,7 @@ function ProjectContext({
 function ProjectDetails({
   project,
   detail,
+  detailReady,
   tab,
   section,
   loading,
@@ -1870,6 +1875,7 @@ function ProjectDetails({
 }: {
   project: WorkbenchProjectRow | null;
   detail: WorkbenchV2ProjectDetailDto | null;
+  detailReady: boolean;
   tab: DetailTab;
   section: WorkbenchV2SectionPageDto | null;
   loading: boolean;
@@ -1959,7 +1965,15 @@ function ProjectDetails({
             </div>
             <div className="row-actions">
               <button className="button small" aria-label={`${(detail?.groupedTags ?? project.groupedTags)?.length ? "编辑" : "添加"}${project.customerName}的项目标签`} onClick={(event) => { event.currentTarget.focus(); onEditTags(); }}>{(detail?.groupedTags ?? project.groupedTags)?.length ? "编辑标签" : "添加标签"}</button>
-              <button className="button small" onClick={onEditProject}>编辑项目资料</button>
+              <button
+                className="button small"
+                disabled={!detailReady}
+                aria-disabled={!detailReady}
+                title={!detailReady ? "正在读取项目资料" : undefined}
+                onClick={onEditProject}
+              >
+                编辑项目资料
+              </button>
               {project.formallyEntered ? (
                 <button className="button small" onClick={onCorrectEntry}>更正进单/合同资料</button>
               ) : (
@@ -3889,10 +3903,8 @@ function ProjectEditForm({
       </form>
     );
   }
-  const projectFormKey = detail ? `project-edit-project-${project.id}-ready` : `project-edit-project-${project.id}-pending`;
   return (
     <form
-      key={projectFormKey}
       className="project-edit-form"
       onSubmit={(event) => void submit(event)}
       onChange={() => setNotice("")}
