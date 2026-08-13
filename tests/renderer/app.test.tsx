@@ -692,7 +692,9 @@ describe('Oracle #10 bounded workbench renderer', () => {
       fireEvent.click(screen.getAllByRole('button', { name: '快速记录' })[0]!);
       const menu = screen.getByRole('dialog');
       expect(within(menu).getAllByRole('button')).toHaveLength(9);
-      expect(menu).toHaveTextContent('八类项目动作');
+      expect(menu).toHaveTextContent('这里保存的记录均关联当前项目');
+      expect(menu).toHaveTextContent('四类开单都会显示在项目开单记录中');
+      expect(menu).toHaveTextContent('认证、单寄备件和 PM 仅作项目归档，不影响搬迁进度');
       expect(menu).not.toHaveTextContent('实际物流费用');
       expect(within(menu).queryByRole('button', { name: '二维码申请' })).not.toBeInTheDocument();
       expect(within(menu).getByText(/二维码申请位于独立导航/)).toBeInTheDocument();
@@ -708,7 +710,8 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     let dialog = await openQuickAction('开单记录');
     const orderNo = within(dialog).getByRole('textbox', { name: /服务单号.*必填/ }); const engineer = within(dialog).getByRole('textbox', { name: /工程师.*必填/ });
-    expect(orderNo).toHaveAccessibleDescription(/同次创建开单记录/); expect(engineer).toHaveAccessibleDescription(/同一次保存/);
+    expect(orderNo).toHaveAccessibleDescription(/当前项目的开单记录/); expect(engineer).toHaveAccessibleDescription(/关联当前项目，并计入该工程师工作量/);
+    expect(within(dialog).getByLabelText(/开单类型/)).toHaveAccessibleDescription(/仅作项目归档，不影响搬迁进度/);
     expect(within(dialog).getByLabelText(/开单类型/).querySelectorAll('option')).toHaveLength(4);
     for (const label of ['搬迁', '认证', '单寄备件', 'PM']) expect(within(dialog).getByRole('option', { name: label })).toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/客户名称|客户单位/)).not.toBeInTheDocument();
@@ -823,7 +826,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   it('队列行、上下文和详情 Tab 都提供绑定当前项目的就近录入入口', async () => {
     render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '为客户 2快速记录' }));
-    expect(screen.getByRole('dialog', { name: '快速记录' })).toHaveTextContent('八类项目动作');
+    expect(screen.getByRole('dialog', { name: '快速记录' })).toHaveTextContent('这里保存的记录均关联当前项目');
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(within(screen.getByRole('grid', { name: '项目队列' })).getByRole('row', { name: /^客户 2 / })).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(within(screen.getByRole('complementary', { name: '当前上下文' })).getByRole('button', { name: '快速记录' }));

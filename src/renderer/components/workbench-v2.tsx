@@ -134,7 +134,7 @@ const ACTIONS: Array<{
     label: "搬迁仪器",
     help: "名称、型号、序列号与 UPS",
   },
-  { type: "order", label: "开单记录", help: "记录开单日期、工程师、类型和服务单号" },
+  { type: "order", label: "开单记录", help: "四类开单均关联当前项目，并计入工程师工作量" },
   {
     type: "acceptance",
     label: "验收报告",
@@ -2321,7 +2321,7 @@ function QuickMenu({
   return (
     <div>
       <p className="notice">
-        八类项目动作均写入当前项目。序列号地址更新与二维码申请位于独立导航。
+        这里保存的记录均关联当前项目。四类开单都会显示在项目开单记录中；认证、单寄备件和 PM 仅作项目归档，不影响搬迁进度。序列号地址更新与二维码申请位于独立导航。
       </p>
       <div className="quick-grid">
         {ACTIONS.map((action) => (
@@ -2877,6 +2877,7 @@ function actionFields(
         <Select
           name="orderType"
           label="开单类型"
+          help="认证、单寄备件和 PM 仅作项目归档，不影响搬迁进度。"
           options={[
             ["relocation", "搬迁"],
             ["certification", "认证"],
@@ -2884,14 +2885,14 @@ function actionFields(
             ["pm", "PM"],
           ]}
         />
-        <Field name="serviceOrderNo" label="服务单号" required help="保存时会同次创建开单记录，并关联下方工程师。" />
+        <Field name="serviceOrderNo" label="服务单号" required help="保存后可在当前项目的开单记录中查看。" />
         <Field
           name="orderedAt"
           label="开单日期"
           type="date"
           required
         />
-        <Field name="engineer" label="工程师" required help="填写服务单号时必须在同一次保存中填写执行工程师。" />
+        <Field name="engineer" label="工程师" required help="保存后关联当前项目，并计入该工程师工作量。" />
       </>
     );
   if (type === "acceptance")
