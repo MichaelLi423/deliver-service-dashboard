@@ -195,11 +195,13 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await screen.findByRole('heading', { name: /项目队列/ });
     const navigation = screen.getByRole('navigation', { name: '主导航' });
     const trigger = within(navigation).getByRole('button', { name: '数据管理' });
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({ x: 640, y: 0, left: 640, top: 0, right: 730, bottom: 60, width: 90, height: 60, toJSON: () => ({}) });
     fireEvent.click(trigger);
     const menu = screen.getByRole('region', { name: '数据管理' });
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(navigation).not.toContainElement(menu);
     expect(menu).toHaveClass('data-menu-panel');
+    await waitFor(() => expect(menu).toHaveStyle({ top: '66px', left: '640px', width: '192px' }));
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('region', { name: '数据管理' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();

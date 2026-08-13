@@ -367,7 +367,7 @@ export function WorkbenchV2({
   const [tagEditGuard, setTagEditGuard] = useState({ dirty: false, busy: false });
   const [historyImport, setHistoryImport] = useState(false);
   const [dataMenuOpen, setDataMenuOpen] = useState(false);
-  const [dataMenuPosition, setDataMenuPosition] = useState({ top: 0, right: 12 });
+  const [dataMenuPosition, setDataMenuPosition] = useState({ top: 0, left: 12, width: 192 });
   const [independentRefresh, setIndependentRefresh] = useState(0);
   const [reminderRefresh, setReminderRefresh] = useState(0);
   const [tagCatalog, setTagCatalog] = useState<ProjectTagCatalogDto | null>(null);
@@ -396,9 +396,11 @@ export function WorkbenchV2({
       const trigger = dataMenuTrigger.current;
       if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
+      const width = 192;
       setDataMenuPosition({
         top: rect.bottom + 6,
-        right: Math.max(12, window.innerWidth - rect.right),
+        left: Math.min(Math.max(12, rect.left), window.innerWidth - width - 12),
+        width,
       });
     };
     const closeFromOutside = (event: MouseEvent) => {
