@@ -1,10 +1,12 @@
 # 代码评审报告（review-report）
 
+> **历史培训夹具证据（2026-08-10，green-final `d304bd5` 当时记录）。** 本报告描述的原 `add-relocation-service-workbench` change 已归档（`openspec/changes/archive/2026-08-10-add-relocation-service-workbench/`），最终实现只在远端培训分支 `origin/training/vibe-coding-reminder-window`、未合入 main。本报告不是当前产品评审，不代表产品批准；正式产品合入需另立正式 change 并另行授权和评审。当前教学叙事冻结于 [training-change/](./training-change/README.md)。
+
 独立代码评审记录，用于培训回放（质量双门之代码评审侧）。记录真实过程，不粉饰。
 
 ## 评审对象
 
-- change：`add-relocation-service-workbench`（进行中）
+- change：`add-relocation-service-workbench`（当时进行中，现已归档；本报告为其历史证据）
 - 能力：workbench-todos（项目提醒，临期窗口配置）
 - 阶段快照：baseline `76747c1` / red-test `f771667` / preset-failure `0554164` / green-final `d304bd5`
 - 评审方式：对照 spec 逐条核对 + 变更 diff 审查；独立于实现过程
@@ -31,6 +33,7 @@
 ## 实际验证（2026-08-10）
 
 - 四阶段 typecheck 均通过；green-final 全量 Vitest 93 files/1076 tests 通过；`npm run e2e:build` 通过；单文件 Playwright（`e2e/workbench-v2-layout.spec.ts`）1/1 通过。
+- 机器执行证据逐项边界：tests 只证明被断言的特定行为；typecheck 只证明类型一致性；build/package 只证明可构建、可打包；E2E 只证明特定环境、特定路径的特定行为。
 - 以上均为 macOS arm64 开发机验证，**不代表 Windows 平台验证**。
 
 配套：[verify-report.md](./verify-report.md)、[demo-runbook.md](./demo-runbook.md)。

@@ -1,34 +1,43 @@
 # Q&A 模板（qa-template）
 
-本模板用于课前收集问题、整理共性问题、登记待答问题池，并为私有材料标注内部附件注入点。**本公开文件不包含任何真实内部信息。**
+本模板用于 90 分钟课程（34 页）的课前收集、共性问题整理、待答问题池登记，并为私有材料标注内部附件注入点。**本公开文件不包含任何真实内部信息。**
 
 ## 课前收集（发给学员）
 
-请在上课前填写并提交，用于安排 12 分钟 Q&A：
+请在上课前填写并提交，用于安排 8 分钟 Q&A：
 
 1. 你之前用过 AI 编码工具吗？用过哪些？（单选：没用过 / 用过但不多 / 常用）
-2. 你当前最想解决的一个问题是什么？（一句话）
-3. 你对"临期窗口"这类业务规则在 AI 辅助开发中如何澄清，有疑问吗？
-4. 你主要关心的是：工具安装配置 / 工作流程 / 业务规则澄清 / 安全边界 / 其他？
+2. 你更关心哪个主题？（多选：会话与权限 / 技能包 skills / 多 Agent 编排 / OpenSpec 规范 / TDD 与诊断 / 安全边界 / 其他）
+3. 你当前最想解决的一个问题是什么？（一句话）
+4. 你的技术角色？（开发 / 产品 / 测试 / 运维 / 其他）
 
 ## 共性问题（课堂公开回答）
 
-以下为整理后的共性问题与回答要点（基于 2026-08-10 官方资料，详见 [README.md](./README.md)）：
+以下为整理后的共性问题与回答要点（版本以官网/上游为准，详见 [environment-checklist.md](./environment-checklist.md)）：
 
 - **Q：Vibe Coding 是不是不用管代码了？**
   A：不是。本课口径：受控 AI 辅助开发——人定义目标、约束、决策与验收证据，AI 辅助分析与实现；不是"凭感觉接受输出"。
 
-- **Q：OpenCode 和 OpenSpec 是什么关系？**
-  A：职责不同。OpenCode 是 AI 编码工具（npm `opencode-ai` 1.18.16），OpenSpec 是规范与验收工具（npm `@fission-ai/openspec` 1.8.0）。两者协作构成需求→规范→实现→验证的闭环。
+- **Q：单 Agent 和 oh-my-opencode-slim 多 Agent 怎么选？**
+  A：任务边界清晰、串行、能描述清楚就用单 Agent；任务可切分、需并行或独立复核再考虑编排。编排有协调成本与 token 成本（Council 多模型投票尤其明显），能单就不多。配置默认在用户级 `~/.config/opencode/oh-my-opencode-slim.json(c)`，项目级 `.opencode/oh-my-opencode-slim.json` 是可选的覆盖（安装不创建 agent 目录）；后台编排需要 `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true`，整体禁用 `OH_MY_OPENCODE_SLIM_DISABLE=1`。
 
-- **Q：MCP 是什么？要不要装？**
-  A：MCP 是开放协议（modelcontextprotocol.io，规范 2026-07-28），不是需要安装的单一运行时。本仓库无 MCP 配置，本课不涉及。
+- **Q：mattpocock/skills 是官方标准吗？**
+  A：不是。它是个人技能集合；背景是 Agent Skills 开放标准与 skills.sh / Vercel Labs 生态。安装前先审阅，安装方式二选一防重复注册。
 
-- **Q：skills 和 oh-my-opencode-slim 是官方的吗？**
-  A：skills 是通用扩展模式，无跨厂商统一标准；oh-my-opencode-slim（npm 2.2.11）是第三方社区插件，非 OpenCode 官方。本项目 `skills-lock.json` 为空，未使用。
+- **Q：OpenSpec 的 strict 通过是不是就说明实现对了？**
+  A：不是。strict 只验证 CLI 校验到的规格格式、requirement/scenario 结构与可解析性，不证明 proposal/design/tasks 完成度，也不验证行为。行为符合性靠规范映射/启发式核对（本课展示历史人工/等效规范映射；项目里 `/opsx-verify` 可辅助这类核对，但本课不声称当时运行过它）、机器执行证据、code review 叠加。机器执行证据逐项边界：tests 只证明被断言的特定行为；typecheck 只证明类型一致性；build/package 只证明可构建、可打包；E2E 只证明特定环境、特定路径的特定行为——不能笼统说"整体支持行为符合性"。
+
+- **Q：TDD 和 diagnosis 有什么区别？**
+  A：TDD 面对已知目标行为，先写失败测试；diagnosis 面对未知故障原因，先收集日志/复现/最小环境再改代码。方向不同，都靠证据。
+
+- **Q：MCP 要装吗？**
+  A：它是协议不是运行时；只有内置工具不够、必须接外部系统时才用。本项目无 MCP 配置，本课不演示。
+
+- **Q：演示里的"临期窗口"现在是产品功能吗？**
+  A：不是。原 change 已归档，正式 spec 是旧版，实现只在远端培训分支。课程用的是 training-change 培训夹具，冻结当时的教学叙事，无产品批准语义。
 
 - **Q：本课为什么不现场调用 Agent？**
-  A：为保证可复现与不受网络/模型不确定性影响：所有 Agent 输出为回放，现场只运行测试、查看 diff、切换快照、操作 UI。
+  A：保证可复现与不受网络/模型不确定性影响：所有 Agent 输出为静态回放，现场只运行测试、查看 diff、切换快照、操作 UI。
 
 ## 待答问题池（会后书面处理）
 
@@ -55,3 +64,4 @@
 
 - 课程概览与导航：[README.md](./README.md)
 - 口播脚本：[speaker-notes.md](./speaker-notes.md)
+- 讲师备课手册：[presenter-preparation.md](./presenter-preparation.md)

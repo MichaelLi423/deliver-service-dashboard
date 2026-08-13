@@ -1,5 +1,7 @@
 # Vibe Coding 培训幻灯片
 
+34 页、90 分钟、16:9，面向技术混合受众。课程采用全部静态回放，不要求学员跟做。
+
 ## 生成
 
 ```bash
@@ -8,25 +10,30 @@ python3 -m venv /tmp/vibe-slides-venv
 /tmp/vibe-slides-venv/bin/python generate_slides.py
 ```
 
-建议将虚拟环境放在仓库外；Windows 可使用等价的临时目录与虚拟环境命令。
+建议将虚拟环境放在项目目录外。Windows 请使用等价的临时目录与虚拟环境命令。
 
-脚本从同一份内容与布局模型生成：
-
-- `vibe-coding-training.pptx`：16:9、18 页，文字与几何图形可编辑；
-- `vibe-coding-training.pdf`：18 页，内容一致的预览与播放兜底。
-
-如需同时输出逐页 PNG 和 contact sheet：
+如需同时生成逐页 PNG 与 contact sheet：
 
 ```bash
-VIBE_SLIDES_PREVIEW_DIR=/tmp/vibe-slides-preview python generate_slides.py
+VIBE_SLIDES_PREVIEW_DIR=/tmp/vibe-slides-preview \
+  /tmp/vibe-slides-venv/bin/python generate_slides.py
 ```
+
+脚本从同一内容与布局模型生成：
+
+- `vibe-coding-training.pptx`：文字和几何图形可编辑；
+- `vibe-coding-training.pdf`：内容一致的固定渲染播放兜底。
+
+## 设计系统
+
+新版采用“编辑式演讲稿 / 工作材料册”语言：暖白纸面、墨黑正文、历史输出摘要的静态重构材料、规范摘录、审阅批注与证据账本。版式使用 1600×900 的 12 列网格（左右 96、列宽 88、沟槽 32）和 8px 垂直基线。绿色只表示已验证，红色只表示失败或人工确认，黄色只表示提问与注意。
 
 ## 字体
 
-- PPTX 中文字体标记为 `Microsoft YaHei`，英文、数字和代码标记为 `Aptos`。字体不嵌入；Windows 缺少微软雅黑时，PowerPoint 会按系统设置替代，建议优先替换为等宽度的中文无衬线字体（如等线或思源黑体），并复查换行。
-- PDF 与 PNG 默认按顺序查找 PingFang、思源黑体/Noto CJK 等常见字体。可用 `VIBE_SLIDES_CJK_FONT` 指定 `.ttf`/`.otf`/`.ttc`；TTC 默认使用简体中文 Regular/Medium/Semibold 字形，可分别用 `VIBE_SLIDES_CJK_REGULAR_INDEX`、`VIBE_SLIDES_CJK_MEDIUM_INDEX`、`VIBE_SLIDES_CJK_BOLD_INDEX` 覆盖索引。
-- 当前已验证的 macOS 字体路径会作为候选路径自动发现，但不是生成的唯一条件。若没有找到支持中文的字体，脚本会停止并提示设置环境变量，避免生成缺字文件。
+- PPTX 中文字体设置为 `Microsoft YaHei`，英文和数字为 `Aptos`，代码为 `Aptos Mono`。字体不嵌入；缺失时 PowerPoint 会使用系统替代字体，播放前应复查换行与基线。
+- PDF 和 PNG 默认寻找 PingFang、思源黑体或 Noto CJK。可通过 `VIBE_SLIDES_CJK_FONT` 指定 `.ttf`、`.otf` 或 `.ttc`。
+- TTC 字体索引可由 `VIBE_SLIDES_CJK_REGULAR_INDEX`、`VIBE_SLIDES_CJK_MEDIUM_INDEX`、`VIBE_SLIDES_CJK_BOLD_INDEX` 覆盖。
 
-## 输出说明
+## PDF 限制
 
-PDF 不依赖 PowerPoint 或 LibreOffice：Pillow 使用指定中文字体逐页渲染，ReportLab 将无损页面封装为 PDF，因此适合跨机器预览和播放兜底。PDF 页面是高分辨率整页图，不提供可选中文文本；可编辑内容以 PPTX 为准。由于 PPTX 使用系统字体替代，字距可能与固定渲染的 PDF 有轻微差异；所有正文均使用显式分行与安全边距来降低重排风险。
+Pillow 使用指定中文字体固定渲染每页，ReportLab 将页面封装为 PDF，因此 PDF 不依赖 PowerPoint 或 LibreOffice。PDF 页面为高分辨率整页图，不提供可选择文本；需要编辑时使用 PPTX。
