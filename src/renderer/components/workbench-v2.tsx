@@ -1184,7 +1184,6 @@ export function WorkbenchV2({
           <div className="panel-head queue-heading">
             <div>
               <h2 id="queue-title">项目队列 {projectPage?.total ?? 0}</h2>
-              <p>选择项目后，上方工作区会显示对应资料与记录</p>
             </div>
             <span className="queue-range" aria-live="polite">
               {notice}
@@ -2064,41 +2063,55 @@ function ProjectDetails({
                 )}
               </div>
             </div>
-            <div className="fact-grid">
+            <div className="overview-groups">
               {[
-              ["客户名称", project.customerName],
-              ["ECC / 临时编号", project.ecc || project.tempNo],
-              ["所属区域", `${project.region || "待补"}${project.regionNeedsAdjustment ? "（待调整）" : ""}`],
-              ["主状态", STATUS_LABEL[project.status]],
-              ["进单日期", project.entryAt ? businessDate(project.entryAt) : "待进单"],
-              ["旧址地址", detail?.detail?.oldSiteAddress || "待补"],
-              ["新址地址", detail?.detail?.newSiteAddress || "待补"],
-              ["计划上门日期", detail?.detail?.planVisitAt || "待补"],
-              ["计划运输日期", detail?.detail?.planTransportAt || "待补"],
-              ["场地确认", detail?.detail?.siteConfirmed ? "是" : "否"],
-              ["是否暂存", detail?.detail?.isTemporaryStorage === null || detail?.detail?.isTemporaryStorage === undefined ? "未填写" : detail.detail.isTemporaryStorage ? "是" : "否"],
-              ["暂存地址", detail?.detail?.temporaryStorageAddress || "待补"],
-              ["计划装机日期", detail?.detail?.plannedInstallAt || "待补"],
-              ["实际装机完成日期", detail?.detail?.actualInstallDoneAt || "待补"],
-              ["项目备注", detail?.detail?.projectNote || "无"],
-              ["暂定仪器名称", detail?.detail?.temporaryInstrumentName || "待补"],
-              ["暂定仪器数量", detail?.detail?.temporaryInstrumentCount === null || detail?.detail?.temporaryInstrumentCount === undefined ? "待补" : `${detail.detail.temporaryInstrumentCount} 台`],
-              ["暂定型号", detail?.detail?.temporaryInstrumentModel || "待补"],
-              ["UPS", detail?.detail?.temporaryHasUps === null || detail?.detail?.temporaryHasUps === undefined ? "未填写" : detail.detail.temporaryHasUps ? "是" : "否"],
-              ["合同开始日期", detail?.detail?.contractStartDate || "待补"],
-              ["合同截止日期", detail?.detail?.contractEndDate || "待补"],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <span>{label}</span>
-                  <strong>{value}</strong>
-                </div>
+                ["基础资料", [
+                  ["客户名称", project.customerName],
+                  ["ECC / 临时编号", project.ecc || project.tempNo],
+                  ["所属区域", `${project.region || "待补"}${project.regionNeedsAdjustment ? "（待调整）" : ""}`],
+                  ["主状态", STATUS_LABEL[project.status]],
+                  ["进单日期", project.entryAt ? businessDate(project.entryAt) : "待进单"],
+                  ["项目备注", detail?.detail?.projectNote || "无"],
+                ]],
+                ["搬迁安排", [
+                  ["旧址地址", detail?.detail?.oldSiteAddress || "待补"],
+                  ["新址地址", detail?.detail?.newSiteAddress || "待补"],
+                  ["计划上门日期", detail?.detail?.planVisitAt || "待补"],
+                  ["计划运输日期", detail?.detail?.planTransportAt || "待补"],
+                  ["场地确认", detail?.detail?.siteConfirmed ? "是" : "否"],
+                  ["是否暂存", detail?.detail?.isTemporaryStorage === null || detail?.detail?.isTemporaryStorage === undefined ? "未填写" : detail.detail.isTemporaryStorage ? "是" : "否"],
+                  ["暂存地址", detail?.detail?.temporaryStorageAddress || "待补"],
+                  ["计划装机日期", detail?.detail?.plannedInstallAt || "待补"],
+                  ["实际装机完成日期", detail?.detail?.actualInstallDoneAt || "待补"],
+                ]],
+                ["设备与合同", [
+                  ["暂定仪器名称", detail?.detail?.temporaryInstrumentName || "待补"],
+                  ["暂定仪器数量", detail?.detail?.temporaryInstrumentCount === null || detail?.detail?.temporaryInstrumentCount === undefined ? "待补" : `${detail.detail.temporaryInstrumentCount} 台`],
+                  ["暂定型号", detail?.detail?.temporaryInstrumentModel || "待补"],
+                  ["UPS", detail?.detail?.temporaryHasUps === null || detail?.detail?.temporaryHasUps === undefined ? "未填写" : detail.detail.temporaryHasUps ? "是" : "否"],
+                  ["合同开始日期", detail?.detail?.contractStartDate || "待补"],
+                  ["合同截止日期", detail?.detail?.contractEndDate || "待补"],
+                ]],
+              ].map(([group, fields]) => (
+                <section className="overview-group" aria-labelledby={`overview-${group}`} key={group as string}>
+                  <h3 id={`overview-${group}`}>{group as string}</h3>
+                  <dl>
+                    {(fields as string[][]).map(([label, value]) => (
+                      <div key={label}>
+                        <dt>{label}</dt>
+                        <dd className={["待补", "未填写", "待进单"].includes(value!) ? "is-missing" : undefined}>{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </section>
               ))}
             </div>
-            <h3>关联登记事实</h3>
-            <div className="fact-grid" aria-label="关联登记事实">
-              {recordFacts.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
-            </div>
-            <p className="notice">序列号地址更新与二维码申请在独立模块按需加载，不在总览展开全部记录。</p>
+            <section className="overview-records" aria-labelledby="overview-records-title">
+              <h3 id="overview-records-title">关联登记事实</h3>
+              <dl>
+                {recordFacts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+              </dl>
+            </section>
           </div>
         ) : (
           <SectionTable

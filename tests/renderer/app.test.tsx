@@ -419,11 +419,21 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(table).toHaveTextContent('2026/8/8');
   });
 
-  it('项目总览展示六类关联登记数量，并说明独立模块按需加载', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
-    const facts = await screen.findByLabelText('关联登记事实');
+  it('项目总览按语义分组完整展示资料，并紧凑展示六类关联登记数量', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { name: /项目队列/ });
+    const row = await screen.findByRole('row', { name: /^客户 1 / });
+    fireEvent.click(within(row).getByText('客户 1'));
+    for (const group of ['基础资料', '搬迁安排', '设备与合同']) {
+      expect(screen.getByRole('region', { name: group })).toBeInTheDocument();
+    }
+    expect(screen.getByRole('region', { name: '基础资料' })).toHaveTextContent('客户名称客户 1');
+    expect(screen.getByRole('region', { name: '搬迁安排' })).toHaveTextContent('旧址地址待补');
+    expect(screen.getByRole('region', { name: '设备与合同' })).toHaveTextContent('合同开始日期待补');
+    const facts = screen.getByRole('region', { name: '关联登记事实' });
     for (const label of ['物流费用登记1 条', '搬迁仪器1 台', '上门活动1 条', '开单记录1 条', '损坏/维修事项0 条', '掉票记录1 条']) expect(facts).toHaveTextContent(label);
-    expect(screen.getByText(/序列号地址更新与二维码申请在独立模块按需加载/)).toBeInTheDocument();
+    expect(screen.queryByText(/序列号地址更新与二维码申请在独立模块按需加载/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/选择项目后，上方工作区会显示对应资料与记录/)).not.toBeInTheDocument();
   });
 
   it('仪器列表展示厂商和服务级别，便于核对导入结果', async () => {
