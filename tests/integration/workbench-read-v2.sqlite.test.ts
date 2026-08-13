@@ -1350,6 +1350,58 @@ describe('工作台 v2 跨项目历史分页（historyPage）', () => {
     expect(() => facade.v2HistoryPage({ kind: 'invoice', from: '2026-09-01', to: '2026-08-01' })).toThrow(/起始日期不得晚于截止日期/);
     closeDatabase(db);
   });
+
+  it('service_order：project_id 为空的独立/未关联开单在全局历史可见（回归：INNER JOIN projects 漏行）', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    // 真实插入 project_id IS NULL 的服务单（非搬迁开单/未关联导入记录）：
+    // 唯一性校验命中、但修复前历史浏览不可见（INNER JOIN projects）。
+    const orderStmt = db.prepare(
+      `INSERT INTO service_orders (id, order_type, service_order_no, ordered_at, engineer, customer_name, project_id, note, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    );
+    orderStmt.run('so-np-1', 'certification', 'SO-NP-001', '2026-08-09', '工程师丙', '独立开单客户', null, null, '2026-08-09T10:00:00+08:00', '2026-08-09T10:00:00+08:00');
+    // 同时保留一条项目内开单：修复不得改变有项目记录的行为。
+    facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'order', projectId, values: { orderType: 'relocation', serviceOrderNo: 'SO-NP-PROJ', orderedAt: '2026-08-11', engineer: '工程师乙' } } });
+    const projOrderId = String(db.prepare('SELECT id FROM service_orders WHERE project_id = ?').get(projectId)!.id);
+
+    const page = facade.v2HistoryPage({ kind: 'service_order' });
+    expect(page.total).toBe(2); // 修复前：total=1，无项目开单被 INNER JOIN 漏掉
+    const npRow = page.rows.find((r) => r.id === 'so-np-1') as Extract<typeof page.rows[number], { kind: 'service_order' }> | undefined;
+    expect(npRow).toBeDefined(); // 修复前：该行不可见
+    expect(npRow!.projectId).toBeNull();
+    expect(npRow!.customerName).toBe('独立开单客户'); // 无项目时回退 service_orders.customer_name
+    expect(npRow!.ecc).toBeNull();
+    expect(npRow!.tempNo).toBe('');
+    expect(npRow!.serviceOrderNo).toBe('SO-NP-001');
+    expect(npRow!.orderedAt).toBe('2026-08-09');
+    expect(npRow!.businessDate).toBe('2026-08-09');
+    expect(npRow!.engineer).toBe('工程师丙');
+
+    // 有项目记录上下文保持原行为
+    const projRow = page.rows.find((r) => r.id === projOrderId) as Extract<typeof page.rows[number], { kind: 'service_order' }> | undefined;
+    expect(projRow).toBeDefined();
+    expect(projRow!.projectId).toBe(projectId);
+    expect(projRow!.customerName).toBe('集成客户甲');
+    expect(projRow!.ecc).toBe('ECC-V2-001');
+
+    // 日期筛选对无项目记录同样生效
+    expect(facade.v2HistoryPage({ kind: 'service_order', from: '2026-08-09', to: '2026-08-09' }).rows.map((r) => r.id)).toEqual(['so-np-1']);
+
+    // keyset 分页包含无项目记录（业务日期倒序：08-11 项目开单在前、08-09 无项目在后）
+    const first = facade.v2HistoryPage({ kind: 'service_order', limit: 1 });
+    const second = facade.v2HistoryPage({ kind: 'service_order', limit: 1, cursor: first.nextCursor! });
+    expect([...first.rows, ...second.rows].map((r) => r.id)).toEqual([projOrderId, 'so-np-1']);
+
+    // 项目详情 section 查询不受影响：无项目开单不属于任何项目
+    expect(facade.v2SectionPage({ kind: 'orders', projectId }).total).toBe(1);
+
+    // 非空服务单号全局唯一保持不放宽：重复单号仍被拒绝
+    expect(() =>
+      orderStmt.run('so-np-dup', 'certification', 'SO-NP-001', '2026-08-10', '工程师丁', '另一客户', null, null, 't', 't'),
+    ).toThrow(/UNIQUE/);
+    closeDatabase(db);
+  });
 });
 
 describe('工作台 v2 mutation（Oracle #10：复用写逻辑，无 snapshot）', () => {

@@ -1044,10 +1044,15 @@ export class WorkbenchReadRepository {
           createdAt: String(r.created_at),
         };
       case 'service_order':
+        // project_id 可空：无项目开单 projectId 为 null（客户名已在 SQL 中回退为
+        // service_orders.customer_name），其余字段同 ctx() 口径。
         return {
           kind,
           id: String(r.id),
-          ...ctx(),
+          projectId: nullString(r.project_id),
+          customerName: r.customer_name === null || r.customer_name === undefined ? '' : String(r.customer_name),
+          ecc: nullString(r.ecc),
+          tempNo: String(r.temp_no ?? ''),
           orderType: r.order_type as 'relocation' | 'certification' | 'parts_by_mail' | 'pm',
           serviceOrderNo: nullString(r.service_order_no),
           orderedAt: String(r.ordered_at),
@@ -1628,8 +1633,10 @@ export const LOOKUP_KINDS: readonly WorkbenchV2LookupKind[] = ['ship_to_requests
 
 /**
  * 跨项目历史分页查询规格（ora-1：#6）。
- * - 项目关联 kind 全部 INNER JOIN projects/customers/contracts（跨项目历史只浏览项目内记录；
- *   service_orders.project_id 可空 → 非搬迁类开单不计入跨项目历史）；
+ * - 项目关联 kind 全部 INNER JOIN projects/customers/contracts（跨项目历史只浏览项目内记录）；
+ *   例外：service_orders.project_id 可空，service_order 用 LEFT JOIN projects——
+ *   project_id 为空的非搬迁开单/未关联导入记录也计入全局历史（唯一性校验本已命中，
+ *   历史浏览不得漏行），客户名回退为 service_orders.customer_name；
  * - dateExpr：业务日期表达式；instrument 无业务日期字段，按 created_at 日期部分
  *   （substr）过滤与输出，保证 to 截止日期包含当天；
  * - 排序/游标统一按 COALESCE(dateExpr,'') DESC, id DESC（无日期者排在末尾）。
@@ -1670,9 +1677,9 @@ const HISTORY_SPECS: Record<WorkbenchV2HistoryKind, HistorySpec> = {
   },
   service_order: {
     fromSql:
-      'FROM service_orders o JOIN projects p ON p.id = o.project_id LEFT JOIN customers cu ON cu.id = p.customer_id LEFT JOIN contracts c ON c.project_id = p.id',
+      'FROM service_orders o LEFT JOIN projects p ON p.id = o.project_id LEFT JOIN customers cu ON cu.id = p.customer_id LEFT JOIN contracts c ON c.project_id = p.id',
     selectSql:
-      'o.id, o.project_id, o.order_type, o.service_order_no, o.ordered_at, o.engineer, o.created_at, cu.name AS customer_name, c.ecc, p.temp_no',
+      "o.id, o.project_id, o.order_type, o.service_order_no, o.ordered_at, o.engineer, o.created_at, CASE WHEN o.project_id IS NULL THEN o.customer_name ELSE cu.name END AS customer_name, c.ecc, p.temp_no",
     idExpr: 'o.id',
     dateExpr: 'o.ordered_at',
   },

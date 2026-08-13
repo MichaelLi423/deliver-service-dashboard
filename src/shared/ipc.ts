@@ -972,7 +972,8 @@ export type WorkbenchV2HistoryRow =
   | {
       kind: 'service_order';
       id: string;
-      projectId: string;
+      /** 项目关联开单为项目 id；未关联项目的开单（project_id 为空）为 null。 */
+      projectId: string | null;
       customerName: string;
       ecc: string | null;
       tempNo: string;
