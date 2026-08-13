@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type CSSProperties,
 } from "react";
+import { createPortal } from "react-dom";
 import ExcelJS from "exceljs";
 import type {
   AccountSessionInfo,
@@ -365,6 +366,8 @@ export function WorkbenchV2({
   const [layer, setLayer] = useState<LayerState | null>(null);
   const [tagEditGuard, setTagEditGuard] = useState({ dirty: false, busy: false });
   const [historyImport, setHistoryImport] = useState(false);
+  const [dataMenuOpen, setDataMenuOpen] = useState(false);
+  const [dataMenuPosition, setDataMenuPosition] = useState({ top: 0, right: 12 });
   const [independentRefresh, setIndependentRefresh] = useState(0);
   const [reminderRefresh, setReminderRefresh] = useState(0);
   const [tagCatalog, setTagCatalog] = useState<ProjectTagCatalogDto | null>(null);
@@ -374,6 +377,8 @@ export function WorkbenchV2({
   const requests = useRef({ projects: 0, detail: 0, section: 0, overview: 0 });
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const importTrigger = useRef<HTMLButtonElement>(null);
+  const dataMenuTrigger = useRef<HTMLButtonElement>(null);
+  const dataMenuPanel = useRef<HTMLDivElement>(null);
   const layerCloseRequest = useRef<(trigger?: HTMLElement | null) => void>(() => undefined);
   /** 提醒跳转/新建成功后钉住的目标项目：即使不在当前页也不被 loadProjects 重置选中。 */
   const selectionPin = useRef("");
@@ -384,6 +389,41 @@ export function WorkbenchV2({
     detail?.project ??
     projectPage?.projects.find((project) => project.id === selectedId) ??
     null;
+
+  useEffect(() => {
+    if (!dataMenuOpen || historyImport) return;
+    const updatePosition = () => {
+      const trigger = dataMenuTrigger.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      setDataMenuPosition({
+        top: rect.bottom + 6,
+        right: Math.max(12, window.innerWidth - rect.right),
+      });
+    };
+    const closeFromOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (dataMenuTrigger.current?.contains(target) || dataMenuPanel.current?.contains(target)) return;
+      setDataMenuOpen(false);
+    };
+    const closeFromKeyboard = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setDataMenuOpen(false);
+      dataMenuTrigger.current?.focus();
+    };
+    updatePosition();
+    document.addEventListener("mousedown", closeFromOutside);
+    document.addEventListener("keydown", closeFromKeyboard);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      document.removeEventListener("mousedown", closeFromOutside);
+      document.removeEventListener("keydown", closeFromKeyboard);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [dataMenuOpen, historyImport]);
 
   function acceptBusinessRevision(next: number): boolean {
     if (next < revision.current) return false;
@@ -885,29 +925,47 @@ export function WorkbenchV2({
           <button onClick={() => setLayer({ kind: "history" })}>浏览全部记录</button>
           <button onClick={() => setLayer({ kind: "report" })}>运营报表</button>
           <button onClick={() => setLayer({ kind: "tags" })}>标签库</button>
-          <details className="data-menu">
-            <summary>数据管理</summary>
-            <div>
+          <div className="data-menu">
+            <button
+              ref={dataMenuTrigger}
+              className="data-menu-trigger"
+              type="button"
+              aria-haspopup="true"
+              aria-expanded={dataMenuOpen}
+              onClick={() => setDataMenuOpen((open) => !open)}
+            >
+              数据管理
+            </button>
+            {dataMenuOpen && createPortal(
+              <div
+                ref={dataMenuPanel}
+                className="data-menu-panel"
+                role="region"
+                aria-label="数据管理"
+                style={dataMenuPosition}
+              >
               <button
                 ref={importTrigger}
                 onClick={() => setHistoryImport(true)}
               >
                 历史数据导入
               </button>
-              <button onClick={() => void runBackup()}>手动备份</button>
-              <button className="danger-text" onClick={() => void runRestore()}>
+              <button onClick={() => { setDataMenuOpen(false); void runBackup(); }}>手动备份</button>
+              <button className="danger-text" onClick={() => { setDataMenuOpen(false); void runRestore(); }}>
                 恢复备份
               </button>
               <div className="data-menu-divider" />
-              <button onClick={() => setLayer({ kind: "tags" })}>
+              <button onClick={() => { setDataMenuOpen(false); setLayer({ kind: "tags" }); }}>
                 管理标签库
               </button>
               <div className="data-menu-divider" />
-              <button className="danger-text" onClick={() => setLayer({ kind: "clean" })}>
+              <button className="danger-text" onClick={() => { setDataMenuOpen(false); setLayer({ kind: "clean" }); }}>
                 清理全部业务数据
               </button>
-            </div>
-          </details>
+              </div>,
+              document.body,
+            )}
+          </div>
         </nav>
         <div className="account-chip">
           <span aria-hidden="true">●</span>

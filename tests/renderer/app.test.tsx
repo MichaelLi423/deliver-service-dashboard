@@ -190,6 +190,25 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2TagCatalog).toHaveBeenCalledTimes(3));
   });
 
+  it('数据管理浮层脱离横向滚动导航，并支持 Escape 与外部点击关闭', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { name: /项目队列/ });
+    const navigation = screen.getByRole('navigation', { name: '主导航' });
+    const trigger = within(navigation).getByRole('button', { name: '数据管理' });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole('region', { name: '数据管理' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(navigation).not.toContainElement(menu);
+    expect(menu).toHaveClass('data-menu-panel');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('region', { name: '数据管理' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('region', { name: '数据管理' })).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('region', { name: '数据管理' })).not.toBeInTheDocument();
+  });
+
   it('新建项目按组键盘可达地同组与跨组多选，并提交全局自定义 tagIds', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
