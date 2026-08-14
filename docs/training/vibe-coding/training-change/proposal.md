@@ -1,6 +1,6 @@
 # 培训提案（夹具）：提醒临期窗口配置入口
 
-> **培训夹具，非产品提案。** 本文件只为浏览器课件回放复现"当时提案长什么样"，不构成产品决策，也从未走产品批准流程。来源：培训分支 `origin/training/vibe-coding-reminder-window` 的叙事（origin 于 baseline `76747c1`）。
+> **培训夹具，非产品提案。** 本文件用于备课和历史会话不可访问时说明"当时提案长什么样"，不构成产品决策，也从未走产品批准流程。来源：培训分支 `origin/training/vibe-coding-reminder-window` 的叙事（origin 于 baseline `76747c1`）。
 
 ## Why
 

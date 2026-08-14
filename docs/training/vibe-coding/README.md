@@ -2,9 +2,9 @@
 
 **从需求到证据的受控开发闭环**
 
-面向技术混合受众（开发为主，含少量产品/测试/运维）的 90 分钟线下课程，共 34 页演示，以本仓库的搬迁服务工作台项目为演示载体。课程讲解"受控 AI 辅助开发"：人定义目标、约束、决策与验收证据，AI 辅助分析与实现；覆盖一次真实 OpenCode 会话、三套关键工具、TDD 与 diagnosis 两种入口、四层验证证据，最后用一个小需求走完完整闭环。
+面向技术混合受众（开发为主，含少量产品/测试/运维）的 90 分钟线下课程，共 31 页演示，以本仓库的搬迁服务工作台项目为演示载体。课程讲解"受控 AI 辅助开发"：人定义目标、约束、决策与验收证据，AI 辅助分析与实现；覆盖一次真实 OpenCode 会话、三套关键工具、TDD 与 diagnosis 两种入口、四层验证证据，最后用一个小需求走完完整闭环。
 
-课程形式：**线下、不跟做、无考核、全部静态回放**。现场不调用 Agent；所有 Agent 输出以**连续编号的静态重构材料**回放（步骤 1–4）——这些材料依据已核验的会话步骤和历史输出摘要重新排版，**不是原始界面截图，也不是现场 Agent 输出**；现场只运行测试、查看 diff、切换快照、操作 UI。
+课程形式：**线下、不跟做、无考核**。项目演示段由讲师通过 OpenCode 打开**已有历史会话**，按关键节点跳转、讲解其中**已有的输出**——不重新运行 Agent、不重新执行历史命令；课件只给整体思路。页 8–11 的 Agent 输出以**连续编号的静态重构材料**呈现（步骤 1–4）——这些材料依据已核验的会话步骤和历史输出摘要重新排版，**不是原始界面截图，也不是现场 Agent 输出**。
 
 ## 时间结构（共 90 分钟）
 
@@ -14,9 +14,8 @@
 | 8–20 分钟 | 第一次 OpenCode 会话（静态重构材料：仓库/status/Plan/权限/diff/undo/验证） | 6–11 |
 | 20–42 分钟 | 三套关键工具教程：mattpocock/skills 7 分钟、oh-my-opencode-slim 8 分钟、OpenSpec 7 分钟；MCP 共 2 分钟：页 12（1 分钟）与页 25（1 分钟） | 12–25 |
 | 42–54 分钟 | 开发方法：TDD vs diagnosis + review/verify 四层证据 | 26–27 |
-| 54–76 分钟 | 当前项目整合演示（22 分钟） | 28–32 |
-| 76–82 分钟 | 日常落地/风险适配 | 33 |
-| 82–90 分钟 | Q&A | 34 |
+| 54–76 分钟 | 现场演示：OpenCode 历史会话（22 分钟） | 28–30 |
+| 76–90 分钟 | Q&A 与收尾 | 31 |
 
 ## 课程要点
 
@@ -25,24 +24,24 @@
 - **TDD 与 diagnosis 是两个入口**：TDD 面对已知目标行为（先写失败测试），diagnosis 面对未知故障原因（先收集证据）；本课两个都讲清何时用。
 - **四层证据**：OpenSpec strict（只验结构）→ 规范映射/启发式核对（历史人工对照，可由 `/opsx-verify` 辅助）→ 机器执行证据 → code review（安全/清晰/可维护）。机器执行证据逐项有边界：tests 只证明被断言的特定行为；typecheck 只证明类型一致性；build/package 只证明可构建、可打包；E2E 只证明特定环境、特定路径的特定行为——不能笼统说"整体支持行为符合性"。
 - **风险适配**：流程强度按业务歧义、改动范围、公共 API、数据/安全影响调整；目标、边界、验证证据不可省。
-- **静态回放**：所有 Agent 输出以静态重构材料呈现，现场不调用 Agent，演示可复现、不依赖网络。
+- **现场演示**：讲师通过 OpenCode 打开已有历史会话，按关键节点讲解已有输出（需求澄清 → 规格/计划 → Red → Green → Review/Verify），不重新运行 Agent、不重新执行历史命令；页 8–11 的 Agent 输出以静态重构材料呈现，保证可复现。
 
 ## 材料导航
 
 | 文件 | 用途 |
 | --- | --- |
-| [presenter-preparation.md](./presenter-preparation.md) | 讲师备课手册：34 页逐页讲解卡、准备清单、故障预案 |
+| [presenter-preparation.md](./presenter-preparation.md) | 讲师备课手册：31 页逐页讲解卡、准备清单、故障预案 |
 | [speaker-notes.md](./speaker-notes.md) | 逐分钟讲稿与正常中文口播 |
 | [environment-checklist.md](./environment-checklist.md) | 版本附录、前置条件、项目自检命令与归档漂移声明 |
 | [tool-roles.md](./tool-roles.md) | 工具职责/边界/本项目状态，关键工具"是什么/为什么/怎么用" |
 | [workflow-checklist.md](./workflow-checklist.md) | TDD vs diagnosis、四层证据、检查点与风险分级 |
-| [demo-runbook.md](./demo-runbook.md) | 静态重构材料步骤、四阶段历史证据、现场/回滚与 no-live-agent 边界 |
+| [demo-runbook.md](./demo-runbook.md) | 现场演示操作提纲：课前确认、关键节点跳转、时间控制、历史证据口径与失败兜底 |
 | [qa-template.md](./qa-template.md) | 课前收集、共性问题、待答问题池与内部附件注入点 |
 | [CONTEXT.md](./CONTEXT.md) | 课程特定语言词汇表（纯词汇表，术语唯一依据） |
 | [review-report.md](./review-report.md) | 历史代码评审记录（培训夹具证据，非当前产品评审） |
 | [verify-report.md](./verify-report.md) | 历史规范核对记录（培训夹具证据） |
-| [training-change/README.md](./training-change/README.md) | 培训夹具材料包（静态教学叙事材料，非产品 change） |
-| [slides/index.html](./slides/index.html) | 可离线直接打开的 34 页浏览器幻灯片 |
+| [training-change/README.md](./training-change/README.md) | 培训夹具材料包（备课/兜底材料，非现场主要展示入口） |
+| [slides/index.html](./slides/index.html) | 可离线直接打开的 31 页浏览器幻灯片 |
 | [slides/README.md](./slides/README.md) | 演讲操作与验证说明 |
 
 业务领域术语以仓库根目录 [CONTEXT.md](../../../CONTEXT.md) 为准；上下文关系见 [CONTEXT-MAP.md](../../../CONTEXT-MAP.md)。

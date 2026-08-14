@@ -15,5 +15,5 @@
 
 - 每一步都是"最小步骤"：Red 只写测试、preset 只演示偏差、Green 只做最小修复，不夹带无关改动。
 - preset-failure 是刻意准备的教学安排（课程词汇表见 [../CONTEXT.md](../CONTEXT.md)），不是真实故障。
-- 现场不调用 Agent，只切换快照、查看 diff、运行已验证命令（边界见 [../demo-runbook.md](../demo-runbook.md)）。
+- 本夹具用于备课与历史会话不可访问时的兜底，不是现场主入口；项目段打开已有 OpenCode 历史会话讲解已有输出，不重新调用 Agent 或执行历史命令（边界见 [../demo-runbook.md](../demo-runbook.md)）。
 - 步骤 6 的 strict 只验证规格结构，行为符合性由测试与评审共同支持（见 [evidence.md](./evidence.md)）。

@@ -1,6 +1,6 @@
 # 工作流检查清单（workflow-checklist）
 
-本清单配合 90 分钟、34 页课程使用，汇总开发闭环的两个入口（TDD vs diagnosis）、四层证据、六个最佳实践检查点与风险分级。配合 [CONTEXT.md](./CONTEXT.md) 词汇表使用。
+本清单配合 90 分钟、31 页课程使用，汇总开发闭环的两个入口（TDD vs diagnosis）、四层证据、六个最佳实践检查点与风险分级。配合 [CONTEXT.md](./CONTEXT.md) 词汇表使用。
 
 ## 开发闭环
 

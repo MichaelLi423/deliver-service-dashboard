@@ -1,6 +1,6 @@
 # 环境与前置条件核对清单
 
-本清单服务于 90 分钟、34 页的《Vibe Coding》课程（全静态回放），是课程环境的唯一事实来源：版本附录、前置条件、项目自检命令与归档漂移声明。**只记录已确认的信息，不声称未运行的命令已通过。** 环境只给平台无关概览，不分发个人配置。
+本清单服务于 90 分钟、31 页的《Vibe Coding》课程，是课程环境的唯一事实来源：版本附录、前置条件、项目自检命令与归档漂移声明。项目段打开 OpenCode 已有历史会话讲解已有输出，不重新运行 Agent 或历史命令。**只记录已确认的信息，不声称未运行的命令已通过。** 环境只给平台无关概览，不分发个人配置。
 
 最后核对日期：2026-08-13。
 
@@ -53,9 +53,8 @@
 
 1. 操作系统：讲师演示机与学员环境不限平台；课程只给平台无关概览。
 2. Node.js >= 20.19.0（项目 README 记录开发机 v24.15.0）。
-3. Git 已安装，可创建 worktree 与切换分支。
-4. 终端可运行 `npm` 脚本（详见下方项目自检命令）。
-5. 演示需可用网络？不需要——演示为静态回放，不现场调用 Agent，不依赖外部模型服务。
+3. 终端可运行 `npm` 脚本（详见下方项目自检命令）。
+4. 演示需可用网络？历史会话应在课前确认可访问；现场不重新调用 Agent 或执行历史命令。会话不可访问时使用已脱敏讲师笔记与现有证据摘要兜底，不依赖外部模型服务。
 
 ## 项目自检命令
 
@@ -71,7 +70,6 @@
 | `npm run test:e2e` | 完整 Playwright 套件 | 未运行 |
 | `npx playwright test e2e/workbench-v2-layout.spec.ts` | 单文件布局 E2E | 未运行 |
 | `npx @fission-ai/openspec@1.8.0 validate add-relocation-service-workbench --strict` | 原 change strict 校验 | 不现场运行：change 已归档，当前 HEAD 不能重跑；仅展示 2026-08-10 历史输出。strict 只校验 CLI 校验到的规格格式、requirement/scenario 结构与可解析性，不证明 proposal/design/tasks 完成度或行为 |
-| `git worktree list` | 确认专用 worktree 就绪 | 未运行 |
 
 > 原 change 已归档，`openspec validate` 不再针对它运行；课程引用的是历史证据，见 [training-change/evidence.md](./training-change/evidence.md)。
 

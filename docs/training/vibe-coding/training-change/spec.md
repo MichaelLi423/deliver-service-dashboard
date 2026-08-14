@@ -1,7 +1,7 @@
 # 静态教学规范（夹具）：workbench-todos · 提醒临期窗口
 
 > **静态教学规范，不是仓库当前 OpenSpec 基线。**
-> 本文件冻结培训分支 green-final `d304bd5` 当时那份 workbench-todos spec 中与"提醒临期窗口配置入口"相关的需求与场景，供浏览器课件回放引用，不随当前 HEAD 演进。当前正式规范见 `../../../../openspec/specs/workbench-todos/spec.md`，其内容与本文件不同（差异见 [evidence.md](./evidence.md) 边界一节）。
+> 本文件冻结培训分支 green-final `d304bd5` 当时那份 workbench-todos spec 中与"提醒临期窗口配置入口"相关的需求与场景，供备课和历史会话不可访问时参考，不随当前 HEAD 演进。当前正式规范见 `../../../../openspec/specs/workbench-todos/spec.md`，其内容与本文件不同（差异见 [evidence.md](./evidence.md) 边界一节）。
 
 需求用 SHALL 表述，场景用 GIVEN/WHEN/THEN 表述；两者共同构成"当时的验收标准"。这是静态教学规范，不是对产品行为的现行承诺。
 

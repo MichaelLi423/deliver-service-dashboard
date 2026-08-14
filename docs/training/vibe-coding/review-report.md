@@ -2,7 +2,7 @@
 
 > **历史培训夹具证据（2026-08-10，green-final `d304bd5` 当时记录）。** 本报告描述的原 `add-relocation-service-workbench` change 已归档（`openspec/changes/archive/2026-08-10-add-relocation-service-workbench/`），最终实现只在远端培训分支 `origin/training/vibe-coding-reminder-window`、未合入 main。本报告不是当前产品评审，不代表产品批准；正式产品合入需另立正式 change 并另行授权和评审。当前教学叙事冻结于 [training-change/](./training-change/README.md)。
 
-独立代码评审记录，用于培训回放（质量双门之代码评审侧）。记录真实过程，不粉饰。
+独立代码评审记录，作为培训历史证据（质量双门之代码评审侧）。记录真实过程，不粉饰。
 
 ## 评审对象
 

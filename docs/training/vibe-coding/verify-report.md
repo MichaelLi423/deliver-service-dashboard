@@ -2,7 +2,7 @@
 
 > **历史培训夹具证据（2026-08-10，green-final `d304bd5` 当时记录）。** 本报告描述的原 `add-relocation-service-workbench` change 已归档（`openspec/changes/archive/2026-08-10-add-relocation-service-workbench/`），当前 `openspec/specs/workbench-todos/` 仍是旧两场景版、不含下列训练边界；最终实现只在远端培训分支 `origin/training/vibe-coding-reminder-window`、未合入 main。本报告不是当前产品核对，不代表产品批准；当前教学叙事冻结于 [training-change/](./training-change/README.md)。
 
-按当时同一 `add-relocation-service-workbench` change 的 `workbench-todos` spec，将 requirements/scenarios 与证据做映射，用于培训回放（质量双门之规范核对侧）。本报告是**历史人工/等效规范映射**，不是当时运行项目命令 `/opsx-verify` 的输出。
+按当时同一 `add-relocation-service-workbench` change 的 `workbench-todos` spec，将 requirements/scenarios 与证据做映射，作为培训历史证据（质量双门之规范核对侧）。本报告是**历史人工/等效规范映射**，不是当时运行项目命令 `/opsx-verify` 的输出。
 
 ## 依据
 
@@ -32,6 +32,6 @@
 
 ## 结论
 
-green-final 阶段，实现行为与 workbench-todos spec 约定一致；结论可用于培训回放（演示 3f：verify 回放 + 最终 UI）。
+green-final 阶段，实现行为与 workbench-todos spec 约定一致；结论可作为培训历史证据（演示节点 Review/Verify）。
 
 配套：[review-report.md](./review-report.md)、[demo-runbook.md](./demo-runbook.md)。
