@@ -289,6 +289,9 @@ export class ExecutionService {
     const instrument = this.requireInstrument(instrumentId);
     const fromBatchId = instrument.batchId;
 
+    // 未改变所属批次时不产生伪改批历史，也不改写仪器审计字段。
+    if (fromBatchId === newBatchId) return instrument;
+
     if (fromBatchId !== null) {
       const from = this.batches.findById(fromBatchId);
       if (from?.startedAt !== null && from?.startedAt !== undefined) {

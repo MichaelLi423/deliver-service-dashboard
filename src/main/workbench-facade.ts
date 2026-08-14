@@ -37,7 +37,7 @@ import type {
   ShipToRequestInputDto, ShipToRequestResultDto, ShipToRequestStatus, WorkbenchActionPayload,
   WorkbenchV2DeleteRequest, WorkbenchV2DeleteResult, WorkbenchV2HistoryPageDto, WorkbenchV2HistoryPageRequest,
   WorkbenchV2IndependentPageDto, WorkbenchV2IndependentPageRequest, WorkbenchV2InvalidateTag,
-  WorkbenchV2LookupPageDto, WorkbenchV2LookupPageRequest, WorkbenchV2MutationRequest,
+  WorkbenchV2LookupPageDto, WorkbenchV2LookupPageRequest, WorkbenchV2BaseMutationRequest, WorkbenchV2MutationRequest,
   WorkbenchV2MutationResult, WorkbenchV2OverviewDto, WorkbenchV2ProjectDetailDto,
   WorkbenchV2ProjectPageDto, WorkbenchV2ProjectPageRequest, WorkbenchV2ReminderLanesDto,
   WorkbenchV2ReminderLanesRequest, WorkbenchV2ReminderPageDto, WorkbenchV2ReminderPageRequest,
@@ -228,9 +228,19 @@ export class WorkbenchFacade {
     let result!: ProjectTagMutationResultDto;
     this.transaction(() => {
       switch (request.command) {
-        case 'create_group': result = { businessRevision: 0, group: this.projectTags.createGroup(request.payload) }; break;
-        case 'create_tag': { const created = this.projectTags.createTag(request.payload); result = { businessRevision: 0, ...created }; break; }
-        case 'replace_project_tags': { const assigned = this.projectTags.replaceSet(request.payload.projectId, request.payload.tagIds); result = { businessRevision: 0, projectId: request.payload.projectId, ...assigned }; break; }
+        case 'create_group': result = { businessRevision: 0, group: this.projectTags.createGroup(request.payload), invalidated: ['tag_catalog'] }; break;
+        case 'create_tag': { const created = this.projectTags.createTag(request.payload); result = { businessRevision: 0, ...created, invalidated: ['tag_catalog'] }; break; }
+        case 'rename_group': {
+          const group = this.projectTags.renameGroup(request.payload.groupId, request.payload);
+          result = { businessRevision: 0, group, invalidated: ['tag_catalog', 'projects', 'reminders'] };
+          break;
+        }
+        case 'rename_tag': {
+          const tag = this.projectTags.renameTag(request.payload.tagId, request.payload);
+          result = { businessRevision: 0, tag, invalidated: ['tag_catalog', 'projects', 'reminders'] };
+          break;
+        }
+        case 'replace_project_tags': { const assigned = this.projectTags.replaceSet(request.payload.projectId, request.payload.tagIds); result = { businessRevision: 0, projectId: request.payload.projectId, ...assigned, invalidated: ['tag_catalog', 'projects', 'reminders', `project:${request.payload.projectId}`] }; break; }
       }
     });
     return { ...result, businessRevision: readBusinessRevision(this.db) } as ProjectTagMutationResultDto;
@@ -373,6 +383,18 @@ export class WorkbenchFacade {
         if (ref.projectId) {
           changed = { projectId: ref.projectId };
         }
+        break;
+      }
+      case 'instrument_update': {
+        this.assertRecordEditingRequestShape(request);
+        const ref = this.writeInstrumentUpdate(request);
+        changed = { projectId: ref.projectId };
+        break;
+      }
+      case 'service_order_note_update': {
+        this.assertRecordEditingRequestShape(request);
+        const ref = this.writeServiceOrderNoteUpdate(request);
+        changed = ref.projectId ? { projectId: ref.projectId } : {};
         break;
       }
       default:
@@ -937,13 +959,64 @@ export class WorkbenchFacade {
     return { projectId, count };
   }
 
+  /** 仪器可编辑字段与改批在同一事务内提交；改批失败时字段更新一并回滚。 */
+  private writeInstrumentUpdate(input: Extract<WorkbenchV2MutationRequest, { op: 'instrument_update' }>): { projectId: string } {
+    let projectId = '';
+    this.transaction(() => {
+      const payload = this.recordEditingPayload(input.payload, ['instrumentId', 'model', 'ups', 'qrRequested', 'batchId']) as unknown as typeof input.payload;
+      if (typeof payload.instrumentId !== 'string' || (payload.model !== null && typeof payload.model !== 'string') || typeof payload.ups !== 'boolean' || typeof payload.qrRequested !== 'boolean' || (payload.batchId !== null && typeof payload.batchId !== 'string')) {
+        throw new ValidationError('V2_MUTATION_PAYLOAD_INVALID', '仪器编辑字段格式不正确');
+      }
+      const instrumentId = payload.instrumentId;
+      const instrument = this.instruments.findById(instrumentId);
+      if (!instrument) throw new ValidationError('INSTRUMENT_NOT_FOUND', `搬迁仪器不存在: ${instrumentId}`);
+      projectId = instrument.projectId;
+      if (
+        instrument.model === (payload.model?.trim() === '' ? null : (payload.model?.trim() ?? null)) &&
+        instrument.ups === payload.ups &&
+        instrument.qrRequested === payload.qrRequested &&
+        instrument.batchId === payload.batchId
+      ) {
+        return;
+      }
+      const execution = this.executionService();
+      if (
+        instrument.model !== (payload.model?.trim() === '' ? null : (payload.model?.trim() ?? null)) ||
+        instrument.ups !== payload.ups ||
+        instrument.qrRequested !== payload.qrRequested
+      ) {
+        execution.updateInstrumentFields(instrumentId, {
+          model: payload.model,
+          ups: payload.ups,
+          qrRequested: payload.qrRequested,
+        }, this.actor());
+      }
+      if (instrument.batchId !== payload.batchId) execution.setInstrumentBatch(instrumentId, payload.batchId, this.actor());
+    });
+    return { projectId };
+  }
+
+  /** 服务单仅后补/清空备注，不触碰身份字段、生命周期或工作量。 */
+  private writeServiceOrderNoteUpdate(input: Extract<WorkbenchV2MutationRequest, { op: 'service_order_note_update' }>): { projectId?: string } {
+    let projectId: string | undefined;
+    this.transaction(() => {
+      const payload = this.recordEditingPayload(input.payload, ['orderId', 'note']) as unknown as typeof input.payload;
+      if (typeof payload.orderId !== 'string' || (payload.note !== null && typeof payload.note !== 'string')) {
+        throw new ValidationError('V2_MUTATION_PAYLOAD_INVALID', '服务单备注编辑字段格式不正确');
+      }
+      const order = new ServiceOrderService(this.orders, this.projects).updateNote(payload.orderId, payload.note, this.actor());
+      projectId = order.projectId ?? undefined;
+    });
+    return projectId ? { projectId } : {};
+  }
+
   /**
    * 损坏/维修事项更新（v2 damage_update）：复用 updateIssueStatus / setPartStatus /
    * updatePart 领域方法，不绕过领域校验（TBD-15：processing/repaired/closed_unrepaired
    * 与备件 used 均要求合同 USD 含税金额为正数；已关闭未修复必须记录关闭原因）。
    * 同一事务内原子落库。
    */
-  private writeDamageUpdate(request: WorkbenchV2MutationRequest): { projectId?: string } {
+  private writeDamageUpdate(request: WorkbenchV2BaseMutationRequest): { projectId?: string } {
     let projectId: string | undefined;
     this.transaction(() => {
       const service = this.damageService();
@@ -979,6 +1052,28 @@ export class WorkbenchFacade {
       }
     });
     return projectId ? { projectId } : {};
+  }
+
+  /** IPC 边界不信任 TypeScript：记录编辑只能携带契约明示字段。 */
+  private assertRecordEditingRequestShape(request: unknown): void {
+    if (request === null || typeof request !== 'object' || Array.isArray(request)) {
+      throw new ValidationError('V2_MUTATION_REQUEST_INVALID', '记录编辑请求必须是对象');
+    }
+    const extra = Object.keys(request).filter((key) => key !== 'op' && key !== 'payload');
+    if (extra.length > 0) {
+      throw new ValidationError('V2_MUTATION_FIELDS_FORBIDDEN', `记录编辑不允许字段: ${extra.join('、')}`);
+    }
+  }
+
+  private recordEditingPayload(payload: unknown, allowed: readonly string[]): Record<string, unknown> {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new ValidationError('V2_MUTATION_PAYLOAD_INVALID', '记录编辑请求 payload 必须是对象');
+    }
+    const extra = Object.keys(payload).filter((key) => !allowed.includes(key));
+    if (extra.length > 0) {
+      throw new ValidationError('V2_MUTATION_FIELDS_FORBIDDEN', `记录编辑不允许字段: ${extra.join('、')}`);
+    }
+    return payload as Record<string, unknown>;
   }
 
   private writeSubmitAction(payload: WorkbenchActionPayload): { projectId?: string } {

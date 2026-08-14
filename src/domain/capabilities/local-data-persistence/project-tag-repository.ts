@@ -53,6 +53,29 @@ export class SqliteProjectTagRepository {
     return { group: { ...group, tags: [] }, tag };
   }
 
+  renameGroup(id: string, input: { name: string }): ProjectTagGroupDto {
+    const group = this.group(id);
+    if (!group) throw new ValidationError('PROJECT_TAG_UNKNOWN_GROUP', `标签分组不存在: ${id}`);
+    const name = trimRequired(input.name, 'PROJECT_TAG_GROUP_NAME_EMPTY', '标签分组名称');
+    if (this.db.prepare('SELECT 1 FROM project_tag_groups WHERE name = ? AND id <> ?').get(name, id)) {
+      throw new ValidationError('PROJECT_TAG_GROUP_NAME_DUPLICATE', `标签分组名称已存在: ${name}`);
+    }
+    this.db.prepare('UPDATE project_tag_groups SET name = ? WHERE id = ?').run(name, id);
+    return { ...group, name, tags: [] };
+  }
+
+  renameTag(id: string, input: { name: string }): ProjectTagDto {
+    const tag = this.db.prepare('SELECT id,group_id,name,sort_order FROM project_tag_definitions WHERE id = ?').get(id) as
+      { id: string; group_id: string; name: string; sort_order: number } | undefined;
+    if (!tag) throw new ValidationError('PROJECT_TAG_UNKNOWN_TAG', `标签不存在: ${id}`);
+    const name = trimRequired(input.name, 'PROJECT_TAG_NAME_EMPTY', '标签名称');
+    if (this.db.prepare('SELECT 1 FROM project_tag_definitions WHERE group_id = ? AND name = ? AND id <> ?').get(tag.group_id, name, id)) {
+      throw new ValidationError('PROJECT_TAG_NAME_DUPLICATE', `标签名称已存在: ${name}`);
+    }
+    this.db.prepare('UPDATE project_tag_definitions SET name = ? WHERE id = ?').run(name, id);
+    return { id: tag.id, groupId: tag.group_id, name, sortOrder: tag.sort_order };
+  }
+
   replaceSet(projectId: string, inputTagIds: readonly string[]): { tagIds: readonly string[]; groupedTags: readonly ProjectTagGroupSummaryDto[] } {
     if (!this.projectExists(projectId)) throw new ValidationError('PROJECT_TAG_UNKNOWN_PROJECT', `项目不存在: ${projectId}`);
     const tagIds = [...new Set(inputTagIds)];

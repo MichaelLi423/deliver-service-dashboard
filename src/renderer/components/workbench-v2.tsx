@@ -15,9 +15,11 @@ import type {
   AdjustableProjectStatus,
   DataCleanPrepareDto,
   InstrumentBulkImportRow,
+  InstrumentUpdatePayload,
   ProjectStatus,
   ProjectTagCatalogDto,
   ProjectTagGroupSummaryDto,
+  ProjectTagMutationRequestDto,
   ProjectSupplementPayload,
   ProjectUpdatePayload,
   ProjectWizardPayload,
@@ -279,7 +281,18 @@ type LayerState =
   | {
       kind: "damage-update";
       damage: Extract<WorkbenchV2SectionRow, { kind: "damage_items" }>;
+    }
+  | {
+      kind: "instrument-edit";
+      instrument: Extract<WorkbenchV2SectionRow, { kind: "instruments" }>;
+    }
+  | {
+      kind: "order-note-edit";
+      order: Extract<WorkbenchV2SectionRow, { kind: "orders" }>;
     };
+
+type TagRenameMutation = Extract<ProjectTagMutationRequestDto, { command: "rename_group" | "rename_tag" }>;
+type InstrumentEditValues = Omit<InstrumentUpdatePayload, "instrumentId">;
 
 function updateProjectRequest(payload: ProjectUpdatePayload): WorkbenchV2MutationRequest {
   return { op: "update_project", payload };
@@ -569,8 +582,7 @@ export function WorkbenchV2({
         projectId === selectedId &&
         TAB_SECTION[tab] === kind &&
         acceptBusinessRevision(next.businessRevision)
-      )
-        setSectionPage(next);
+      ) setSectionPage(next);
     } catch (cause) {
       if (id === requests.current.section) setDetailError(messageOf(cause));
     } finally {
@@ -617,7 +629,10 @@ export function WorkbenchV2({
           filterOverride,
         ),
       );
-    if (selectedId && tags.includes(`project:${selectedId}`))
+    if (
+      selectedId &&
+      (tags.includes("projects") || tags.includes(`project:${selectedId}`))
+    )
       jobs.push(loadDetail(selectedId));
     if (
       selectedId &&
@@ -668,6 +683,40 @@ export function WorkbenchV2({
       setLayer(null);
       setToast(success);
       window.setTimeout(() => setToast(""), 2800);
+    } catch (cause) {
+      throw new Error(mutationErrorMessage(cause));
+    }
+  }
+
+  async function mutateRecord(request: WorkbenchV2MutationRequest, success: string): Promise<void> {
+    try {
+      const api = bridge();
+      if (!api) throw new Error("当前环境未连接主进程");
+      const result = await api.v2Mutate(request);
+      revision.current = Math.max(revision.current, result.businessRevision);
+      const projectId = selectedId;
+      await Promise.all([
+        loadProjects(cursorStack.at(-1) ?? null, currentPageIndex, projectId || undefined, undefined, true),
+        ...(projectId ? [loadDetail(projectId, true)] : []),
+        ...(projectId && TAB_SECTION[tab]
+          ? [loadSection(projectId, TAB_SECTION[tab]!, sectionCursors.at(-1) ?? null)]
+          : []),
+      ]);
+      setLayer(null);
+      setToast(success);
+      window.setTimeout(() => setToast(""), 2800);
+    } catch (cause) {
+      throw new Error(mutationErrorMessage(cause));
+    }
+  }
+
+  async function renameCatalogItem(request: TagRenameMutation): Promise<void> {
+    const api = bridge();
+    if (!api?.v2TagMutate) throw new Error("当前环境暂不支持维护标签库");
+    try {
+      const result = await api.v2TagMutate(request);
+      revision.current = Math.max(revision.current, result.businessRevision);
+      await refreshInvalidated(result.invalidated, selectedId || undefined);
     } catch (cause) {
       throw new Error(mutationErrorMessage(cause));
     }
@@ -1133,6 +1182,10 @@ export function WorkbenchV2({
             onTab={setTab}
             onRetry={() => {
               if (!selectedId) return;
+              if (detail?.project?.id !== selectedId) {
+                void loadDetail(selectedId);
+                return;
+              }
               const kind = TAB_SECTION[tab];
               if (kind) void loadSection(selectedId, kind, sectionCursors.at(-1) ?? null);
               else void loadDetail(selectedId);
@@ -1172,6 +1225,8 @@ export function WorkbenchV2({
             onInvoiceRevoke={(invoice) => setLayer({ kind: "invoice-revoke", invoice })}
             onBatchEdit={(batch) => setLayer({ kind: "batch-edit", batch })}
             onDamageUpdate={(damage) => setLayer({ kind: "damage-update", damage })}
+            onInstrumentEdit={(instrument) => setLayer({ kind: "instrument-edit", instrument })}
+            onOrderNoteEdit={(order) => setLayer({ kind: "order-note-edit", order })}
             onDelete={(kind, id) => {
               if (!window.confirm("删除后无法恢复，确认删除这条记录？")) return;
               void deleteRecord({ kind, id } as DeleteInput, "记录已删除").catch((cause) => setDetailError(messageOf(cause)));
@@ -1186,7 +1241,9 @@ export function WorkbenchV2({
         >
           <div className="panel-head queue-heading">
             <div>
-              <h2 id="queue-title">项目队列 {projectPage?.total ?? 0}</h2>
+              <h2 id="queue-title">
+                {projectPage ? `项目队列 ${projectPage.total}` : "正在读取项目…"}
+              </h2>
             </div>
             <span className="queue-range" aria-live="polite">
               {notice}
@@ -1591,10 +1648,20 @@ export function WorkbenchV2({
                 )
               }
             />
+          ) : layer.kind === "instrument-edit" ? (
+            <InstrumentEditForm
+              instrument={layer.instrument}
+              onSave={(values) => mutateRecord({ op: "instrument_update", payload: { instrumentId: layer.instrument.id, ...values } }, "仪器资料已更新")}
+            />
+          ) : layer.kind === "order-note-edit" ? (
+            <ServiceOrderNoteForm
+              order={layer.order}
+              onSave={(note) => mutateRecord({ op: "service_order_note_update", payload: { orderId: layer.order.id, note } }, note ? "开单备注已保存" : "开单备注已清空")}
+            />
           ) : layer.kind === "report" ? (
             <ReportPanelV2 catalog={tagCatalog} catalogLoading={tagCatalogLoading} catalogError={tagCatalogError} onRetryCatalog={loadTagCatalog} />
           ) : layer.kind === "tags" ? (
-            <TagLibraryPanel catalog={tagCatalog} loading={tagCatalogLoading} error={tagCatalogError} onRefresh={loadTagCatalog} />
+            <TagLibraryPanel catalog={tagCatalog} loading={tagCatalogLoading} error={tagCatalogError} onRefresh={loadTagCatalog} onRename={renameCatalogItem} />
           ) : layer.kind === "history" ? (
             <HistoryBrowserV2 onRevision={(next) => { revision.current = Math.max(revision.current, next); }} onDelete={(request, success) => deleteRecord(request, success, false)} />
           ) : layer.kind === "reminder-all" ? (
@@ -1871,6 +1938,8 @@ function ProjectDetails({
   onInvoiceRevoke,
   onBatchEdit,
   onDamageUpdate,
+  onInstrumentEdit,
+  onOrderNoteEdit,
   onDelete,
 }: {
   project: WorkbenchProjectRow | null;
@@ -1901,6 +1970,12 @@ function ProjectDetails({
   ) => void;
   onDamageUpdate: (
     damage: Extract<WorkbenchV2SectionRow, { kind: "damage_items" }>,
+  ) => void;
+  onInstrumentEdit: (
+    instrument: Extract<WorkbenchV2SectionRow, { kind: "instruments" }>,
+  ) => void;
+  onOrderNoteEdit: (
+    order: Extract<WorkbenchV2SectionRow, { kind: "orders" }>,
   ) => void;
   onDelete: (kind: "service_order" | "activity" | "damage_repair_item" | "batch" | "instrument", id: string) => void;
 }): JSX.Element {
@@ -2081,6 +2156,8 @@ function ProjectDetails({
               onInvoiceRevoke={onInvoiceRevoke}
               onBatchEdit={onBatchEdit}
               onDamageUpdate={onDamageUpdate}
+              onInstrumentEdit={onInstrumentEdit}
+              onOrderNoteEdit={onOrderNoteEdit}
               onDelete={onDelete}
             />
           </div>
@@ -2091,6 +2168,8 @@ function ProjectDetails({
             onInvoiceRevoke={onInvoiceRevoke}
             onBatchEdit={onBatchEdit}
             onDamageUpdate={onDamageUpdate}
+            onInstrumentEdit={onInstrumentEdit}
+            onOrderNoteEdit={onOrderNoteEdit}
             onDelete={onDelete}
           />
         )}
@@ -2128,6 +2207,8 @@ function SectionTable({
   onInvoiceRevoke,
   onBatchEdit,
   onDamageUpdate,
+  onInstrumentEdit,
+  onOrderNoteEdit,
   onDelete,
 }: {
   page: WorkbenchV2SectionPageDto | null;
@@ -2142,6 +2223,12 @@ function SectionTable({
   ) => void;
   onDamageUpdate: (
     damage: Extract<WorkbenchV2SectionRow, { kind: "damage_items" }>,
+  ) => void;
+  onInstrumentEdit: (
+    instrument: Extract<WorkbenchV2SectionRow, { kind: "instruments" }>,
+  ) => void;
+  onOrderNoteEdit: (
+    order: Extract<WorkbenchV2SectionRow, { kind: "orders" }>,
   ) => void;
   onDelete: (kind: "service_order" | "activity" | "damage_repair_item" | "batch" | "instrument", id: string) => void;
 }): JSX.Element {
@@ -2201,9 +2288,9 @@ function SectionTable({
                   <div className="row-actions compact"><button className="button small" onClick={() => onDamageUpdate(row)}>更新维修状态</button><button className="button danger small" onClick={() => onDelete("damage_repair_item", row.id)}>删除</button></div>
                 </td>
               )}
-              {row.kind === "instruments" && <td><button className="button danger small" onClick={() => onDelete("instrument", row.id)}>删除</button></td>}
-              {row.kind === "orders" && <td><button className="button danger small" onClick={() => onDelete("service_order", row.id)}>删除</button></td>}
-              {row.kind === "activities" && <td><button className="button danger small" onClick={() => onDelete("activity", row.id)}>删除</button></td>}
+              {row.kind === "instruments" && <td><div className="row-actions compact"><button className="button small" onClick={() => onInstrumentEdit(row)}>编辑</button><button className="button danger small" onClick={() => onDelete("instrument", row.id)}>删除</button></div></td>}
+              {row.kind === "orders" && <td><div className="row-actions compact"><button className="button small" onClick={() => onOrderNoteEdit(row)}>{row.note ? "修改备注" : "后补备注"}</button><button className="button danger small" onClick={() => onDelete("service_order", row.id)}>删除</button></div></td>}
+              {row.kind === "activities" && <td><div className="restricted-action"><button className="button danger small" onClick={() => onDelete("activity", row.id)}>删除</button><small>到访与工作事实有误时，删除后按实际情况重新登记。</small></div></td>}
             </tr>
           ))}
         </tbody>
@@ -2214,7 +2301,7 @@ function SectionTable({
 
 function sectionColumns(kind: WorkbenchV2SectionKind): string[] {
   return kind === "instruments"
-    ? ["name", "manufacturer", "model", "serviceLevel", "serialNo", "batchId", "ups"]
+    ? ["name", "manufacturer", "model", "serviceLevel", "serialNo", "batchId", "ups", "qrRequested"]
     : kind === "batches"
       ? [
           "planTransportDate",
@@ -2226,7 +2313,7 @@ function sectionColumns(kind: WorkbenchV2SectionKind): string[] {
       : kind === "activities"
         ? ["visitAt", "engineers"]
         : kind === "orders"
-          ? ["orderedAt", "engineer", "orderType", "serviceOrderNo"]
+          ? ["orderedAt", "engineer", "orderType", "serviceOrderNo", "note"]
         : kind === "invoices"
           ? ["invoicedAt", "amount", "active", "revokedAt", "lastModifiedAt"]
           : kind === "damage_items"
@@ -2252,6 +2339,7 @@ function columnLabel(key: string): string {
         serialNo: "序列号",
         batchId: "物流费用记录",
         ups: "UPS",
+        qrRequested: "二维码",
         planTransportDate: "运输日期",
         transportCompany: "运输公司",
         budgetPrice: "合同预算价",
@@ -2274,6 +2362,7 @@ function columnLabel(key: string): string {
         orderType: "开单类型",
         orderedAt: "开单日期",
         engineer: "工程师",
+        note: "备注",
       } as Record<string, string>
     )[key] || key
   );
@@ -2289,7 +2378,11 @@ function sectionCellValue(
     return values.dealPrice ?? values.discountedPrice;
   return values[column];
 }
-function formatCell(column: string, value: unknown): string {
+function formatCell(column: string, value: unknown): ReactNode {
+  if (column === "qrRequested")
+    return value
+      ? <span className="record-state qr-marked" aria-label="已申请二维码">已申请</span>
+      : <span className="record-state qr-unmarked">未申请</span>;
   if (value === null || value === "") return "—";
   if (typeof value === "boolean") return value ? "是" : "否";
   if (column === "amount") return money(String(value));
@@ -2297,6 +2390,66 @@ function formatCell(column: string, value: unknown): string {
   if (["planTransportDate", "startedAt", "visitAt", "invoicedAt", "revokedAt", "orderedAt"].includes(column))
     return businessDate(String(value)) || String(value);
   return String(value);
+}
+
+function InstrumentEditForm({
+  instrument,
+  onSave,
+}: {
+  instrument: Extract<WorkbenchV2SectionRow, { kind: "instruments" }>;
+  onSave: (values: InstrumentEditValues) => Promise<void>;
+}): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [batchId, setBatchId] = useState(instrument.batchId ?? "");
+  const [ups, setUps] = useState(instrument.ups);
+  const [qrRequested, setQrRequested] = useState(instrument.qrRequested);
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setBusy(true); setError("");
+    const data = new FormData(event.currentTarget);
+    const model = String(data.get("model") ?? "").trim();
+    try { await onSave({ model: model || null, ups, qrRequested, batchId: batchId || null }); }
+    catch (cause) { setError(messageOf(cause)); setBusy(false); }
+  }
+  return <form className="record-edit-form" aria-busy={busy} onSubmit={(event) => void submit(event)}>
+    <div className="readonly-record" aria-label="只读仪器识别信息">
+      <div><span>仪器名称</span><strong>{instrument.name}</strong></div>
+      <div><span>序列号</span><strong>{instrument.serialNo || "未登记"}</strong></div>
+      <p>名称与序列号用于识别和关联历史记录。如有错误，请删除本条后按正确信息重新登记。</p>
+    </div>
+    <div className="form-grid">
+      <Field name="model" label="型号" defaultValue={instrument.model ?? ""} optional autoFocus />
+      <BoundedSectionPicker projectId={instrument.projectId} kind="batches" value={batchId} onChange={setBatchId} />
+      <label className="confirm-check"><input type="checkbox" checked={ups} onChange={(event) => setUps(event.target.checked)} />配备 UPS</label>
+      <label className="confirm-check"><input type="checkbox" checked={qrRequested} onChange={(event) => setQrRequested(event.target.checked)} />二维码已申请</label>
+    </div>
+    {error && <div className="inline-error" role="alert">{error}</div>}
+    <div className="form-footer"><span>仅更新型号、UPS、二维码标记和所属批次</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存修改"}</button></div>
+  </form>;
+}
+
+function ServiceOrderNoteForm({
+  order,
+  onSave,
+}: {
+  order: Extract<WorkbenchV2SectionRow, { kind: "orders" }>;
+  onSave: (note: string | null) => Promise<void>;
+}): JSX.Element {
+  const [note, setNote] = useState(order.note ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save(next: string): Promise<void> {
+    setBusy(true); setError("");
+    try { await onSave(next.trim() || null); }
+    catch (cause) { setError(messageOf(cause)); setBusy(false); }
+  }
+  return <form className="record-edit-form" aria-busy={busy} onSubmit={(event) => { event.preventDefault(); void save(note); }}>
+    <div className="readonly-record compact"><div><span>服务单号</span><strong>{order.serviceOrderNo || "待补"}</strong></div><div><span>工程师</span><strong>{order.engineer}</strong></div></div>
+    <TextArea name="serviceOrderNote" label="备注" value={note} onChange={(event) => setNote(event.target.value)} help="可修改、后补；清空后保存会移除现有备注。" autoFocus />
+    {error && <div className="inline-error" role="alert">{error}</div>}
+    <div className="form-footer"><button className="button" type="button" disabled={busy || !order.note} onClick={() => { setNote(""); void save(""); }}>清空备注</button><button className="button primary" disabled={busy}>{busy ? "正在保存…" : order.note ? "保存修改" : "补充备注"}</button></div>
+  </form>;
 }
 
 function QuickMenu({
@@ -3230,6 +3383,7 @@ function BoundedShipToPicker({
           </option>
         ))}
       </select>
+      <small>Account ID 主数据不在这里直接改写；申请资料有误时，请按正确客户与新址重新发起申请。</small>
       <div className="picker-pagination">
         <span>
           本页 {rows.length} / 共 {page?.total ?? 0}
@@ -3554,7 +3708,7 @@ function DataRows({
                   ).join("、")}
                 </td>
                 <td className="numeric qr-workload-cell">{row.workload}</td>
-                <td><button className="button danger small" onClick={() => onDelete(row.id)}>删除</button></td>
+                <td><div className="restricted-action"><button className="button danger small" onClick={() => onDelete(row.id)}>删除</button><small>申请内容有误时，删除后重新登记。</small></div></td>
               </tr>
             ) : (
               <tr key={row.id}>
@@ -3565,7 +3719,7 @@ function DataRows({
                 <td>{row.newSiteAddress}</td>
                 <td>{row.accountId}</td>
                 <td>{businessDate(row.updatedAt)}</td>
-                <td><button className="button danger small" onClick={() => onDelete(row.id)}>删除</button></td>
+                <td><div className="restricted-action"><button className="button danger small" onClick={() => onDelete(row.id)}>删除</button><small>地址事实有误时，删除后按最新资料重新登记。</small></div></td>
               </tr>
             ),
           )}
@@ -3742,10 +3896,11 @@ function ProjectTagEditForm({
   );
 }
 
-function TagLibraryPanel({ catalog, loading, error, onRefresh }: { catalog: ProjectTagCatalogDto | null; loading: boolean; error: string; onRefresh: () => Promise<void> }): JSX.Element {
+function TagLibraryPanel({ catalog, loading, error, onRefresh, onRename }: { catalog: ProjectTagCatalogDto | null; loading: boolean; error: string; onRefresh: () => Promise<void>; onRename: (request: TagRenameMutation) => Promise<void> }): JSX.Element {
   const [busy, setBusy] = useState<"group" | "tag" | "">("");
   const [mutationError, setMutationError] = useState("");
   const [notice, setNotice] = useState("");
+  const [renaming, setRenaming] = useState<{ kind: "group" | "tag"; id: string; name: string } | null>(null);
   async function create(event: FormEvent<HTMLFormElement>, command: "create_group" | "create_tag"): Promise<void> {
     event.preventDefault();
     const form = event.currentTarget;
@@ -3763,6 +3918,21 @@ function TagLibraryPanel({ catalog, loading, error, onRefresh }: { catalog: Proj
     } catch (cause) { setMutationError(messageOf(cause)); }
     finally { setBusy(""); }
   }
+  async function rename(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!renaming) return;
+    const name = String(new FormData(event.currentTarget).get("rename") ?? "").trim();
+    if (!name || name === renaming.name) return;
+    setBusy(renaming.kind); setMutationError(""); setNotice("");
+    try {
+      await onRename(renaming.kind === "group"
+        ? { command: "rename_group", payload: { groupId: renaming.id, name } }
+        : { command: "rename_tag", payload: { tagId: renaming.id, name } });
+      setNotice(renaming.kind === "group" ? "分组名称已更新，所有使用位置已同步" : "标签名称已更新，所有使用位置已同步");
+      setRenaming(null);
+    } catch (cause) { setMutationError(messageOf(cause)); }
+    finally { setBusy(""); }
+  }
   return <div className="tag-library">
     <section className="tag-library-intro"><p className="overline">全局分类</p><h3>维护所有项目共用的分类标签</h3><p>创建分组及组内标签，供所有搬迁项目复用。</p></section>
     <div className="tag-library-create">
@@ -3772,7 +3942,11 @@ function TagLibraryPanel({ catalog, loading, error, onRefresh }: { catalog: Proj
     {notice && <div className="inline-success" role="status">{notice}</div>}
     {(error || mutationError) && <div className="inline-error" role="alert">{mutationError || error}<button className="text-action" type="button" onClick={() => void onRefresh()}>重试读取</button></div>}
     <section className="tag-library-catalog" aria-busy={loading}><div className="report-section-head"><div><p className="overline">当前标签库</p><h3>{catalog?.groups.length ?? 0} 个分组</h3></div></div>
-      {loading ? <div className="tag-catalog-state" role="status">正在读取标签库…</div> : !catalog?.groups.length ? <Empty title="还没有标签分组" copy="先创建分组，再向分组中添加标签。" /> : <div className="tag-library-groups">{catalog.groups.map((group) => <article key={group.id}><h4>{group.name}</h4>{group.tags.length ? <div className="tag-library-tags">{group.tags.map((tag) => <span key={tag.id}>{tag.name}</span>)}</div> : <p>暂无标签，可在上方添加。</p>}</article>)}</div>}
+      {loading ? <div className="tag-catalog-state" role="status">正在读取标签库…</div> : !catalog?.groups.length ? <Empty title="还没有标签分组" copy="先创建分组，再向分组中添加标签。" /> : <div className="tag-library-groups">{catalog.groups.map((group) => <article key={group.id}>
+        <div className="tag-library-group-head"><h4>{group.name}</h4><button className="text-action" type="button" onClick={() => setRenaming({ kind: "group", id: group.id, name: group.name })}>重命名分组</button></div>
+        {renaming?.kind === "group" && renaming.id === group.id && <form className="rename-form" onSubmit={(event) => void rename(event)}><Field name="rename" label="新的分组名称" defaultValue={renaming.name} required autoFocus /><small>保存后会影响所有项目中的分组名称。</small><div className="row-actions"><button className="button" type="button" onClick={() => setRenaming(null)}>取消</button><button className="button primary" disabled={Boolean(busy)}>保存名称</button></div></form>}
+        {group.tags.length ? <div className="tag-library-tags">{group.tags.map((tag) => <div className="tag-library-tag" key={tag.id}><span>{tag.name}</span><button type="button" aria-label={`重命名标签${tag.name}`} onClick={() => setRenaming({ kind: "tag", id: tag.id, name: tag.name })}>重命名</button>{renaming?.kind === "tag" && renaming.id === tag.id && <form className="rename-form tag-rename-form" onSubmit={(event) => void rename(event)}><Field name="rename" label="新的标签名称" defaultValue={renaming.name} required autoFocus /><small>保存后会影响所有已使用该标签的位置。</small><div className="row-actions"><button className="button" type="button" onClick={() => setRenaming(null)}>取消</button><button className="button primary" disabled={Boolean(busy)}>保存名称</button></div></form>}</div>)}</div> : <p>暂无标签，可在上方添加。</p>}
+      </article>)}</div>}
     </section>
   </div>;
 }
@@ -4333,10 +4507,10 @@ function HistoryBrowserV2({ onDelete, onRevision }: {
           const context = row.kind === "serial_address" ? row.customerName : "独立二维码申请";
           const record = row.kind === "serial_address" ? `${row.serialNo} · ${row.accountId}` : `${row.applicant} · ${row.types.map((type) => QR_REQUEST_TYPE_LABEL.get(type) ?? type).join("、")}`;
           const date = row.kind === "serial_address" ? row.updatedAt : row.requestedAt;
-          return <tr key={row.id}><td><strong>{context}</strong><small>独立登记</small></td><td>{record}</td><td>{businessDate(date)}</td><td><button className="button danger small" onClick={() => { if (window.confirm("删除后无法恢复，确认删除这条记录？")) void remove({ kind: row.kind, id: row.id }); }}>删除</button></td></tr>;
+          return <tr key={row.id}><td><strong>{context}</strong><small>独立登记</small></td><td>{record}</td><td>{businessDate(date)}</td><td><div className="restricted-action"><button className="button danger small" onClick={() => { if (window.confirm("删除后无法恢复，确认删除这条记录？")) void remove({ kind: row.kind, id: row.id }); }}>删除</button><small>{row.kind === "serial_address" ? "地址事实有误时，删除后重新登记。" : "申请内容有误时，删除后重新登记。"}</small></div></td></tr>;
         }
         const request = historyDeleteRequest(row);
-        return <tr key={row.id}><td><strong>{row.customerName}</strong><small>{row.ecc ?? row.tempNo}</small></td><td>{historyRecordText(row)}</td><td>{row.businessDate || "—"}</td><td>{row.kind === "invoice" ? (row.active ? <button className="button danger small" onClick={() => setRevoke(row)}>撤销</button> : <span className="terminal-note">已撤销</span>) : <button className="button danger small" onClick={() => { if (request && window.confirm("删除后无法恢复，确认删除这条记录？")) void remove(request); }}>删除</button>}</td></tr>;
+        return <tr key={row.id}><td><strong>{row.customerName}</strong><small>{row.ecc ?? row.tempNo}</small></td><td>{historyRecordText(row)}</td><td>{row.businessDate || "—"}</td><td>{row.kind === "invoice" ? (row.active ? <button className="button danger small" onClick={() => setRevoke(row)}>撤销</button> : <span className="terminal-note">已撤销；如需更正，请新增有效掉票。</span>) : <div className="restricted-action"><button className="button danger small" onClick={() => { if (request && window.confirm("删除后无法恢复，确认删除这条记录？")) void remove(request); }}>删除</button>{row.kind === "activity" && <small>到访或工作事实有误时，删除后重新登记。</small>}{row.kind === "acceptance" && <small>验收已有后续依赖时应保留原事实，当前不支持原位修改。</small>}{row.kind === "ship_to_request" && <small>申请资料有误时，按正确客户与新址重新发起。</small>}</div>}</td></tr>;
       })}</tbody></table>{rows.length === 0 && <Empty title="暂无记录" copy="调整记录类型或日期范围后再试。" />}</div>
       <div className="queue-pagination"><button className="button" disabled={stack.length <= 1} onClick={() => { const next = stack.slice(0,-1); setStack(next); void load(next.at(-1) ?? null); }}>上一页</button><span>本页 {rows.length} / 共 {page?.total ?? 0}</span><button className="button" disabled={!page?.nextCursor} onClick={() => { if (!page?.nextCursor) return; const next = [...stack,page.nextCursor]; setStack(next); void load(page.nextCursor); }}>下一页</button></div>
     </section>
@@ -4554,6 +4728,8 @@ function layerRequiresDirtyProtection(layer: LayerState): boolean {
     "invoice-revoke",
     "batch-edit",
     "damage-update",
+    "instrument-edit",
+    "order-note-edit",
     "tags",
     "edit-project-tags",
   ].includes(layer.kind);
@@ -4877,6 +5053,8 @@ function layerTitle(layer: LayerState): string {
   if (layer.kind === "invoice-revoke") return "撤销掉票";
   if (layer.kind === "batch-edit") return "编辑物流费用记录";
   if (layer.kind === "damage-update") return "更新维修状态";
+  if (layer.kind === "instrument-edit") return "编辑仪器资料";
+  if (layer.kind === "order-note-edit") return "维护开单备注";
   if (layer.kind === "action")
     return (
       ACTIONS.find((action) => action.type === layer.action)?.label ||
@@ -4897,6 +5075,8 @@ function layerDescription(
   if (layer.kind === "reminder-all") return "按提醒日期查看全部项目与到期分类";
   if (layer.kind === "clean") return "先检查数量，再输入固定文本确认";
   if (layer.kind === "tags") return "所有项目共用的分组与标签";
+  if (layer.kind === "instrument-edit") return `${layer.instrument.name} · 名称与序列号保持只读`;
+  if (layer.kind === "order-note-edit") return `${layer.order.serviceOrderNo || "服务单号待补"} · 可修改、后补或清空`;
   if (layer.kind === "independent") return "独立模块 · 记录按页读取";
   if (layer.kind === "cancel") return "记录取消日期与原因（终态，不可恢复）";
   return project

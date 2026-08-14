@@ -119,7 +119,7 @@ function mockApi(overrides: Partial<WorkbenchApi> = {}): WorkbenchApi {
       lanePageSize: 50,
     }),
     v2TagCatalog: vi.fn().mockResolvedValue(tagCatalog),
-    v2TagMutate: vi.fn().mockResolvedValue({ businessRevision: 2, group: tagCatalog.groups[0] }),
+    v2TagMutate: vi.fn().mockResolvedValue({ businessRevision: 2, group: tagCatalog.groups[0], invalidated: ['tag_catalog', 'projects', 'reminders', 'project:p-1'] }),
     v2IndependentPage: vi.fn().mockImplementation((request: { kind: string }) => Promise.resolve({ businessRevision: 1, kind: request.kind, rows: [], total: 0, nextCursor: null, limit: 50 })),
     v2LookupPage: vi.fn().mockImplementation((request: { kind: string }) => Promise.resolve({ businessRevision: 1, kind: request.kind, rows: [], total: 0, nextCursor: null, limit: 50 })),
     v2Mutate: vi.fn().mockResolvedValue({ businessRevision: 2, invalidated: ['overview', 'projects', 'project:p-1', 'sections:p-1'], changed: { projectId: 'p-1' } }),
@@ -167,7 +167,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   it('100k total 只渲染当前固定 20 项', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     expect(await screen.findByRole('heading', { name: '项目队列 100000' })).toBeInTheDocument();
-    expect(screen.getAllByRole('row')).toHaveLength(21);
+    expect(within(screen.getByRole('grid', { name: '项目队列' })).getAllByRole('row')).toHaveLength(21);
     expect(screen.getByText('固定每页20 · 第 1–20 项 / 共 100000 项')).toBeInTheDocument();
     expect(screen.queryByText(/每页最多50项/)).not.toBeInTheDocument();
     expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.not.objectContaining({ limit: expect.anything() }));
@@ -188,6 +188,49 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.change(within(dialog).getByLabelText(/所属分组/), { target: { value: 'group-type' } }); fireEvent.change(within(dialog).getByLabelText(/标签名称/), { target: { value: '重点项目' } }); fireEvent.click(within(dialog).getByRole('button', { name: '添加标签' }));
     await waitFor(() => expect(api.v2TagMutate).toHaveBeenCalledWith({ command: 'create_tag', payload: { groupId: 'group-type', name: '重点项目' } }));
     await waitFor(() => expect(api.v2TagCatalog).toHaveBeenCalledTimes(3));
+  });
+
+  it('标签分组和标签重命名使用稳定 ID payload，并按 bounded invalidation 刷新目录、队列、详情和提醒', async () => {
+    let groupRenamed = false; let tagRenamed = false;
+    const currentGroups = () => tagCatalog.groups.map((group) => group.id === 'group-type' ? {
+      ...group,
+      name: groupRenamed ? '业务类型' : group.name,
+      tags: group.tags.map((tag) => tag.id === 'tag-move' ? { ...tag, name: tagRenamed ? '设备搬迁' : tag.name } : tag),
+    } : group);
+    const currentProject = () => ({
+      ...project(1),
+      groupedTags: [
+        { groupId: 'group-type', groupName: groupRenamed ? '业务类型' : '项目类型', tagIds: ['tag-move'], tagNames: [tagRenamed ? '设备搬迁' : '搬迁'] },
+        { groupId: 'group-instrument', groupName: '特殊仪器', tagIds: ['tag-icpms'], tagNames: ['ICPMS'] },
+      ],
+    });
+    const api = mockApi({
+      v2TagCatalog: vi.fn().mockImplementation(() => Promise.resolve({ businessRevision: tagRenamed ? 3 : groupRenamed ? 2 : 1, selectedTagIds: [], groups: currentGroups() })),
+      v2ProjectPage: vi.fn().mockImplementation((request: { cursor?: string | null }) => Promise.resolve(request.cursor ? page(secondProjects, null) : page([currentProject(), ...firstProjects.slice(1)], 'cursor-2', 100_000, tagRenamed ? 3 : groupRenamed ? 2 : 1))),
+      v2ProjectDetail: vi.fn().mockImplementation((projectId: string) => {
+        const row = projectId === 'p-1' ? currentProject() : [...firstProjects, ...secondProjects].find((item) => item.id === projectId) ?? null;
+        return Promise.resolve({ ...detailOf(row), businessRevision: tagRenamed ? 3 : groupRenamed ? 2 : 1, groupedTags: row?.groupedTags ?? [] });
+      }),
+      v2TagMutate: vi.fn().mockImplementation((request: { command: string }) => {
+        if (request.command === 'rename_group') groupRenamed = true; else tagRenamed = true;
+        const groups = currentGroups();
+        return Promise.resolve(request.command === 'rename_group'
+          ? { businessRevision: 2, group: groups[0], invalidated: ['tag_catalog', 'projects', 'reminders'] }
+          : { businessRevision: 3, tag: groups[0]!.tags[0], invalidated: ['tag_catalog', 'projects', 'reminders'] });
+      }),
+    });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('region', { name: '客户 1' }); fireEvent.click(screen.getByRole('button', { name: '标签库' }));
+    const dialog = screen.getByRole('dialog', { name: '管理标签库' }); const groupCard = within(dialog).getByRole('heading', { name: '项目类型' }).closest('article')!;
+    const queue = screen.getByRole('grid', { name: '项目队列' }); const context = screen.getByRole('complementary', { name: '当前上下文' }); const detail = screen.getByRole('region', { name: '客户 1' }); const detailTags = within(detail).getByRole('region', { name: '项目标签' });
+    expect(within(groupCard).getByText('搬迁')).toBeInTheDocument(); expect(within(queue).getByRole('row', { name: /^客户 1 / })).toHaveTextContent('项目类型搬迁'); expect(context).toHaveTextContent('项目类型搬迁'); expect(detailTags).toHaveTextContent('项目类型搬迁');
+    const catalogReads = vi.mocked(api.v2TagCatalog).mock.calls.length; const projectReads = vi.mocked(api.v2ProjectPage).mock.calls.length; const detailReads = vi.mocked(api.v2ProjectDetail).mock.calls.length; const reminderReads = vi.mocked(api.v2ReminderLanes).mock.calls.length;
+    fireEvent.click(within(groupCard).getByRole('button', { name: '重命名分组' })); fireEvent.change(within(groupCard).getByLabelText(/新的分组名称/), { target: { value: '业务类型' } }); fireEvent.click(within(groupCard).getByRole('button', { name: '保存名称' }));
+    await waitFor(() => expect(api.v2TagMutate).toHaveBeenCalledWith({ command: 'rename_group', payload: { groupId: 'group-type', name: '业务类型' } }));
+    await waitFor(() => expect(vi.mocked(api.v2TagCatalog).mock.calls.length).toBeGreaterThan(catalogReads)); expect(vi.mocked(api.v2ProjectPage).mock.calls.length).toBeGreaterThan(projectReads); expect(vi.mocked(api.v2ProjectDetail).mock.calls.length).toBeGreaterThan(detailReads); expect(vi.mocked(api.v2ReminderLanes).mock.calls.length).toBeGreaterThan(reminderReads);
+    await waitFor(() => { expect(within(dialog).getByRole('heading', { name: '业务类型' })).toBeInTheDocument(); expect(within(queue).getByRole('row', { name: /^客户 1 / })).toHaveTextContent('业务类型搬迁'); expect(context).toHaveTextContent('业务类型搬迁'); expect(detailTags).toHaveTextContent('业务类型搬迁'); });
+    const moveTag = within(dialog).getByText('搬迁').closest('.tag-library-tag')!; fireEvent.click(within(moveTag as HTMLElement).getByRole('button', { name: '重命名标签搬迁' })); fireEvent.change(within(moveTag as HTMLElement).getByLabelText(/新的标签名称/), { target: { value: '设备搬迁' } }); fireEvent.click(within(moveTag as HTMLElement).getByRole('button', { name: '保存名称' }));
+    await waitFor(() => expect(api.v2TagMutate).toHaveBeenCalledWith({ command: 'rename_tag', payload: { tagId: 'tag-move', name: '设备搬迁' } }));
+    await waitFor(() => { const catalogGroup = within(dialog).getByRole('heading', { name: '业务类型' }).closest('article')!; expect(within(catalogGroup).getByText('设备搬迁')).toBeInTheDocument(); expect(within(queue).getByRole('row', { name: /^客户 1 / })).toHaveTextContent('业务类型设备搬迁'); expect(context).toHaveTextContent('业务类型设备搬迁'); expect(detailTags).toHaveTextContent('业务类型设备搬迁'); });
   });
 
   it('数据管理浮层脱离横向滚动导航，并支持 Escape 与外部点击关闭', async () => {
@@ -479,7 +522,44 @@ describe('Oracle #10 bounded workbench renderer', () => {
   });
 
   it('项目队列支持 roving focus 与方向/Home/End/Enter/Space/PageDown', async () => {
-    render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); const rows = screen.getAllByRole('row').slice(1); rows[0]!.focus(); fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' }); expect(rows[1]).toHaveFocus(); fireEvent.keyDown(rows[1]!, { key: 'Enter' }); expect(rows[1]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[1]!, { key: 'End' }); expect(rows.at(-1)).toHaveFocus(); fireEvent.keyDown(rows.at(-1)!, { key: 'Home' }); expect(rows[0]).toHaveFocus(); fireEvent.keyDown(rows[0]!, { key: ' ' }); expect(rows[0]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[0]!, { key: 'PageDown' }); expect(await screen.findByText('客户 21')).toBeInTheDocument();
+    render(<App />); const grid = await screen.findByRole('grid', { name: '项目队列' }); const rows = within(grid).getAllByRole('row').slice(1); rows[0]!.focus(); fireEvent.keyDown(rows[0]!, { key: 'ArrowDown' }); expect(rows[1]).toHaveFocus(); fireEvent.keyDown(rows[1]!, { key: 'Enter' }); expect(rows[1]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[1]!, { key: 'End' }); expect(rows.at(-1)).toHaveFocus(); fireEvent.keyDown(rows.at(-1)!, { key: 'Home' }); expect(rows[0]).toHaveFocus(); fireEvent.keyDown(rows[0]!, { key: ' ' }); expect(rows[0]).toHaveAttribute('aria-selected', 'true'); fireEvent.keyDown(rows[0]!, { key: 'PageDown' }); expect(await screen.findByText('客户 21')).toBeInTheDocument();
+  });
+
+  it('仪器编辑只提交四个允许字段，名称与序列号保持只读，并刷新队列详情和当前表格', async () => {
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    const instrumentTable = (await screen.findByRole('columnheader', { name: '二维码' })).closest('table')!;
+    fireEvent.click(within(instrumentTable).getAllByRole('button', { name: '编辑' })[0]!);
+    const dialog = screen.getByRole('dialog', { name: '编辑仪器资料' });
+    expect(within(dialog).getByText('仪器 0')).toBeInTheDocument(); expect(within(dialog).getByText('SN-0')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('textbox', { name: /仪器名称|序列号/ })).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText(/型号/), { target: { value: '7900X' } });
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '配备 UPS' }));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '二维码已申请' }));
+    const batch = within(dialog).getByLabelText('物流费用记录'); await waitFor(() => expect(within(batch).getByRole('option', { name: /华东运输/ })).toBeInTheDocument()); fireEvent.change(batch, { target: { value: 'batch-1' } });
+    const projectReads = vi.mocked(api.v2ProjectPage).mock.calls.length; const detailReads = vi.mocked(api.v2ProjectDetail).mock.calls.length; const sectionReads = vi.mocked(api.v2SectionPage).mock.calls.length;
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'instrument_update', payload: { instrumentId: 'i-0', model: '7900X', ups: true, qrRequested: true, batchId: 'batch-1' } }));
+    await waitFor(() => expect(vi.mocked(api.v2ProjectPage).mock.calls.length).toBeGreaterThan(projectReads));
+    expect(vi.mocked(api.v2ProjectDetail).mock.calls.length).toBeGreaterThan(detailReads); expect(vi.mocked(api.v2SectionPage).mock.calls.length).toBeGreaterThan(sectionReads);
+  });
+
+  it('开单编辑只发送备注，并支持清空已有备注', async () => {
+    const orderPage = section('orders'); const notedPage = { ...orderPage, rows: orderPage.rows.map((row) => row.kind === 'orders' ? { ...row, note: '原备注' } : row) } as WorkbenchV2SectionPageDto;
+    const api = mockApi({ v2SectionPage: vi.fn().mockImplementation((request: { kind: WorkbenchV2SectionPageDto['kind']; projectId: string }) => Promise.resolve(request.kind === 'orders' ? notedPage : section(request.kind, request.projectId))) });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('tab', { name: '开单记录' }));
+    const orderTable = (await screen.findByRole('columnheader', { name: '备注' })).closest('table')!; fireEvent.click(within(orderTable).getByRole('button', { name: '修改备注' }));
+    let dialog = screen.getByRole('dialog', { name: '维护开单备注' }); fireEvent.change(within(dialog).getByLabelText('备注'), { target: { value: '补充后的备注' } }); fireEvent.click(within(dialog).getByRole('button', { name: '保存修改' }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'service_order_note_update', payload: { orderId: 'order-1', note: '补充后的备注' } }));
+    fireEvent.click(screen.getByRole('tab', { name: '开单记录' })); const refreshedTable = (await screen.findByRole('columnheader', { name: '备注' })).closest('table')!; fireEvent.click(within(refreshedTable).getByRole('button', { name: '修改备注' }));
+    dialog = screen.getByRole('dialog', { name: '维护开单备注' }); fireEvent.click(within(dialog).getByRole('button', { name: '清空备注' }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenLastCalledWith({ op: 'service_order_note_update', payload: { orderId: 'order-1', note: null } }));
+  });
+
+  it('验收事实不提供原位编辑，有后续依赖时明确保留原事实', async () => {
+    const acceptance: WorkbenchV2HistoryRow = { kind: 'acceptance', id: 'p-1', projectId: 'p-1', customerName: '客户 1', ecc: 'ECC-000001', tempNo: 'TMP-000001', acceptanceReportDate: '2026-08-08', businessDate: '2026-08-08', createdAt: '2026-08-08T00:00:00Z' };
+    const api = mockApi({ v2HistoryPage: vi.fn().mockImplementation((request: { kind: WorkbenchV2HistoryPageDto['kind'] }) => Promise.resolve({ businessRevision: 1, kind: request.kind, rows: request.kind === 'acceptance' ? [acceptance] : [], total: request.kind === 'acceptance' ? 1 : 0, nextCursor: null, limit: 50 })) });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' })); const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' }); fireEvent.click(within(dialog).getByRole('tab', { name: '验收记录' }));
+    const row = await within(dialog).findByRole('row', { name: /客户 1.*验收报告/ }); expect(within(row).queryByRole('button', { name: '编辑' })).not.toBeInTheDocument(); expect(row).toHaveTextContent('验收已有后续依赖时应保留原事实，当前不支持原位修改。'); expect(row).not.toHaveTextContent('从项目资料继续更正');
   });
 
   it('历史导入返回后刷新 overview 与项目首页并恢复入口焦点', async () => {

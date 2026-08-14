@@ -500,16 +500,31 @@ export interface ReplaceProjectTagSetRequestDto {
   tagIds: readonly string[];
 }
 
-/** 标签写入命令；不提供表级 CRUD、删除、重命名或重排命令。 */
+/** 重命名全局标签分组；稳定 ID 和排序均保持不变。 */
+export interface RenameProjectTagGroupRequestDto {
+  groupId: string;
+  name: string;
+}
+
+/** 重命名全局标签；稳定 ID、所属分组和排序均保持不变。 */
+export interface RenameProjectTagRequestDto {
+  tagId: string;
+  name: string;
+}
+
+/** 标签写入命令；仅支持创建、重命名及项目 replace-set，不支持删除、移动或重排。 */
 export type ProjectTagMutationRequestDto =
   | { command: 'create_group'; payload: CreateProjectTagGroupRequestDto }
   | { command: 'create_tag'; payload: CreateProjectTagRequestDto }
+  | { command: 'rename_group'; payload: RenameProjectTagGroupRequestDto }
+  | { command: 'rename_tag'; payload: RenameProjectTagRequestDto }
   | { command: 'replace_project_tags'; payload: ReplaceProjectTagSetRequestDto };
 
 /** 创建全局标签分组后的结果。 */
 export interface CreateProjectTagGroupResultDto {
   businessRevision: number;
   group: ProjectTagGroupDto;
+  invalidated: readonly WorkbenchV2InvalidateTag[];
 }
 
 /** 创建组内标签后的结果。 */
@@ -517,6 +532,7 @@ export interface CreateProjectTagResultDto {
   businessRevision: number;
   group: ProjectTagGroupDto;
   tag: ProjectTagDto;
+  invalidated: readonly WorkbenchV2InvalidateTag[];
 }
 
 /** replace-set 后的规范化项目标签视图，供队列、详情和当前上下文刷新。 */
@@ -525,12 +541,28 @@ export interface ReplaceProjectTagSetResultDto {
   projectId: string;
   tagIds: readonly string[];
   groupedTags: readonly ProjectTagGroupSummaryDto[];
+  invalidated: readonly WorkbenchV2InvalidateTag[];
+}
+
+/** 分组重命名后的有界结果。 */
+export interface RenameProjectTagGroupResultDto {
+  businessRevision: number;
+  group: ProjectTagGroupDto;
+  invalidated: readonly WorkbenchV2InvalidateTag[];
+}
+
+export interface RenameProjectTagResultDto {
+  businessRevision: number;
+  tag: ProjectTagDto;
+  invalidated: readonly WorkbenchV2InvalidateTag[];
 }
 
 export type ProjectTagMutationResultDto =
   | CreateProjectTagGroupResultDto
   | CreateProjectTagResultDto
-  | ReplaceProjectTagSetResultDto;
+  | ReplaceProjectTagSetResultDto
+  | RenameProjectTagGroupResultDto
+  | RenameProjectTagResultDto;
 
 /** 项目分类标签写入失败稳定错误码；IPC 通过 IpcEnvelope 序列化。 */
 export const PROJECT_TAG_REJECTION_CODES = {
@@ -1341,7 +1373,7 @@ export type WorkbenchV2InvalidateTag =
   | 'lookup:ship_to_requests'
   | 'lookup:customers';
 
-export interface WorkbenchV2MutationRequest {
+export interface WorkbenchV2BaseMutationRequest {
   op: WorkbenchV2MutationOp;
   /** submit_action / adjust_status / cancel_project / set_reminder 等需要。 */
   projectId?: string;
@@ -1408,6 +1440,28 @@ export interface InstrumentBulkImportPayload {
   projectId: string;
   rows: readonly InstrumentBulkImportRow[];
 }
+
+/** 仪器编辑仅允许修改型号、UPS、二维码申请标记和所属批次；名称与序列号不可编辑。 */
+export interface InstrumentUpdatePayload {
+  instrumentId: string;
+  model: string | null;
+  ups: boolean;
+  qrRequested: boolean;
+  batchId: string | null;
+}
+
+/** 服务单编辑仅允许修改备注；null 或空白均表示清空。 */
+export interface ServiceOrderNoteUpdatePayload {
+  orderId: string;
+  note: string | null;
+}
+
+/** 记录编辑一律用 payload 承载，防止身份字段混入普通 mutation 顶层。 */
+export type WorkbenchV2RecordEditingMutationRequest =
+  | { op: 'instrument_update'; payload: InstrumentUpdatePayload }
+  | { op: 'service_order_note_update'; payload: ServiceOrderNoteUpdatePayload };
+
+export type WorkbenchV2MutationRequest = WorkbenchV2BaseMutationRequest | WorkbenchV2RecordEditingMutationRequest;
 
 export interface WorkbenchV2MutationResult {
   businessRevision: number;
