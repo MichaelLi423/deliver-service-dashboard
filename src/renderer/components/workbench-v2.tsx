@@ -128,7 +128,7 @@ const ACTIONS: Array<{
   {
     type: "batch",
     label: "物流费用登记",
-    help: "一次登记运输安排、费用日期和两项价格",
+    help: "可先保存现有信息，运输安排、费用日期和价格后续均可补充修改",
   },
   {
     type: "instrument",
@@ -299,17 +299,18 @@ function updateProjectRequest(payload: ProjectUpdatePayload): WorkbenchV2Mutatio
 }
 
 type BatchEditValues = {
-  planTransportDate: string;
-  transportCompany: string;
-  budgetPrice: string;
-  dealPrice: string;
+  planTransportDate: string | null;
+  transportCompany: string | null;
+  appliedAt: string | null;
+  budgetPrice: string | null;
+  dealPrice: string | null;
 };
 
 function batchEditRequest(
   batchId: string,
   batchEdit: BatchEditValues,
 ): WorkbenchV2MutationRequest {
-  return { op: "batch_edit", payload: { batchId, ...batchEdit } };
+  return { op: "batch_edit", payload: { batchId, ...batchEdit } } as WorkbenchV2MutationRequest;
 }
 
 function instrumentBulkImportRequest(
@@ -2802,6 +2803,7 @@ function BatchEditForm({
   const values = batch as unknown as Record<string, unknown>;
   const budgetPrice = String(values.budgetPrice ?? values.originalPrice ?? "");
   const dealPrice = String(values.dealPrice ?? values.discountedPrice ?? "");
+  const appliedAt = String(values.appliedAt ?? "");
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -2812,10 +2814,11 @@ function BatchEditForm({
     const data = new FormData(event.currentTarget);
     try {
       await onSave({
-        planTransportDate: String(data.get("planTransportDate") ?? ""),
-        transportCompany: String(data.get("transportCompany") ?? "").trim(),
-        budgetPrice: String(data.get("budgetPrice") ?? ""),
-        dealPrice: String(data.get("dealPrice") ?? ""),
+        planTransportDate: String(data.get("planTransportDate") ?? "").trim() || null,
+        transportCompany: String(data.get("transportCompany") ?? "").trim() || null,
+        appliedAt: String(data.get("appliedAt") ?? "").trim() || null,
+        budgetPrice: String(data.get("budgetPrice") ?? "").trim() || null,
+        dealPrice: String(data.get("dealPrice") ?? "").trim() || null,
       });
     } catch (cause) {
       setError(messageOf(cause));
@@ -2828,7 +2831,7 @@ function BatchEditForm({
   return (
     <form className="project-edit-form" onSubmit={(event) => void submit(event)}>
       <p className="notice">
-        修改本条物流费用的运输安排和价格。费用登记日期保持首次登记月份。
+        可补充、修改或清空本条物流费用信息。修改费用登记日期会影响报表归属月份。
       </p>
       <div className="edit-form-sections">
         <fieldset className="edit-form-section">
@@ -2839,7 +2842,8 @@ function BatchEditForm({
               label="运输日期"
               type="date"
               defaultValue={batch.planTransportDate ?? ""}
-              required
+              optional
+              help="可留空；填写时请选择有效日期。"
               autoFocus
             />
             <Field
@@ -2847,6 +2851,14 @@ function BatchEditForm({
               label="运输公司"
               defaultValue={batch.transportCompany ?? ""}
               optional
+            />
+            <Field
+              name="appliedAt"
+              label="费用登记日期"
+              type="date"
+              defaultValue={appliedAt}
+              optional
+              help="可留空；填写时请选择有效日期。修改后会影响报表归属月份。"
             />
           </div>
         </fieldset>
@@ -2858,18 +2870,18 @@ function BatchEditForm({
               label="合同预算价"
               type="number"
               step="0.01"
-              min="0.01"
               defaultValue={budgetPrice}
-              required
+              optional
+              help="可留空；填写时请输入大于 0 的金额。"
             />
             <Field
               name="dealPrice"
               label="物流成交价"
               type="number"
               step="0.01"
-              min="0"
               defaultValue={dealPrice}
-              required
+              optional
+              help="可留空；填写时请输入不小于 0 的金额。"
             />
           </div>
         </fieldset>
@@ -2941,7 +2953,8 @@ function actionFields(
           name="planTransportDate"
           label="运输日期"
           type="date"
-          required
+          optional
+          help="可留空；填写时请选择有效日期。"
           autoFocus
         />
         <Field name="transportCompany" label="运输公司" optional />
@@ -2949,24 +2962,24 @@ function actionFields(
           name="appliedAt"
           label="费用登记日期"
           type="date"
-          required
+          optional
+          help="可留空；填写时请选择有效日期。填写后用于报表归属月份，后续修改会改变归属月份。"
         />
         <Field
           name="budgetPrice"
           label="合同预算价"
           type="number"
           step="0.01"
-          min="0.01"
-          required
+          optional
+          help="可留空；填写时请输入大于 0 的金额。"
         />
         <Field
           name="dealPrice"
           label="物流成交价"
           type="number"
           step="0.01"
-          min="0"
-          required
-          help="物流成交价高于合同预算价时会提示确认，但仍允许记录。"
+          optional
+          help="可留空；填写时请输入不小于 0 的金额。高于合同预算价时会提示确认，但仍允许记录。"
         />
       </>
     );
