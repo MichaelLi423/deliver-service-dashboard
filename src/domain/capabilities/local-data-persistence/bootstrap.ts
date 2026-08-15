@@ -75,6 +75,10 @@ import {
   PROJECT_TAG_MIGRATION_VERSION,
 } from './schema-v17';
 import {
+  applyOptionalLogisticsFeeMigration,
+  OPTIONAL_LOGISTICS_FEE_MIGRATION_VERSION,
+} from './schema-v18';
+import {
   buildFinancialIntegrityHint,
   hasAnyFinancialIntegrityIssue,
   readFinancialIntegrityCounts,
@@ -200,6 +204,13 @@ export const PROJECT_TAG_MIGRATION: Migration = {
   up: (db) => applyProjectTagMigration(db),
 };
 
+/** v18 迁移：物流费用登记全部字段可选（重建 logistics_fees 使业务费用字段可空）。 */
+export const OPTIONAL_LOGISTICS_FEE_MIGRATION: Migration = {
+  version: OPTIONAL_LOGISTICS_FEE_MIGRATION_VERSION,
+  name: 'optional-logistics-fee-fields',
+  up: (db) => applyOptionalLogisticsFeeMigration(db),
+};
+
 /** 当前迁移序列（后续 schema 升级追加新 Migration，不修改已发布迁移）。 */
 export const MIGRATIONS: readonly Migration[] = [
   INITIAL_MIGRATION,
@@ -219,6 +230,7 @@ export const MIGRATIONS: readonly Migration[] = [
   RELOCATION_WORKBENCH_MIGRATION,
   TEMPORARY_INSTRUMENT_FIELDS_MIGRATION,
   PROJECT_TAG_MIGRATION,
+  OPTIONAL_LOGISTICS_FEE_MIGRATION,
 ];
 
 export interface BootstrapOptions {

@@ -146,24 +146,26 @@ export interface InstrumentProgress {
 }
 
 /**
- * 实际物流费用记录（tasks 3.7）：每批次仅一笔；物流费用申请（登记）时间必填
- * 默认当天、首次登记决定归属月份；合同预算价必填且 > 0，物流成交价允许 0
- * （>= 0，即最终实际费用）；物流成交价 > 合同预算价仅警告。
+ * 实际物流费用记录（tasks 3.7）：每批次仅一笔；登记时间/三金额均可选（部分费用）。
+ * - appliedAt：物流费用申请（登记）日期（业务日期；可空，可后补/修改/清空）；
+ * - budgetPriceCents：合同预算价（分整数；有值必须 > 0）；
+ * - dealPriceCents：物流成交价（分整数；有值允许 0，即最终实际费用）；
+ * - logisticsCostCents：历史兼容旧列，现行业务与 dealPriceCents 恒同值（仅历史导入保留）。
  */
 export interface LogisticsFee {
   id: string;
   batchId: string;
-  /** 物流费用申请（登记）日期（业务日期；修改金额不改变）。 */
-  appliedAt: BusinessDate;
-  /** 合同预算价（分整数，必填且 > 0）。 */
-  budgetPriceCents: bigint;
-  /** 物流成交价（分整数，允许 0；即最终实际费用）。 */
-  dealPriceCents: bigint;
+  /** 物流费用申请（登记）日期（业务日期；部分费用时可空）。 */
+  appliedAt: BusinessDate | null;
+  /** 合同预算价（分整数；部分费用时可空；有值必须 > 0）。 */
+  budgetPriceCents: bigint | null;
+  /** 物流成交价（分整数；部分费用时可空；有值允许 0；即最终实际费用）。 */
+  dealPriceCents: bigint | null;
   /**
    * 历史兼容旧列（旧「实际物流费用」口径）：现行业务与 dealPriceCents 恒同值
    * （物流成交价即最终实际费用），仅历史数据/导入保留，不新增业务语义。
    */
-  logisticsCostCents: bigint;
+  logisticsCostCents: bigint | null;
   /** 账号归属快照。 */
   accountId: string | null;
   usernameSnapshot: string | null;
@@ -224,19 +226,19 @@ export interface BatchQuoteInput {
   discountedPriceCents?: bigint | null;
 }
 
-/** 物流费用记录输入（3.7）。 */
+/** 物流费用记录输入（部分费用语义）：未提交字段不参与（undefined）；null = 显式清空。 */
 export interface LogisticsFeeInput {
-  /** 物流费用申请（登记）日期（必填，缺省默认当天）。 */
-  appliedAt?: BusinessDate;
-  /** 合同预算价（分整数，必填且 > 0）。 */
-  budgetPriceCents: bigint;
-  /** 物流成交价（分整数，允许 0；即最终实际费用）。 */
-  dealPriceCents: bigint;
+  /** 物流费用申请（登记）日期（undefined=不提交；null=清空；有值须为合法业务日期）。 */
+  appliedAt?: BusinessDate | null;
+  /** 合同预算价（分整数；undefined=不提交；null=清空；有值必须 > 0）。 */
+  budgetPriceCents?: bigint | null;
+  /** 物流成交价（分整数；undefined=不提交；null=清空；有值允许 0 即最终实际费用）。 */
+  dealPriceCents?: bigint | null;
   /**
    * 历史兼容旧列（旧「实际物流费用」口径）：现行业务与 dealPriceCents 恒同值
    * （物流成交价即最终实际费用）；仅历史导入需单独提供，新流程调用方传 dealPriceCents。
    */
-  logisticsCostCents: bigint;
+  logisticsCostCents?: bigint | null;
 }
 
 /** 物流费用记录结果（含物流成交价 > 合同预算价的警告，警告不阻塞保存）。 */

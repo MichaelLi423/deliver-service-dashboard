@@ -623,16 +623,26 @@ describe('实际物流费用记录（3.7 / TBD-14）', () => {
     ).toThrow(/每批次仅允许一笔/);
   });
 
-  it('费用登记日期必填默认当天，归属月份按该日期计算', () => {
+  it('费用登记日期可选：缺省不默认当天（null），可后补/修改/清空', () => {
     const { service, batch, fees } = makeBatch();
     const { fee } = service.recordLogisticsFee(batch.id, {
       budgetPriceCents: 10000n,
       dealPriceCents: 12000n,
       logisticsCostCents: 11000n,
     }, ACTOR);
-    expect(fee.appliedAt).toBe('2026-08-07'); // 默认当天（固定时钟）
-    expect(fee.appliedAt.slice(0, 7)).toBe('2026-08'); // 归属月份
-    expect(fees.findByBatchId(batch.id)?.appliedAt).toBe('2026-08-07');
+    // 空日期不得默认当天：未提交 appliedAt → null（归属月份由补录日期决定）。
+    expect(fee.appliedAt).toBeNull();
+    expect(fees.findByBatchId(batch.id)?.appliedAt).toBeNull();
+    // 补录 appliedAt；修改；清空
+    let updated = service.updateLogisticsFee(fee.id, { appliedAt: '2026-08-07' }, ACTOR).fee;
+    expect(updated.appliedAt).toBe('2026-08-07');
+    expect(updated.appliedAt!.slice(0, 7)).toBe('2026-08');
+    updated = service.updateLogisticsFee(fee.id, { appliedAt: '2026-08-15' }, ACTOR).fee;
+    expect(updated.appliedAt).toBe('2026-08-15');
+    updated = service.updateLogisticsFee(fee.id, { appliedAt: null }, ACTOR).fee;
+    expect(updated.appliedAt).toBeNull();
+    // 非法日期拒绝
+    expect(() => service.updateLogisticsFee(fee.id, { appliedAt: '2026-8-1' }, ACTOR)).toThrow(/格式非法/);
   });
 
   it('合同预算价必填且大于 0；物流成交价允许 0（负数拒绝）', () => {
@@ -694,9 +704,10 @@ describe('实际物流费用记录（3.7 / TBD-14）', () => {
       logisticsCostCents: 12000n,
     }, ACTOR);
     expect(updated.appliedAt).toBe('2026-07-15');
-    expect(updated.appliedAt.slice(0, 7)).toBe('2026-07');
+    expect(updated.appliedAt!.slice(0, 7)).toBe('2026-07');
     expect(updated.budgetPriceCents).toBe(11000n);
     expect(updated.dealPriceCents).toBe(13000n);
+    expect(updated.logisticsCostCents).toBe(12000n);
   });
 
   it('getLogisticsFeeDifference（历史兼容：旧三口径成交-实际差异；现行业务与成交同值恒为 0）', () => {
@@ -760,6 +771,33 @@ describe('实际物流费用记录（3.7 / TBD-14）', () => {
     expect(updated.logisticsCostCents).toBe(13000n);
     expect(updated.appliedAt).toBe('2026-07-15');
     expect(service.getLogisticsFeeDifference(updated)).toBe(0n);
+  });
+
+  it('部分费用：任一字段有值即可创建；null 与 0 严格区分', () => {
+    const { service, batch, fees } = makeBatch();
+    // 仅登记日期：创建部分费用，金额全空（null，不转 0）
+    const { fee } = service.recordLogisticsFee(batch.id, { appliedAt: '2026-08-01' }, ACTOR);
+    expect(fee.appliedAt).toBe('2026-08-01');
+    expect(fee.budgetPriceCents).toBeNull();
+    expect(fee.dealPriceCents).toBeNull();
+    expect(fee.logisticsCostCents).toBeNull();
+    expect(fees.findByBatchId(batch.id)?.budgetPriceCents).toBeNull();
+    // 超预算警告仅两价都有值时判定：部分费用无警告（且每批次仅一笔）
+    expect(() => service.recordLogisticsFee(batch.id, { appliedAt: '2026-08-01' }, ACTOR)).toThrow(/每批次仅允许一笔/);
+    // 部分更新：null = 清空、undefined = 保持、0n = 显式 0（与 null 区分）
+    let updated = service.updateLogisticsFee(fee.id, { budgetPriceCents: 10000n, dealPriceCents: 0n }, ACTOR).fee;
+    expect(updated.budgetPriceCents).toBe(10000n);
+    expect(updated.dealPriceCents).toBe(0n); // 显式 0，非 null
+    expect(updated.logisticsCostCents).toBeNull(); // 未提交 → 保持 null
+    updated = service.updateLogisticsFee(fee.id, { budgetPriceCents: null }, ACTOR).fee;
+    expect(updated.budgetPriceCents).toBeNull(); // null = 清空
+    expect(updated.dealPriceCents).toBe(0n); // 未提交 → 保持 0
+    // 非法值回滚：预算 0 / 负成交价均拒绝且不部分落库
+    const before = fees.all.length;
+    expect(() => service.updateLogisticsFee(fee.id, { budgetPriceCents: 0n }, ACTOR)).toThrow(/大于 0/);
+    expect(() => service.updateLogisticsFee(fee.id, { dealPriceCents: -1n }, ACTOR)).toThrow(/不得为负数/);
+    expect(fees.all.length).toBe(before);
+    expect(fees.findByBatchId(batch.id)?.budgetPriceCents).toBeNull();
   });
 });
 

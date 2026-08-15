@@ -344,6 +344,7 @@ export class SqliteLogisticsFeeRepository implements LogisticsFeeRepository {
              logistics_cost_cents, account_id, username_snapshot, created_at, updated_at
            ) VALUES (?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(id) DO UPDATE SET
+             applied_at=excluded.applied_at,
              budget_price_cents=excluded.budget_price_cents,
              deal_price_cents=excluded.deal_price_cents,
              logistics_cost_cents=excluded.logistics_cost_cents,
@@ -355,9 +356,9 @@ export class SqliteLogisticsFeeRepository implements LogisticsFeeRepository {
           fee.id,
           fee.batchId,
           fee.appliedAt,
-          fee.budgetPriceCents.toString(),
-          fee.dealPriceCents.toString(),
-          fee.logisticsCostCents.toString(),
+          fee.budgetPriceCents === null ? null : fee.budgetPriceCents.toString(),
+          fee.dealPriceCents === null ? null : fee.dealPriceCents.toString(),
+          fee.logisticsCostCents === null ? null : fee.logisticsCostCents.toString(),
           fee.accountId,
           fee.usernameSnapshot,
           fee.createdAt,
@@ -451,10 +452,11 @@ function rowToLogisticsFee(row: Record<string, unknown>): LogisticsFee {
   return {
     id: String(row.id),
     batchId: String(row.batch_id),
-    appliedAt: String(row.applied_at),
-    budgetPriceCents: toBigInt(row.budget_price_cents) ?? 0n,
-    dealPriceCents: toBigInt(row.deal_price_cents) ?? 0n,
-    logisticsCostCents: toBigInt(row.logistics_cost_cents) ?? 0n,
+    appliedAt: row.applied_at === null ? null : String(row.applied_at),
+    // 部分费用语义：null 保持 null（绝不把缺失金额静默当 0）。
+    budgetPriceCents: toBigInt(row.budget_price_cents),
+    dealPriceCents: toBigInt(row.deal_price_cents),
+    logisticsCostCents: toBigInt(row.logistics_cost_cents),
     accountId: row.account_id === null ? null : String(row.account_id),
     usernameSnapshot: row.username_snapshot === null ? null : String(row.username_snapshot),
     createdAt: String(row.created_at),

@@ -9,6 +9,7 @@ import {
   type MonthKey,
 } from '../../core/time';
 import type { Project } from '../relocation-project-lifecycle';
+import type { LogisticsFee } from '../relocation-execution';
 import type { ProjectStatusOrCancelled } from '../relocation-project-lifecycle';
 import type { OrderType } from '../service-order-recording';
 import type { PartCurrency, PartStatus } from '../damage-repair-tracking';
@@ -478,8 +479,24 @@ export class ReportingService {
         const project = batch ? projectsById.get(batch.projectId) : undefined;
         return { fee, batch, project };
       })
-      .filter((x): x is { fee: (typeof x)['fee']; batch: NonNullable<(typeof x)['batch']>; project: Project } =>
-        x.batch !== undefined && x.project !== undefined,
+      .filter((x): x is {
+        fee: LogisticsFee & {
+          appliedAt: BusinessDate;
+          budgetPriceCents: bigint;
+          dealPriceCents: bigint;
+          logisticsCostCents: bigint;
+        };
+        batch: NonNullable<(typeof x)['batch']>;
+        project: Project;
+      } =>
+        x.batch !== undefined &&
+        x.project !== undefined &&
+        // 部分费用 null-safe：仅完整费用记录（申请时间 + 三金额均非空）进入原有汇总，
+        // 缺失字段绝不当 0 或字符串 null 参与统计（历史完整记录结果不变）。
+        x.fee.appliedAt !== null &&
+        x.fee.budgetPriceCents !== null &&
+        x.fee.dealPriceCents !== null &&
+        x.fee.logisticsCostCents !== null,
       )
       .filter((x) => this.projectInScope(x.project.id, f))
       .filter((x) => this.regionMatch(x.project, f))

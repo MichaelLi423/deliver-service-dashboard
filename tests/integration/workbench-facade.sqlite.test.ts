@@ -619,24 +619,58 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(fee.logistics_cost_cents).toBe(1100000n); // 物流成交价即最终实际费用
   });
 
-  it('快速记录搬迁批次：必填缺失/非法值全部回滚，批次与费用均不落库', async () => {
-    const { facade } = await makeFacade();
+  it('快速记录搬迁批次：全空仅建批次、单字段建部分费用、非法值全部回滚', async () => {
+    const { facade, db } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
       payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '原子批次客户' }),
     });
     const projectId = projectIdOf(created);
 
-    // 必填缺失：appliedAt 缺失 → 明确报错，不虚构申请日期
-    expect(() =>
-      facade.v2Mutate({
-        op: 'submit_action',
-        projectId,
-        action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', budgetPrice: '12000', dealPrice: '11000' } },
-      }),
-    ).toThrow(/物流费用申请（登记）日期必填/);
+    // 全空费用字段：仅建批次、不建物流费用（空金额不得转 0、空日期不得默认当天）
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'batch', projectId, values: { planTransportDate: '', transportCompany: '', appliedAt: '', budgetPrice: '', dealPrice: '' } },
+    });
+    expect(facade.v2SectionPage({ projectId, kind: 'batches' }).total).toBe(1);
+    const emptyBatch = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+      WorkbenchV2SectionRow,
+      { kind: 'batches' }
+    >;
+    expect(emptyBatch.originalPrice).toBeNull();
+    expect(emptyBatch.discountedPrice).toBeNull();
+    expect(emptyBatch.appliedAt).toBeNull();
+    expect(
+      db.prepare('SELECT COUNT(*) AS n FROM logistics_fees WHERE batch_id = ?').get(emptyBatch.id) as { n: number },
+    ).toMatchObject({ n: 0 });
 
-    // 非法价格：预算价 0 报错；成交价 0 允许（已确认语义：成交价可 0、预算价仍 > 0）
+    // 单字段创建部分费用：仅 appliedAt 有值 → 建部分费用，金额全空
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'batch', projectId, values: { planTransportDate: '', transportCompany: '', appliedAt: '2026-08-09', budgetPrice: '', dealPrice: '' } },
+    });
+    const partialBatch = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+      WorkbenchV2SectionRow,
+      { kind: 'batches' }
+    >;
+    expect(partialBatch.appliedAt).toBe('2026-08-09');
+    const partialFee = prepareReadBigInt(
+      db,
+      'SELECT applied_at, budget_price_cents, deal_price_cents, logistics_cost_cents FROM logistics_fees WHERE batch_id = ?',
+    ).get(partialBatch.id) as {
+      applied_at: string | null;
+      budget_price_cents: bigint | null;
+      deal_price_cents: bigint | null;
+      logistics_cost_cents: bigint | null;
+    };
+    expect(partialFee.applied_at).toBe('2026-08-09');
+    expect(partialFee.budget_price_cents).toBeNull();
+    expect(partialFee.deal_price_cents).toBeNull();
+    expect(partialFee.logistics_cost_cents).toBeNull();
+
+    // 非法价格：预算价 0 报错；成交价 -1 报错；均原子回滚不落库
     expect(() =>
       facade.v2Mutate({
         op: 'submit_action',
@@ -661,11 +695,11 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       }),
     ).toThrow(/计划运输日期 格式非法/);
 
-    // 三连失败均未产生任何批次或费用
-    expect(facade.v2SectionPage({ projectId, kind: 'batches' }).total).toBe(0);
+    // 失败均未产生任何额外批次或费用（仅前面两个合法批次）
+    expect(facade.v2SectionPage({ projectId, kind: 'batches' }).total).toBe(2);
     expect(
-      facade.reportDto({ monthFrom: '2026-08', monthTo: '2026-08' }).sections.find((s) => s.key === 'monthly_logistics')?.rows,
-    ).toHaveLength(0);
+      db.prepare('SELECT COUNT(*) AS n FROM logistics_fees').get() as { n: number },
+    ).toMatchObject({ n: 1 }); // 仅部分费用那一笔
   });
 
   // ---- batch_edit：编辑批次与费用，不允许修改 appliedAt ----
@@ -725,7 +759,7 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       deal_price_cents: bigint;
       logistics_cost_cents: bigint;
     };
-    // 不允许修改 appliedAt：申请（登记）时间保持原值，归属月份不变
+    // 未提交 appliedAt → 保持原值；dealPrice 同时覆盖 dealPriceCents 与 logisticsCostCents
     expect(fee.applied_at).toBe(appliedAtBefore.applied_at);
     expect(fee.applied_at).toBe('2026-08-09');
     // dealPrice 同时覆盖 dealPriceCents 与 logisticsCostCents（物流成交价即最终实际费用）
@@ -734,7 +768,48 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
     expect(fee.logistics_cost_cents).toBe(1250000n);
   });
 
-  it('batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑', async () => {
+  it('batch_edit 可修改/清空 appliedAt（影响报表归属月份），行 DTO 实时反映', async () => {
+    const { facade, db } = await makeFacade();
+    const created = facade.v2Mutate({
+      op: 'create_project',
+      payload: wizard({ intent: 'pre_entry_execution', managerApproved: true, customerName: '批次日期客户' }),
+    });
+    const projectId = projectIdOf(created);
+    facade.v2Mutate({
+      op: 'submit_action',
+      projectId,
+      action: { type: 'batch', projectId, values: { planTransportDate: '2026-08-10', appliedAt: '2026-08-09', budgetPrice: '12000', dealPrice: '11000' } },
+    });
+    const batchRow = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+      WorkbenchV2SectionRow,
+      { kind: 'batches' }
+    >;
+    expect(batchRow.appliedAt).toBe('2026-08-09');
+
+    // 修改 appliedAt：行 DTO 与费用记录同步更新
+    facade.v2Mutate({ op: 'batch_edit', payload: { batchId: batchRow.id, appliedAt: '2026-08-15' } });
+    const modified = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+      WorkbenchV2SectionRow,
+      { kind: 'batches' }
+    >;
+    expect(modified.appliedAt).toBe('2026-08-15');
+    expect(prepareReadBigInt(db, 'SELECT applied_at FROM logistics_fees WHERE batch_id = ?').get(batchRow.id)).toMatchObject({
+      applied_at: '2026-08-15',
+    });
+
+    // 清空 appliedAt：null
+    facade.v2Mutate({ op: 'batch_edit', payload: { batchId: batchRow.id, appliedAt: null } });
+    const cleared = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+      WorkbenchV2SectionRow,
+      { kind: 'batches' }
+    >;
+    expect(cleared.appliedAt).toBeNull();
+    expect(prepareReadBigInt(db, 'SELECT applied_at FROM logistics_fees WHERE batch_id = ?').get(batchRow.id)).toMatchObject({
+      applied_at: null,
+    });
+  });
+
+  it('batch_edit 历史批次无 fee：编辑价格按需创建部分费用，仅批次字段不虚构费用', async () => {
     const { facade, db, accountId } = await makeFacade();
     const created = facade.v2Mutate({
       op: 'create_project',
@@ -761,26 +836,41 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       actor,
     );
 
-    // 编辑价格：明确报错（编辑契约无 appliedAt，不虚构申请时间创建费用），且不部分落库
-    expect(() =>
-      facade.v2Mutate({ op: 'batch_edit', payload: { batchId: batch.id, budgetPrice: '13000' } }),
-    ).toThrow(/尚无实际物流费用记录/);
-    const unchanged = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
+    // 编辑价格：缺 fee 按需创建部分费用（含 appliedAt 补录），成交价与实际费用同步
+    facade.v2Mutate({
+      op: 'batch_edit',
+      payload: { batchId: batch.id, appliedAt: '2026-08-09', budgetPrice: '13000', dealPrice: '12500' },
+    });
+    const fee = prepareReadBigInt(
+      db,
+      'SELECT applied_at, budget_price_cents, deal_price_cents, logistics_cost_cents FROM logistics_fees WHERE batch_id = ?',
+    ).get(batch.id) as {
+      applied_at: string | null;
+      budget_price_cents: bigint | null;
+      deal_price_cents: bigint | null;
+      logistics_cost_cents: bigint | null;
+    };
+    expect(fee.applied_at).toBe('2026-08-09');
+    expect(fee.budget_price_cents).toBe(1300000n);
+    expect(fee.deal_price_cents).toBe(1250000n);
+    expect(fee.logistics_cost_cents).toBe(1250000n); // 成交价与实际费用同步
+    const afterCreate = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
       WorkbenchV2SectionRow,
       { kind: 'batches' }
     >;
-    expect(unchanged.originalPrice).toBe('12000.00');
-    expect(unchanged.discountedPrice).toBe('11000.00');
+    expect(afterCreate.originalPrice).toBe('13000.00');
+    expect(afterCreate.discountedPrice).toBe('12500.00');
+    expect(afterCreate.appliedAt).toBe('2026-08-09');
 
-    // 仅批次字段（计划运输日期/运输公司）仍可编辑
+    // 仅批次字段（计划运输日期/运输公司）编辑：不虚构费用记录
+    const feeCountBefore = (db.prepare('SELECT COUNT(*) AS n FROM logistics_fees WHERE batch_id = ?').get(batch.id) as { n: number }).n;
     facade.v2Mutate({ op: 'batch_edit', payload: { batchId: batch.id, planTransportDate: '2026-08-15', transportCompany: '新运输' } });
     const edited = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
       WorkbenchV2SectionRow,
       { kind: 'batches' }
     >;
-    expect(edited).toMatchObject({ planTransportDate: '2026-08-15', transportCompany: '新运输', originalPrice: '12000.00' });
-    // 仍未虚构任何费用记录
-    expect((db.prepare('SELECT COUNT(*) AS n FROM logistics_fees WHERE batch_id = ?').get(batch.id) as { n: number }).n).toBe(0);
+    expect(edited).toMatchObject({ planTransportDate: '2026-08-15', transportCompany: '新运输', originalPrice: '13000.00' });
+    expect((db.prepare('SELECT COUNT(*) AS n FROM logistics_fees WHERE batch_id = ?').get(batch.id) as { n: number }).n).toBe(feeCountBefore);
   });
 
   it('batch_edit 不存在的批次明确报错', async () => {

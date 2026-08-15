@@ -441,17 +441,18 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
     const section = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2SectionPage, 100, {
       projectId,
       kind: 'batches',
-    } as never)) as { rows: Array<{ id: string; originalPrice: string; discountedPrice: string }> };
+    } as never)) as { rows: Array<{ id: string; originalPrice: string; discountedPrice: string; appliedAt: string | null }> };
     const batchId = section.rows[0].id;
     expect(section.rows[0].originalPrice).toBe('12000.00'); // 合同预算价 → batch.originalPriceCents
     expect(section.rows[0].discountedPrice).toBe('11000.00'); // 物流成交价 → batch.discountedPriceCents
+    expect(section.rows[0].appliedAt).toBe('2026-08-09'); // batch row 可读 fee appliedAt（LEFT JOIN）
 
     const feeBefore = ctx
       .db()
       .prepare('SELECT applied_at FROM logistics_fees WHERE batch_id = ?')
       .get(batchId) as { applied_at: string };
 
-    // batch_edit：修改批次字段与两个价格口径，返回 bounded 结果；appliedAt 保持不变
+    // batch_edit：修改批次字段与两个价格口径，返回 bounded 结果；未提交 appliedAt 保持现值
     const editBefore = readBusinessRevision(ctx.db());
     const edited = (await ctx.bus.invoke(IPC_CHANNELS.workbenchV2Mutate, 100, {
       op: 'batch_edit',
@@ -492,7 +493,7 @@ describe('Oracle #10 v2 IPC：mutation 有界结果与写后读取', () => {
       deal_price_cents: unknown;
       logistics_cost_cents: unknown;
     };
-    // 不允许修改 appliedAt；dealPrice 同时覆盖 dealPriceCents 与 logisticsCostCents
+    // 未提交 appliedAt → 保持现值；dealPrice 同时覆盖 dealPriceCents 与 logisticsCostCents
     expect(feeAfter.applied_at).toBe(feeBefore.applied_at);
     expect(feeAfter.applied_at).toBe('2026-08-09');
     expect(String(feeAfter.budget_price_cents)).toBe('1300000');

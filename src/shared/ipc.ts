@@ -742,6 +742,11 @@ export type WorkbenchV2SectionRow =
       transportCompany: string | null;
       originalPrice: string | null;
       discountedPrice: string | null;
+      /**
+       * 物流费用申请（登记）日期（业务日期 yyyy-mm-dd）；LEFT JOIN 取该批次唯一
+       * 费用记录，无费用记录时 null（有界读取不因缺 fee 漏行）。
+       */
+      appliedAt: string | null;
       /** 开始运输日期（业务日期 yyyy-mm-dd；null = 未开始）。 */
       startedAt: string | null;
       /** 审计/技术创建时间（精确 ISO）。 */
@@ -1721,13 +1726,12 @@ export interface ProjectSupplementPayload {
  * - `dealPrice`=物流成交价 → 双写 batch.discountedPriceCents、fee.dealPriceCents 与
  *   fee.logisticsCostCents（物流成交价即最终实际费用）。
  *
- * 三态语义：`undefined` = 未提交保持现值；`null` = 显式清空（仅计划运输日期/运输公司）；
- * 价格字段 `undefined` = 保持现值，有值 = 覆盖（合同预算价必须 > 0；物流成交价允许显式 0
- * 但必填——空串视为缺失报错、不得静默当 0，由主进程/领域校验）。
- *
- * 不允许修改 `appliedAt`（物流费用申请/登记时间）：契约不含该字段，
- * 底层 updateLogisticsFee 亦不更新申请时间，编辑前后归属月份不变。
- * 历史批次无 fee 时编辑价格会明确报错（不虚构申请时间创建费用），仅批次字段仍可编辑。
+ * 全部字段三态语义：`undefined` = 未提交保持现值；`null` = 显式清空；有值 = 覆盖。
+ * - 计划运输日期/运输公司/费用登记日期：null 或空串 = 清空；
+ * - 价格字段：null = 清空；有值 = 覆盖（合同预算价必须 > 0；物流成交价允许显式 0）；
+ *   空串视为缺失报错、不得静默当 0，由主进程/领域校验。
+ * `appliedAt`（物流费用申请/登记时间）可补、改、清空（修改会影响报表归属月份）。
+ * 历史批次无 fee 时按需创建部分费用记录；仅提交 null/undefined 时不虚构费用记录。
  */
 export interface BatchEditPayload {
   /** 目标批次 id。 */
@@ -1736,10 +1740,12 @@ export interface BatchEditPayload {
   planTransportDate?: string | null;
   /** 运输公司；null = 清空。 */
   transportCompany?: string | null;
-  /** 合同预算价（十进制字符串，必填且 > 0）→ batch.originalPriceCents + fee.budgetPriceCents。 */
-  budgetPrice?: string;
-  /** 物流成交价（十进制字符串，必填但允许显式 0）→ batch.discountedPriceCents + fee.dealPriceCents + fee.logisticsCostCents。 */
-  dealPrice?: string;
+  /** 合同预算价（十进制字符串，有值必须 > 0）→ batch.originalPriceCents + fee.budgetPriceCents；null = 清空。 */
+  budgetPrice?: string | null;
+  /** 物流成交价（十进制字符串，有值允许显式 0）→ batch.discountedPriceCents + fee.dealPriceCents + fee.logisticsCostCents；null = 清空。 */
+  dealPrice?: string | null;
+  /** 物流费用申请（登记）日期（业务日期 yyyy-mm-dd）；null 或空串 = 清空；undefined = 保持现值。 */
+  appliedAt?: string | null;
 }
 
 export type WorkbenchActionType =
@@ -1758,10 +1764,11 @@ export interface WorkbenchActionPayload {
    * registeredAt/partRequestedAt/entryAt/updatedAt/reportDate 等）一律为 yyyy-mm-dd，
    * 由主进程校验后透传，绝不转换为 ISO；审计/技术时间不在此提交。
    * 快速记录搬迁批次（type='batch'）提交 planTransportDate/transportCompany/appliedAt/
-   * budgetPrice/dealPrice，主进程在同一事务内原子创建批次与其唯一一笔物流费用：
-   * budgetPrice=合同预算价 → batch.originalPriceCents + fee.budgetPriceCents；
-   * dealPrice=物流成交价 → batch.discountedPriceCents + fee.dealPriceCents +
-   * fee.logisticsCostCents（物流成交价即最终实际费用）。
+   * budgetPrice/dealPrice（全部可选，空串=未填写），主进程在同一事务内原子创建批次；
+   * 任一费用字段有值时创建该批次唯一一笔（可部分）物流费用，全空时仅建批次。
+   * 仅两个价格口径：budgetPrice=合同预算价 → batch.originalPriceCents +
+   * fee.budgetPriceCents；dealPrice=物流成交价 → batch.discountedPriceCents +
+   * fee.dealPriceCents + fee.logisticsCostCents（物流成交价即最终实际费用）。
    */
   values: Record<string, string | number | boolean | string[] | null>;
 }

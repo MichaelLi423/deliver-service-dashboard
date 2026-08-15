@@ -4,7 +4,7 @@ import { Money, formatCents } from '../domain/core/money';
 import { ValidationError } from '../domain/core/errors';
 import { SystemClock, assertValidBusinessDate } from '../domain/core/time';
 import { CustomerService, ProjectService, isFormallyEntered, type ProjectStatusOrCancelled } from '../domain/capabilities/relocation-project-lifecycle';
-import { ExecutionService, type BatchQuoteInput, type WorkType } from '../domain/capabilities/relocation-execution';
+import { ExecutionService, type BatchQuoteInput, type LogisticsFeeInput, type WorkType } from '../domain/capabilities/relocation-execution';
 import { ServiceOrderService } from '../domain/capabilities/service-order-recording';
 import { ReminderService } from '../domain/capabilities/workbench-todos';
 import { ShipToService } from '../domain/capabilities/ship-to-management';
@@ -1092,46 +1092,51 @@ export class WorkbenchFacade {
     this.transaction(() => {
       switch (payload.type) {
         case 'batch': {
-          // 快速记录搬迁批次：同一事务原子创建批次与其唯一一笔物流费用（每批次仅一笔）。
+          // 快速记录搬迁批次（全部字段可选）：同一事务原子创建批次；任一费用字段
+          // 有值（非空串）时创建该批次唯一一笔（可部分）物流费用，全空时仅建批次。
           // 仅两个价格口径——budgetPrice=合同预算价 → batch.originalPriceCents + fee.budgetPriceCents；
           // dealPrice=物流成交价 → batch.discountedPriceCents + fee.dealPriceCents +
           // fee.logisticsCostCents（物流成交价即最终实际费用）。
-          // planTransportDate/appliedAt/budgetPrice/dealPrice 必填，transportCompany 可选。
+          // 空金额不得转 0、空日期不得默认当天（undefined/null/空串 = 未填写）。
           const execution = this.executionService();
-          const planTransportDate = optional(v.planTransportDate) ?? null;
-          if (planTransportDate === null) {
-            throw new ValidationError('BATCH_PLAN_TRANSPORT_DATE_REQUIRED', '快速记录搬迁批次：计划运输日期必填');
+          const batch = execution.createBatch(projectId, actor);
+          const quote: BatchQuoteInput = {};
+          const feeInput: LogisticsFeeInput = {};
+          const planTransportDate = businessDate(v.planTransportDate, '计划运输日期');
+          if (planTransportDate !== undefined) {
+            quote.planTransportDate = planTransportDate;
+          }
+          if (optional(v.transportCompany) !== undefined) {
+            quote.transportCompany = optional(v.transportCompany) ?? null;
+          }
+          const budgetPriceRaw = optional(v.budgetPrice);
+          if (budgetPriceRaw !== undefined) {
+            const budgetPriceCents = parseAmountInput(budgetPriceRaw);
+            if (budgetPriceCents <= 0n) {
+              throw new ValidationError('LOGISTICS_BUDGET_PRICE_REQUIRED', '快速记录搬迁批次：合同预算价有值时必须大于 0');
+            }
+            quote.originalPriceCents = budgetPriceCents;
+            feeInput.budgetPriceCents = budgetPriceCents;
+          }
+          const dealPriceRaw = optional(v.dealPrice);
+          if (dealPriceRaw !== undefined) {
+            const dealPriceCents = parseAmountInput(dealPriceRaw);
+            if (dealPriceCents < 0n) {
+              throw new ValidationError('LOGISTICS_DEAL_PRICE_REQUIRED', '快速记录搬迁批次：物流成交价有值时不得为负数');
+            }
+            quote.discountedPriceCents = dealPriceCents;
+            // 人工录入始终 deal_price 与 logistics_cost 同步（物流成交价即最终实际费用）。
+            feeInput.dealPriceCents = dealPriceCents;
+            feeInput.logisticsCostCents = dealPriceCents;
           }
           const appliedAt = businessDate(v.appliedAt, '物流费用申请（登记）日期');
-          if (appliedAt === undefined) {
-            throw new ValidationError('LOGISTICS_APPLIED_AT_REQUIRED', '快速记录搬迁批次：物流费用申请（登记）日期必填');
+          if (appliedAt !== undefined) {
+            feeInput.appliedAt = appliedAt;
           }
-          // 价格必填语义：预算价必填且 > 0；物流成交价必填但允许显式 0——
-          // 缺失/空串报 DEAL_PRICE_REQUIRED（不得把缺失静默当作 0）。
-          const budgetPriceCents = parseAmountInput(v.budgetPrice);
-          if (String(v.budgetPrice ?? '').trim() === '' || budgetPriceCents <= 0n) {
-            throw new ValidationError('LOGISTICS_BUDGET_PRICE_REQUIRED', '快速记录搬迁批次：合同预算价必填且必须大于 0');
+          if (Object.values(feeInput).some((value) => value !== undefined && value !== null)) {
+            execution.recordLogisticsFee(batch.id, feeInput, actor);
           }
-          if (String(v.dealPrice ?? '').trim() === '') {
-            throw new ValidationError('DEAL_PRICE_REQUIRED', '快速记录搬迁批次：物流成交价必填（允许为 0，但必须显式填写）');
-          }
-          const dealPriceCents = parseAmountInput(v.dealPrice);
-          if (dealPriceCents < 0n) {
-            throw new ValidationError('LOGISTICS_DEAL_PRICE_REQUIRED', '快速记录搬迁批次：物流成交价不得为负数');
-          }
-          const batch = execution.createBatch(projectId, actor);
-          execution.updateBatchQuote(batch.id, {
-            planTransportDate,
-            transportCompany: optional(v.transportCompany) ?? null,
-            originalPriceCents: budgetPriceCents,
-            discountedPriceCents: dealPriceCents,
-          }, actor);
-          execution.recordLogisticsFee(batch.id, {
-            appliedAt,
-            budgetPriceCents,
-            dealPriceCents,
-            logisticsCostCents: dealPriceCents,
-          }, actor);
+          execution.updateBatchQuote(batch.id, quote, actor);
           break;
         }
         case 'instrument': this.executionService().registerInstrument(projectId,{name:text(v.name),manufacturer:optional(v.manufacturer),model:optional(v.model),serviceLevel:optional(v.serviceLevel),serialNo:optional(v.serialNo),batchId:optional(v.batchId),ups:requiredBoolean(v.ups, 'UPS'),qrRequested:requiredBoolean(v.qrRequested, '二维码申请')},actor); break;
@@ -1158,11 +1163,35 @@ export class WorkbenchFacade {
           new ServiceOrderService(this.orders, this.projects).recordOrder({orderType,serviceOrderNo:text(v.serviceOrderNo),orderedAt:businessDate(v.orderedAt,'开单日期') ?? '',engineer:text(v.engineer),customerName:orderCustomerName,projectId:projectId || null,note:optional(v.note)},actor); break;
         }
         case 'logistics': {
-          // 与快速 batch 同口径：物流成交价必填但允许显式 0（缺失/空串报错，不静默当 0）。
-          if (String(v.dealPrice ?? '').trim() === '') {
-            throw new ValidationError('DEAL_PRICE_REQUIRED', '记录物流费用：物流成交价必填（允许为 0，但必须显式填写）');
+          // 记录物流费用（部分费用语义）：全部字段可选；空金额不得转 0、空日期不得
+          // 默认当天；dealPrice 有值时与 logisticsCost 同步（物流成交价即最终实际费用）。
+          const feeInput: LogisticsFeeInput = {};
+          const appliedAt = businessDate(v.appliedAt, '物流费用申请（登记）日期');
+          if (appliedAt !== undefined) {
+            feeInput.appliedAt = appliedAt;
           }
-          this.executionService().recordLogisticsFee(text(v.batchId),{appliedAt:businessDate(v.appliedAt,'物流费用申请（登记）日期') ?? '',budgetPriceCents:parseAmountInput(v.budgetPrice),dealPriceCents:parseAmountInput(v.dealPrice),logisticsCostCents:parseAmountInput(v.logisticsCost)},actor); break;
+          const budgetPriceRaw = optional(v.budgetPrice);
+          if (budgetPriceRaw !== undefined) {
+            const budgetPriceCents = parseAmountInput(budgetPriceRaw);
+            if (budgetPriceCents <= 0n) {
+              throw new ValidationError('LOGISTICS_BUDGET_PRICE_REQUIRED', '记录物流费用：合同预算价有值时必须大于 0');
+            }
+            feeInput.budgetPriceCents = budgetPriceCents;
+          }
+          const dealPriceRaw = optional(v.dealPrice);
+          if (dealPriceRaw !== undefined) {
+            const dealPriceCents = parseAmountInput(dealPriceRaw);
+            if (dealPriceCents < 0n) {
+              throw new ValidationError('LOGISTICS_DEAL_PRICE_REQUIRED', '记录物流费用：物流成交价有值时不得为负数');
+            }
+            feeInput.dealPriceCents = dealPriceCents;
+            feeInput.logisticsCostCents = dealPriceCents;
+          }
+          if (!Object.values(feeInput).some((value) => value !== undefined && value !== null)) {
+            throw new ValidationError('LOGISTICS_FEE_EMPTY', '记录物流费用：至少需要填写一项费用信息');
+          }
+          this.executionService().recordLogisticsFee(text(v.batchId), feeInput, actor);
+          break;
         }
         case 'acceptance': this.projectService().markAcceptance(projectId,text(v.reportDate)); break;
         case 'invoice': this.financialService().recordInvoice(projectId,{invoicedAt:businessDate(v.invoicedAt,'掉票日期') ?? '',amountCents:parseAmountInput(v.amount)},actor); break;
@@ -1218,13 +1247,13 @@ export class WorkbenchFacade {
 
   /**
    * 编辑搬迁批次（v2 batch_edit，同一事务内原子落库）：
-   * - 计划运输日期/运输公司写批次；
-   * - 合同预算价 → batch.originalPriceCents + fee.budgetPriceCents；
+   * - 计划运输日期/运输公司写批次（undefined=保持；null/空串=清空）；
+   * - 合同预算价 → batch.originalPriceCents + fee.budgetPriceCents（undefined=保持；null=清空）；
    * - 物流成交价 → batch.discountedPriceCents + fee.dealPriceCents + fee.logisticsCostCents
-   *   （物流成交价即最终实际费用，updateLogisticsFee 时同时覆盖实际费用口径）。
-   * - 不允许修改 appliedAt：契约不含该字段，updateLogisticsFee 亦不更新申请（登记）时间，
-   *   编辑前后归属月份不变。
-   * - 历史批次无 fee 时编辑价格明确报错（不虚构申请时间创建费用）；仅批次字段仍可编辑。
+   *   （物流成交价即最终实际费用；undefined=保持；null=清空）；
+   * - appliedAt（费用登记日期）可补、改、清空（修改影响报表归属月份）；
+   * - 费用 upsert seam：缺 fee 时按需创建部分费用（仅提交 null/undefined 时不虚构记录），
+   *   已有 fee 时部分更新（undefined 字段保持现值）。
    */
   private writeEditBatch(edit: BatchEditPayload): { projectId: string; batchId: string } {
     let projectId = '';
@@ -1237,6 +1266,7 @@ export class WorkbenchFacade {
       }
       projectId = batch.projectId;
       const quote: BatchQuoteInput = {};
+      const feeInput: LogisticsFeeInput = {};
       if (edit.planTransportDate !== undefined) {
         const raw = text(edit.planTransportDate);
         quote.planTransportDate = raw === '' ? null : raw;
@@ -1244,31 +1274,41 @@ export class WorkbenchFacade {
       if (edit.transportCompany !== undefined) {
         quote.transportCompany = edit.transportCompany === null ? null : text(edit.transportCompany);
       }
-      if (edit.budgetPrice !== undefined || edit.dealPrice !== undefined) {
-        const fee = this.fees.findByBatchId(batch.id);
-        if (!fee) {
-          throw new ValidationError(
-            'BATCH_EDIT_REQUIRES_FEE',
-            '该批次尚无实际物流费用记录，无法编辑合同预算价/物流成交价；历史批次请先补录物流费用（编辑契约不虚构申请时间）',
-          );
+      if (edit.budgetPrice !== undefined) {
+        // 空串视为缺失报错（不得静默当 0）；null = 清空；有值覆盖（> 0 由领域校验）。
+        if (String(edit.budgetPrice).trim() === '') {
+          throw new ValidationError('LOGISTICS_BUDGET_PRICE_REQUIRED', '编辑搬迁批次：合同预算价有值时必须大于 0');
         }
-        // 价格必填语义（编辑）：undefined = 保持现值；空串 = 视为缺失报错（不得静默当 0）；
-        // 物流成交价允许显式 0（预算价仍 > 0，由领域校验）。
-        const budgetPriceCents = edit.budgetPrice !== undefined ? parseAmountInput(edit.budgetPrice) : fee.budgetPriceCents;
-        if (edit.budgetPrice !== undefined && String(edit.budgetPrice).trim() === '') {
-          throw new ValidationError('LOGISTICS_BUDGET_PRICE_REQUIRED', '编辑搬迁批次：合同预算价必填且必须大于 0');
-        }
-        if (edit.dealPrice !== undefined && String(edit.dealPrice).trim() === '') {
-          throw new ValidationError('DEAL_PRICE_REQUIRED', '编辑搬迁批次：物流成交价必填（允许为 0，但必须显式填写）');
-        }
-        const dealPriceCents = edit.dealPrice !== undefined ? parseAmountInput(edit.dealPrice) : fee.dealPriceCents;
+        const budgetPriceCents = edit.budgetPrice === null ? null : parseAmountInput(edit.budgetPrice);
         quote.originalPriceCents = budgetPriceCents;
+        feeInput.budgetPriceCents = budgetPriceCents;
+      }
+      if (edit.dealPrice !== undefined) {
+        if (String(edit.dealPrice).trim() === '') {
+          throw new ValidationError('DEAL_PRICE_REQUIRED', '编辑搬迁批次：物流成交价有值时必须显式填写（允许为 0）');
+        }
+        const dealPriceCents = edit.dealPrice === null ? null : parseAmountInput(edit.dealPrice);
         quote.discountedPriceCents = dealPriceCents;
-        execution.updateLogisticsFee(fee.id, {
-          budgetPriceCents,
-          dealPriceCents,
-          logisticsCostCents: dealPriceCents,
-        }, actor);
+        // 人工录入始终 deal_price 与 logistics_cost 同步（null/0/具体值）。
+        feeInput.dealPriceCents = dealPriceCents;
+        feeInput.logisticsCostCents = dealPriceCents;
+      }
+      if (edit.appliedAt !== undefined) {
+        const raw = text(edit.appliedAt);
+        feeInput.appliedAt = raw === '' ? null : raw;
+      }
+      const hasFeeFields = edit.appliedAt !== undefined || edit.budgetPrice !== undefined || edit.dealPrice !== undefined;
+      if (hasFeeFields) {
+        const existing = this.fees.findByBatchId(batch.id);
+        const hasFeeValue = Object.values(feeInput).some((value) => value !== undefined && value !== null);
+        if (!existing) {
+          // 缺 fee：仅当至少一个费用字段有实际值时才创建（部分费用），否则不虚构记录。
+          if (hasFeeValue) {
+            execution.recordLogisticsFee(batch.id, feeInput, actor);
+          }
+        } else {
+          execution.updateLogisticsFee(existing.id, feeInput, actor);
+        }
       }
       execution.updateBatchQuote(batch.id, quote, actor);
     });

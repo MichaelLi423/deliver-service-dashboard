@@ -1414,6 +1414,8 @@ export class WorkbenchReadRepository {
           transportCompany: nullString(r.transport_company),
           originalPrice: centsString(toBigInt(r.original_price_cents)),
           discountedPrice: centsString(toBigInt(r.discounted_price_cents)),
+          // LEFT JOIN 该批次唯一费用记录；无费用时 null（batch_id UNIQUE，不重复行）。
+          appliedAt: nullString(r.fee_applied_at),
           startedAt: nullString(r.started_at),
           createdAt: String(r.created_at),
         };
@@ -1549,7 +1551,7 @@ const SECTION_SPECS: Record<
 > = {
   batches: {
     baseSql:
-      'SELECT b.id, b.project_id, b.plan_transport_date, b.transport_company, b.original_price_cents, b.discounted_price_cents, b.started_at, b.created_at FROM batches b WHERE b.project_id = ?',
+      'SELECT b.id, b.project_id, b.plan_transport_date, b.transport_company, b.original_price_cents, b.discounted_price_cents, b.started_at, b.created_at, f.applied_at AS fee_applied_at FROM batches b LEFT JOIN logistics_fees f ON f.batch_id = b.id WHERE b.project_id = ?',
     countSql: 'SELECT COUNT(*) AS n FROM batches WHERE project_id = ?',
     orderSql: 'ORDER BY b.created_at DESC, b.id DESC',
     cursorSql: '(b.created_at, b.id) < (?, ?)',

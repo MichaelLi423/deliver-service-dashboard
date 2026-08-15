@@ -5,10 +5,8 @@ import { bootstrapDatabase, MIGRATIONS } from '../../src/domain/capabilities/loc
 import { closeDatabase, openDatabase, readSchemaVersion } from '../../src/domain/capabilities/local-data-persistence/connection';
 import { MigrationError, runMigrations, type Migration } from '../../src/domain/capabilities/local-data-persistence/migration';
 import { TEMPORARY_INSTRUMENT_FIELDS_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v16';
-import {
-  LATEST_SCHEMA_VERSION,
-  PROJECT_TAG_MIGRATION_VERSION,
-} from '../../src/domain/capabilities/local-data-persistence/schema-v17';
+import { PROJECT_TAG_MIGRATION_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v17';
+import { LATEST_SCHEMA_VERSION } from '../../src/domain/capabilities/local-data-persistence/schema-v18';
 import { cleanupTempDir, makeTempDir } from '../helpers/tmp-db';
 
 describe('schema v17：项目分类标签', () => {
@@ -16,10 +14,11 @@ describe('schema v17：项目分类标签', () => {
     const dir = makeTempDir();
     try {
       const { db } = bootstrapDatabase({ dataDir: dir });
+      // 最新版本（含 v18 物流费用字段可选迁移）；v17 标签迁移版本号仍为 17。
       expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION);
-      expect(readSchemaVersion(db)).toBe(PROJECT_TAG_MIGRATION_VERSION);
+      expect(PROJECT_TAG_MIGRATION_VERSION).toBe(17);
       expect(MIGRATIONS.map((migration) => migration.version)).toEqual(
-        Array.from({ length: PROJECT_TAG_MIGRATION_VERSION }, (_, index) => index + 1),
+        Array.from({ length: LATEST_SCHEMA_VERSION }, (_, index) => index + 1),
       );
 
       const groups = db
@@ -70,7 +69,7 @@ describe('schema v17：项目分类标签', () => {
       );
 
       runMigrations(db, { migrations: MIGRATIONS, backupDir });
-      expect(readSchemaVersion(db)).toBe(PROJECT_TAG_MIGRATION_VERSION);
+      expect(readSchemaVersion(db)).toBe(LATEST_SCHEMA_VERSION); // v17 升级后再到 v18
       expect(db.prepare('SELECT temp_no FROM projects WHERE id = ?').get('v16-project')).toMatchObject({
         temp_no: 'TP-V17',
       });

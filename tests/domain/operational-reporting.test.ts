@@ -584,6 +584,41 @@ describe('月度物流费用汇总、合同占比与历史异常批次（7.6）'
     expect(report.monthlyLogistics[0].transportCompany).toBe('物流公司乙');
   });
 
+  it('部分费用 null-safe：缺失字段不计入汇总（不得当 0/字符串 null），完整记录结果不变', () => {
+    const { facts, service } = setup();
+    facts.projects = [makeProject({ id: 'p1' }), makeProject({ id: 'p2', tempNo: 'TP-2' })];
+    facts.batches = [
+      makeBatch({ id: 'b1', projectId: 'p1', transportCompany: '物流公司甲' }),
+      makeBatch({ id: 'b2', projectId: 'p1', transportCompany: '物流公司甲' }),
+      makeBatch({ id: 'b3', projectId: 'p2', transportCompany: '物流公司乙' }),
+    ];
+    facts.logisticsFees = [
+      // 完整记录：进入原有汇总（历史完整记录结果不变）
+      makeFee({ id: 'f1', batchId: 'b1', budgetPriceCents: 10000n, dealPriceCents: 9500n, logisticsCostCents: 9000n }),
+      // 部分费用（仅登记日期）：缺失金额不得当 0 参与统计
+      makeFee({ id: 'f2', batchId: 'b2', appliedAt: '2026-07-20', budgetPriceCents: null, dealPriceCents: null, logisticsCostCents: null }),
+      // 部分费用（无 appliedAt）：无归属月份，不得进入月度汇总
+      makeFee({ id: 'f3', batchId: 'b3', appliedAt: null, budgetPriceCents: 30000n, dealPriceCents: 29000n, logisticsCostCents: 28000n }),
+    ];
+    const report = service.buildReport(JULY);
+    // 仅完整记录进入月度汇总：f2/f3 被排除
+    expect(report.monthlyLogistics).toHaveLength(1);
+    expect(report.monthlyLogistics[0]).toMatchObject({
+      transportCompany: '物流公司甲',
+      batchCount: 1, // f1 仅一笔；f2（部分）不计
+      budgetSumCents: 10000n,
+      dealSumCents: 9500n,
+      costSumCents: 9000n,
+    });
+    // 部分费用不进入合同占比（f3 无归属月份）
+    expect(report.logisticsContractRatios).toHaveLength(1);
+    // 完整费用下钻明细含全部字段；部分费用不出现
+    const details = service.getMetricDetails('monthly_logistics', JULY) as Array<{ feeId: string }>;
+    expect(details.map((d) => d.feeId)).toEqual(['f1']);
+    // 有 fee 记录（含部分）的批次不再出现在待补清单
+    expect(report.pendingLogistics.map((r) => r.batchId).sort()).toEqual([]);
+  });
+
   it('物流成交价合同占比：RMB 按固定汇率折算 USD ÷ 最新合同金额，空/0 不可算', () => {
     const { facts, service } = setup();
     facts.projects = [makeProject({ id: 'p1' })];

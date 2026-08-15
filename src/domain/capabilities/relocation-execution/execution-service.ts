@@ -458,29 +458,37 @@ export class ExecutionService {
   // ---- 3.7 实际物流费用记录 ----
 
   /**
-   * 登记物流费用：每批次仅一笔；申请（登记）时间必填默认当天、首次登记决定
-   * 归属月份；合同预算价必填且 > 0，物流成交价允许 0（>= 0，即最终实际费用，
-   * logisticsCostCents 旧列现行业务与物流成交价同值，仅历史兼容）；
-   * 物流成交价 > 合同预算价仅警告。
+   * 登记物流费用（部分费用语义）：每批次仅一笔；appliedAt/三金额均可选。
+   * - appliedAt：有值校验业务日期；不提交/空 = null（不默认当天）；
+   * - budgetPriceCents：有值必须 > 0；dealPriceCents/logisticsCostCents：有值 >= 0（允许 0）；
+   * - logisticsCostCents 旧列现行业务与物流成交价同值，仅历史兼容。
+   * 全部字段为空时调用方不应创建费用记录（仅建批次）；任一字段有值即可创建部分费用。
+   * 超预算警告仅当合同预算价与物流成交价两值均存在时判定。
    */
   recordLogisticsFee(batchId: string, input: LogisticsFeeInput, actor: ActorSnapshot): LogisticsFeeResult {
     this.requireBatch(batchId);
     if (this.fees.findByBatchId(batchId)) {
       throw new ValidationError('FEE_ALREADY_EXISTS', '该批次已登记一笔物流费用，每批次仅允许一笔');
     }
-    const appliedAt = input.appliedAt === undefined ? this.today() : input.appliedAt;
-    assertValidBusinessDate(appliedAt, '物流费用申请（登记）时间');
-    assertPositiveAmount(input.budgetPriceCents, '合同预算价');
-    assertNonNegativeAmount(input.dealPriceCents, '物流成交价');
-    assertNonNegativeAmount(input.logisticsCostCents, '实际物流费用（历史兼容，现行业务与物流成交价同值）');
+    const appliedAt = input.appliedAt === undefined ? null : input.appliedAt;
+    if (appliedAt !== null) {
+      assertValidBusinessDate(appliedAt, '物流费用申请（登记）时间');
+    }
+    assertOptionalAmount(input.budgetPriceCents, assertPositiveAmount, '合同预算价');
+    assertOptionalAmount(input.dealPriceCents, assertNonNegativeAmount, '物流成交价');
+    assertOptionalAmount(
+      input.logisticsCostCents,
+      assertNonNegativeAmount,
+      '实际物流费用（历史兼容，现行业务与物流成交价同值）',
+    );
     const now = this.now();
     const fee: LogisticsFee = {
       id: newInternalId(),
       batchId,
       appliedAt,
-      budgetPriceCents: input.budgetPriceCents,
-      dealPriceCents: input.dealPriceCents,
-      logisticsCostCents: input.logisticsCostCents,
+      budgetPriceCents: input.budgetPriceCents ?? null,
+      dealPriceCents: input.dealPriceCents ?? null,
+      logisticsCostCents: input.logisticsCostCents ?? null,
       accountId: actor.accountId,
       usernameSnapshot: actor.username,
       createdAt: now,
@@ -491,18 +499,36 @@ export class ExecutionService {
   }
 
   /**
-   * 修改物流费用金额：不改变申请（登记）时间与归属月份（TBD-14）。
-   * logisticsCostCents 旧列为历史兼容，现行业务与 dealPriceCents 同值。
+   * 修改物流费用（部分更新语义）：undefined = 保持现值；null = 清空；有值 = 覆盖。
+   * appliedAt 可补、改、清空（修改会影响报表归属月份）；logisticsCostCents 旧列
+   * 为历史兼容，现行业务与 dealPriceCents 同值。
    */
   updateLogisticsFee(feeId: string, input: LogisticsFeeInput, actor: ActorSnapshot): LogisticsFeeResult {
     const fee = this.requireFee(feeId);
-    assertPositiveAmount(input.budgetPriceCents, '合同预算价');
-    assertNonNegativeAmount(input.dealPriceCents, '物流成交价');
-    assertNonNegativeAmount(input.logisticsCostCents, '实际物流费用（历史兼容，现行业务与物流成交价同值）');
-    // 申请（登记）时间保持不变：appliedAt 不在此更新
-    fee.budgetPriceCents = input.budgetPriceCents;
-    fee.dealPriceCents = input.dealPriceCents;
-    fee.logisticsCostCents = input.logisticsCostCents;
+    if (input.appliedAt !== undefined) {
+      if (input.appliedAt !== null) {
+        assertValidBusinessDate(input.appliedAt, '物流费用申请（登记）时间');
+      }
+      fee.appliedAt = input.appliedAt;
+    }
+    if (input.budgetPriceCents !== undefined) {
+      if (input.budgetPriceCents !== null) {
+        assertPositiveAmount(input.budgetPriceCents, '合同预算价');
+      }
+      fee.budgetPriceCents = input.budgetPriceCents;
+    }
+    if (input.dealPriceCents !== undefined) {
+      if (input.dealPriceCents !== null) {
+        assertNonNegativeAmount(input.dealPriceCents, '物流成交价');
+      }
+      fee.dealPriceCents = input.dealPriceCents;
+    }
+    if (input.logisticsCostCents !== undefined) {
+      if (input.logisticsCostCents !== null) {
+        assertNonNegativeAmount(input.logisticsCostCents, '实际物流费用（历史兼容，现行业务与物流成交价同值）');
+      }
+      fee.logisticsCostCents = input.logisticsCostCents;
+    }
     fee.accountId = actor.accountId;
     fee.usernameSnapshot = actor.username;
     fee.updatedAt = this.now();
@@ -513,9 +539,10 @@ export class ExecutionService {
   /**
    * @deprecated 历史兼容：现行业务「物流成交价即最终实际费用」，logisticsCostCents 与
    * dealPriceCents 恒同值，本差异恒为 0；仅对历史三口径数据保留计算，不破坏调用方。
+   * 部分费用（金额为空）按 0 参与计算，仅在完整费用上有业务意义。
    */
   getLogisticsFeeDifference(fee: LogisticsFee): bigint {
-    return fee.dealPriceCents - fee.logisticsCostCents;
+    return (fee.dealPriceCents ?? 0n) - (fee.logisticsCostCents ?? 0n);
   }
 
   // ---- 内部辅助 ----
@@ -569,7 +596,8 @@ export class ExecutionService {
   }
 
   private dealOverBudgetWarning(fee: LogisticsFee): string | null {
-    if (fee.dealPriceCents > fee.budgetPriceCents) {
+    // 超预算警告仅当合同预算价与物流成交价两值均存在时判定（部分费用不提示）。
+    if (fee.budgetPriceCents !== null && fee.dealPriceCents !== null && fee.dealPriceCents > fee.budgetPriceCents) {
       return '物流成交价大于合同预算价，已允许保存（不自动创建项目提醒）';
     }
     return null;
@@ -596,4 +624,17 @@ function assertNonNegativeAmount(cents: bigint | null | undefined, fieldName: st
   if (cents === null || cents === undefined || cents < 0n) {
     throw new ValidationError('AMOUNT_NON_NEGATIVE', `${fieldName} 不得为负数`);
   }
+}
+
+/**
+ * 可选金额校验：undefined / null 直接通过（不提交或清空）；有值才执行规则校验
+ * （部分费用语义：空金额不得转 0、有值必须满足约束）。
+ */
+function assertOptionalAmount(
+  cents: bigint | null | undefined,
+  rule: (cents: bigint | null | undefined, fieldName: string) => asserts cents is bigint,
+  fieldName: string,
+): void {
+  if (cents === undefined || cents === null) return;
+  rule(cents, fieldName);
 }
