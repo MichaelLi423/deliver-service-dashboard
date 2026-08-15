@@ -651,10 +651,15 @@ describe('工作台 application facade → 领域服务 → SQLite（v2 有界 A
       projectId,
       action: { type: 'batch', projectId, values: { planTransportDate: '', transportCompany: '', appliedAt: '2026-08-09', budgetPrice: '', dealPrice: '' } },
     });
-    const partialBatch = facade.v2SectionPage({ projectId, kind: 'batches' }).rows[0] as Extract<
-      WorkbenchV2SectionRow,
-      { kind: 'batches' }
-    >;
+    // 同毫秒创建的批次 created_at 相同，rows 排序按随机 id 决胜，不能依赖 rows[0]；
+    // 按费用记录定位该批次，再经真实 section 链路读取行 DTO。
+    const feeBatch = db
+      .prepare('SELECT batch_id FROM logistics_fees WHERE applied_at = ? AND batch_id IN (SELECT id FROM batches WHERE project_id = ?)')
+      .get('2026-08-09', projectId) as { batch_id: string } | undefined;
+    expect(feeBatch).toBeTruthy();
+    const partialBatch = facade.v2SectionPage({ projectId, kind: 'batches' }).rows.find(
+      (r) => r.id === feeBatch!.batch_id,
+    ) as Extract<WorkbenchV2SectionRow, { kind: 'batches' }>;
     expect(partialBatch.appliedAt).toBe('2026-08-09');
     const partialFee = prepareReadBigInt(
       db,
