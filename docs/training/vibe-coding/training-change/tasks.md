@@ -9,7 +9,7 @@
 | 3. Red | 只加失败测试：domain/integration 补 0 与大整数；main IPC 补 `set_window_days` 0 与非法值；renderer 补控件/保存/日期断言 | red-test `f771667` | 预期失败：main 2 项 `V2_MUTATION_UNKNOWN`、renderer 1 项找不到"临期窗口"控件 |
 | 4. preset-failure | 预设错误实现：IPC op、facade、UI 全部接通，但 facade 校验写成 `days <= 0` 拒绝 0 | preset-failure `0554164` | 预期失败：0 用例被"必须不小于 1"拒绝 |
 | 5. Green | 最小修复：facade/领域校验改为 0..`Number.MAX_SAFE_INTEGER` 非负安全整数；UI 保存前不生效、保存后立即刷新、行内日期可见；spec 同步加固 | green-final `d304bd5` | 4 个聚焦文件 95 tests、全量 93 files/1076 tests 通过 |
-| 6. review/verify | 代码评审 + 规范核对 + strict 结构校验 | green-final `d304bd5` 之后的证据 | [../review-report.md](../review-report.md)、[../verify-report.md](../verify-report.md)、[evidence.md](./evidence.md) |
+| 6. review/verify | 代码评审 + 规范核对 + strict 结构校验 | green-final `d304bd5` 之后的证据 | [evidence.md](./evidence.md) |
 
 ## 教学要点
 

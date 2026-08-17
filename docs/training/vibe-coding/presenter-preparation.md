@@ -43,9 +43,9 @@
 
 - [ ] 确认四阶段顺序与 hash：baseline `76747c1` → red-test `f771667` → preset-failure `0554164` → green-final `d304bd5`；`380ad38` 是叙事外中间提交，不作为阶段展示。四阶段只是历史证据引用，现场不切换快照、不重新运行。
 - [ ] 确认 OpenCode 中已有历史会话可打开、五个关键节点（需求澄清 → 规格/计划 → Red → Green → Review/Verify）可跳转；确认会话与全部材料中敏感信息已脱敏。
-- [ ] 准备失败兜底：已脱敏讲师笔记与现有证据摘要（[review-report.md](./review-report.md)、[verify-report.md](./verify-report.md)、[training-change/](./training-change/README.md) 夹具），历史会话无法打开时用于替代讲解；不新增敏感截图或数据。
+- [ ] 准备失败兜底：已脱敏讲师笔记与现有证据摘要（[training-change/evidence.md](./training-change/evidence.md)、[training-change/](./training-change/README.md) 夹具），历史会话无法打开时用于替代讲解；不新增敏感截图或数据。
 - [ ] 按 [environment-checklist.md](./environment-checklist.md) 在演示机运行自检命令并记录真实结果；历史 green-final 证据（95 聚焦 / 1076 全量 / strict / e2e build / 布局 1/1）来自 2026-08-10 macOS arm64，只能作为历史证据引用，不声称刚刚重跑。
-- [ ] 用浏览器打开 `slides/index.html`，检查中文、代码块与表格在投影比例下可读，并确认离线可翻页。
+- [ ] 用浏览器打开 `slides/0814讲演.html`，检查中文、代码块与表格在投影比例下可读，并确认离线可翻页。
 - [ ] 逐页核对 26 页讲解卡与浏览器课件页码一致。
 
 ### T-30 分钟：现场技术检查
@@ -254,7 +254,7 @@
 - **建议口播**：strict 通过 ≠ 行为正确，后面四层证据再讲。
 - **转场句**："MCP 收个尾。"
 - **不要展开**：每步命令全参。
-- **对应资料**：[verify-report.md](./verify-report.md)
+- **对应资料**：[training-change/evidence.md](./training-change/evidence.md)
 
 ### 页 20 MCP 边界
 
@@ -284,7 +284,7 @@
 - **建议口播**：每一层单独都不够，叠起来才叫闭环；机器结果别读成"全都对"。
 - **转场句**："方法讲完，用真实需求走一遍。"
 - **不要展开**：CI 配置、工具链细节。
-- **对应资料**：[verify-report.md](./verify-report.md)、[review-report.md](./review-report.md)
+- **对应资料**：[training-change/evidence.md](./training-change/evidence.md)
 
 ### 页 23 演示目标
 
@@ -362,7 +362,7 @@
 | --- | --- | --- | --- |
 | 投屏不可用 | 切本机屏幕 | 用讲解卡 + 浏览器课件继续 | 临时装驱动、暴露个人桌面 |
 | 字体/中文乱码 | 切换本机已有浏览器 | 按页码继续，不现场改字体 | 下载未知字体、联网安装 |
-| 浏览器异常 | 用另一款已安装浏览器直接打开 `slides/index.html` | 讲师屏保留计时器 | 现场重做投影片 |
+| 浏览器异常 | 用另一款已安装浏览器直接打开 `slides/0814讲演.html` | 讲师屏保留计时器 | 现场重做投影片 |
 | 静态材料缺失/错序 | 跳到讲解卡的口播文字，口头描述素材内容 | 记录缺失项，课后补齐 | 现场调用 Agent 补素材 |
 | 历史会话打不开 | 使用已脱敏讲师笔记与现有证据摘要 | 讲五节点与三观察点，结束回页 25 | 重新调用 Agent、重跑历史命令 |
 | 测试超时/终端无响应 | 停止等待，引用历史证据摘要 | 声明不再现场重跑 | 反复重试、声称通过 |
@@ -392,7 +392,7 @@
 - 把"计划 → 实现 → 复核"抽象阶段说成 oh-my-opencode-slim 的角色名——真实角色是 Orchestrator/Explorer/Oracle/Council/Librarian/Designer/Fixer（Observer 可选）。
 - 把 skills 安装命令现场执行、或同时用两种安装方式造成重复注册。
 - 不讲 Council 多模型投票的 token 成本，让学员误以为编排零成本。
-- 把最后三项最小修正后"已执行第三轮独立 Oracle 评审"——没有该轮评审（见 [review-report.md](./review-report.md)）；2026-08-13 终审是课程内容终审，不是代码分支第三轮评审。
+- 把最后三项最小修正后"已执行第三轮独立 Oracle 评审"——没有该轮评审（见 [training-change/evidence.md](./training-change/evidence.md)）；2026-08-13 终审是课程内容终审，不是代码分支第三轮评审。
 
 ## 8. 彩排记录模板
 

@@ -60,7 +60,7 @@
   - **两种入口**：终端 CLI（人手动操作）；聊天命令（会话内让 Agent 走流程）。命令形态会随宿主工具不同而变化，本课只展示本仓库实际命令：`.opencode/commands/` 里已有的连字符形式 `/opsx-propose`、`/opsx-apply`、`/opsx-verify`、`/opsx-archive`、`/opsx-explore`。
   - **artifacts**：proposal（提案）、spec（规格：SHALL + 场景）、design（设计决策）、tasks（最小步骤）。changes 放进行中，归档进 archive。
   - **核心流程**：explore 摸清现状 → propose 生成提案与规格 → apply 按规格实现 → archive 完成后归档。
-  - **verify**：本仓库 `.opencode/commands/opsx-verify.md` 是项目已有的启发式命令——读取 artifacts、搜索代码，做完整性/正确性/连贯性的启发式判断；不需要 profile 前置，也不会自动跑项目测试。本课不声称 green-final 阶段真实运行过它；现场展示的是**历史人工/等效规范映射**（见 [verify-report.md](./verify-report.md)）。
+  - **verify**：本仓库 `.opencode/commands/opsx-verify.md` 是项目已有的启发式命令——读取 artifacts、搜索代码，做完整性/正确性/连贯性的启发式判断；不需要 profile 前置，也不会自动跑项目测试。本课不声称 green-final 阶段真实运行过它；现场展示的是**历史人工/等效规范映射**（见 [training-change/evidence.md](./training-change/evidence.md)）。
   - **strict 只验结构**：`validate --strict` 的"Change is valid"只校验 CLI 校验到的规格格式、requirement/scenario 结构与可解析性，**不证明 proposal/design/tasks 完成度，也不校验行为符合性**。行为由机器执行证据与 code review 共同支持（四层证据见 [workflow-checklist.md](./workflow-checklist.md)）。本课 strict 输出是 2026-08-10 历史记录：原 change 已归档，当前 HEAD 不能重跑；training-change 是静态夹具不被 CLI 扫描，只能人工阅读。
 
 ## MCP：只讲边界

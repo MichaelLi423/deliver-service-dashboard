@@ -68,4 +68,4 @@
 - 工具职责与边界：[tool-roles.md](./tool-roles.md)
 - 演示执行细节：[demo-runbook.md](./demo-runbook.md)
 - 词汇定义：[CONTEXT.md](./CONTEXT.md)
-- 历史评审与核对证据：[review-report.md](./review-report.md)、[verify-report.md](./verify-report.md)
+- 历史证据摘要（评审与核对结论）：[training-change/evidence.md](./training-change/evidence.md)

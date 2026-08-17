@@ -38,10 +38,9 @@
 | [demo-runbook.md](./demo-runbook.md) | 现场演示操作提纲：课前确认、关键节点跳转、时间控制、历史证据口径与失败兜底 |
 | [qa-template.md](./qa-template.md) | 课前收集、共性问题、待答问题池与内部附件注入点 |
 | [CONTEXT.md](./CONTEXT.md) | 课程特定语言词汇表（纯词汇表，术语唯一依据） |
-| [review-report.md](./review-report.md) | 历史代码评审记录（培训夹具证据，非当前产品评审） |
-| [verify-report.md](./verify-report.md) | 历史规范核对记录（培训夹具证据） |
+| [training-change/evidence.md](./training-change/evidence.md) | 统一历史证据摘要（阶段证据、代码评审与规范核对结论） |
 | [training-change/README.md](./training-change/README.md) | 培训夹具材料包（备课/兜底材料，非现场主要展示入口） |
-| [slides/index.html](./slides/index.html) | 可离线直接打开的 26 页浏览器幻灯片 |
+| [slides/0814讲演.html](./slides/0814讲演.html) | 可离线直接打开的 26 页浏览器幻灯片 |
 | [slides/README.md](./slides/README.md) | 演讲操作与验证说明 |
 
 业务领域术语以仓库根目录 [CONTEXT.md](../../../CONTEXT.md) 为准；上下文关系见 [CONTEXT-MAP.md](../../../CONTEXT-MAP.md)。
