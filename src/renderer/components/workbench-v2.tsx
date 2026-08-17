@@ -3230,12 +3230,14 @@ function BoundedSectionPicker({
   kind,
   value,
   onChange,
+  onSelect,
   required = false,
 }: {
   projectId: string;
   kind: "instruments" | "batches";
   value: string;
   onChange: (value: string) => void;
+  onSelect?: (row: WorkbenchV2SectionPageDto["rows"][number] | null) => void;
   required?: boolean;
 }): JSX.Element {
   const [page, setPage] = useState<WorkbenchV2SectionPageDto | null>(null);
@@ -3273,7 +3275,11 @@ function BoundedSectionPicker({
         id={`v2-${kind}-picker`}
         value={value}
         required={required}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          onChange(nextValue);
+          onSelect?.(page?.rows.find((row) => row.id === nextValue) ?? null);
+        }}
       >
         <option value="">请选择当前页记录</option>
         {page?.rows.map((row) => (
@@ -3451,6 +3457,7 @@ function IndependentModuleV2({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [instrumentId, setInstrumentId] = useState("");
+  const [serialNo, setSerialNo] = useState("");
   const [qrTypes, setQrTypes] = useState<string[]>(["A", "B"]);
   const sequence = useRef(0);
   async function load(cursor: string | null): Promise<void> {
@@ -3513,7 +3520,13 @@ function IndependentModuleV2({
               {project ? (
                 <div className="optional-link full">
                   <span>可选关联</span>
-                  <BoundedSectionPicker projectId={project.id} kind="instruments" value={instrumentId} onChange={setInstrumentId} />
+                  <BoundedSectionPicker
+                    projectId={project.id}
+                    kind="instruments"
+                    value={instrumentId}
+                    onChange={setInstrumentId}
+                    onSelect={(row) => setSerialNo(row?.kind === "instruments" ? row.serialNo ?? "" : "")}
+                  />
                   <small>可关联当前项目仪器，也可以留空独立登记。</small>
                 </div>
               ) : (
@@ -3528,7 +3541,13 @@ function IndependentModuleV2({
                 required
               />
               <Field name="newSiteAddress" label="新址地址" required />
-              <Field name="serialNo" label="序列号" required />
+              <Field
+                name="serialNo"
+                label="序列号"
+                value={serialNo}
+                onChange={(event) => setSerialNo(event.target.value)}
+                required
+              />
               <Field name="accountId" label="Account ID" required />
               <Field
                 name="updatedAt"

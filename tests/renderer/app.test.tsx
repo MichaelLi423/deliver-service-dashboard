@@ -1120,6 +1120,21 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(await screen.findByText('记录已保存')).toHaveAttribute('role', 'status');
   });
 
+  it('选择搬迁仪器后自动回填序列号，仍可手工编辑并在清空选择时清空', async () => {
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
+    fireEvent.click(screen.getByRole('button', { name: '序列号地址更新' }));
+    const dialog = screen.getByRole('dialog', { name: '序列号地址更新' });
+    const instrumentPicker = within(dialog).getByRole('combobox', { name: '搬迁仪器' });
+    const serialInput = within(dialog).getByRole('textbox', { name: /序列号.*必填/ });
+    await within(dialog).findByRole('option', { name: 'SN-1 · 仪器 1' });
+    fireEvent.change(instrumentPicker, { target: { value: 'i-1' } });
+    expect(serialInput).toHaveValue('SN-1');
+    fireEvent.change(serialInput, { target: { value: '手工序列号' } });
+    expect(serialInput).toHaveValue('手工序列号');
+    fireEvent.change(instrumentPicker, { target: { value: '' } });
+    expect(serialInput).toHaveValue('');
+  });
+
   it('二维码申请不选任何类型时阻止提交并就地提示', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '二维码申请' }));
