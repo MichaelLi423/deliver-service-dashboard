@@ -386,7 +386,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     request: Record<string, unknown>;
   }> = [
     {
-      kind: 'acceptance', label: '验收记录',
+      kind: 'acceptance', label: '验收报告',
       row: { kind: 'acceptance', id: 'p-1', projectId: 'p-1', customerName: '客户 1', ecc: 'ECC-000001', tempNo: 'TMP-000001', acceptanceReportDate: '2026-08-09', businessDate: '2026-08-09', createdAt: '2026-08-09T00:00:00Z' },
       request: { kind: 'acceptance', projectId: 'p-1', expectedRevision: 7 },
     },
@@ -558,7 +558,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   it('验收事实不提供原位编辑，有后续依赖时明确保留原事实', async () => {
     const acceptance: WorkbenchV2HistoryRow = { kind: 'acceptance', id: 'p-1', projectId: 'p-1', customerName: '客户 1', ecc: 'ECC-000001', tempNo: 'TMP-000001', acceptanceReportDate: '2026-08-08', businessDate: '2026-08-08', createdAt: '2026-08-08T00:00:00Z' };
     const api = mockApi({ v2HistoryPage: vi.fn().mockImplementation((request: { kind: WorkbenchV2HistoryPageDto['kind'] }) => Promise.resolve({ businessRevision: 1, kind: request.kind, rows: request.kind === 'acceptance' ? [acceptance] : [], total: request.kind === 'acceptance' ? 1 : 0, nextCursor: null, limit: 50 })) });
-    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' })); const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' }); fireEvent.click(within(dialog).getByRole('tab', { name: '验收记录' }));
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' })); const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' }); fireEvent.click(within(dialog).getByRole('tab', { name: '验收报告' }));
     const row = await within(dialog).findByRole('row', { name: /客户 1.*验收报告/ }); expect(within(row).queryByRole('button', { name: '编辑' })).not.toBeInTheDocument(); expect(row).toHaveTextContent('验收已有后续依赖时应保留原事实，当前不支持原位修改。'); expect(row).not.toHaveTextContent('从项目资料继续更正');
   });
 
@@ -1197,6 +1197,35 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2Delete).toHaveBeenCalledWith({ kind: 'service_order', id: 'order-1', expectedRevision: 1 }));
   });
 
+  it('历史侧栏提供验收报告入口，并按报告形成日期范围查询跨项目记录', async () => {
+    const acceptance: WorkbenchV2HistoryRow = {
+      kind: 'acceptance', id: 'p-acceptance', projectId: 'p-acceptance', customerName: '验收客户',
+      ecc: 'ECC-ACCEPTANCE', tempNo: 'TMP-ACCEPTANCE', acceptanceReportDate: '2026-08-18',
+      businessDate: '2026-08-18', createdAt: '2026-08-18T00:00:00Z',
+    };
+    const api = mockApi({
+      v2HistoryPage: vi.fn().mockImplementation((request: { kind: WorkbenchV2HistoryPageDto['kind'] }) => Promise.resolve({
+        businessRevision: 4, kind: request.kind, rows: request.kind === 'acceptance' ? [acceptance] : [],
+        total: request.kind === 'acceptance' ? 1 : 0, nextCursor: null, limit: 50,
+      })),
+    });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+    render(<App />);
+    await screen.findByRole('heading', { name: /项目队列/ });
+    fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' }));
+    const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' });
+    fireEvent.click(within(dialog).getByRole('tab', { name: '验收报告' }));
+    fireEvent.change(within(dialog).getByLabelText('起始日期'), { target: { value: '2026-08-01' } });
+    fireEvent.change(within(dialog).getByLabelText('截止日期'), { target: { value: '2026-08-31' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '查看记录' }));
+
+    await waitFor(() => expect(api.v2HistoryPage).toHaveBeenLastCalledWith({
+      kind: 'acceptance', from: '2026-08-01', to: '2026-08-31', cursor: null, limit: 50,
+    }));
+    const row = await within(dialog).findByRole('row', { name: /验收客户.*ECC-ACCEPTANCE.*验收报告.*2026-08-18/ });
+    expect(row).toBeInTheDocument();
+  });
+
   it('历史抽屉明确列出八类删除记录并分别走关联与独立读取路由', async () => {
     const api = mockApi();
     Object.defineProperty(window, 'workbench', { value: api, configurable: true });
@@ -1204,7 +1233,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' }));
     const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' });
-    for (const label of ['物流费用', '搬迁仪器', '开单记录', '验收记录', 'Account ID 申请', '损坏维修', '序列号地址更新', '二维码申请']) {
+    for (const label of ['物流费用', '搬迁仪器', '开单记录', '验收报告', 'Account ID 申请', '损坏维修', '序列号地址更新', '二维码申请']) {
       expect(within(dialog).getByRole('tab', { name: label })).toBeInTheDocument();
     }
     await waitFor(() => expect(api.v2HistoryPage).toHaveBeenCalledWith(expect.objectContaining({ kind: 'service_order' })));
@@ -1234,7 +1263,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '浏览全部记录' }));
     const dialog = screen.getByRole('dialog', { name: '浏览往期与全部记录' });
-    fireEvent.click(within(dialog).getByRole('tab', { name: '验收记录' }));
+    fireEvent.click(within(dialog).getByRole('tab', { name: '验收报告' }));
     fireEvent.click(await within(dialog).findByRole('button', { name: '删除' }));
     await waitFor(() => expect(api.v2Delete).toHaveBeenCalledWith({ kind: 'acceptance', projectId: 'p-1', expectedRevision: 3 }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('项目已有掉票历史，不能删除验收记录');

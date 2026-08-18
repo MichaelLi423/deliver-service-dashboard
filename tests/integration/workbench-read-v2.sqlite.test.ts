@@ -1324,17 +1324,32 @@ describe('工作台 v2 跨项目历史分页（historyPage）', () => {
     closeDatabase(db);
   });
 
-  it('acceptance（仅已验收项目）与 ship_to_request（无项目上下文）：分页与筛选', () => {
+  it('acceptance 跨项目按报告形成日期筛选并返回上下文；ship_to_request 保持无项目上下文', () => {
     const ctx = makeFacade();
     const { db, facade, projectId } = ctx;
-    // 标记验收 → 待掉票
+    const second = facade.v2Mutate({
+      op: 'create_project',
+      payload: {
+        intent: 'formal', customerName: '验收客户乙', ecc: 'ECC-ACCEPT-002', region: 'North',
+        instrumentCount: 1, contractAmount: '50000',
+      },
+    });
+    const secondProjectId = second.changed!.projectId!;
+    // 两个项目分别标记验收 → 待掉票；日期筛选应只返回范围内项目。
     facade.v2Mutate({ op: 'submit_action', projectId, action: { type: 'acceptance', projectId, values: { reportDate: '2026-08-15' } } });
-    const acc = facade.v2HistoryPage({ kind: 'acceptance' });
+    facade.v2Mutate({ op: 'submit_action', projectId: secondProjectId, action: { type: 'acceptance', projectId: secondProjectId, values: { reportDate: '2026-08-20' } } });
+    expect(facade.v2HistoryPage({ kind: 'acceptance' }).total).toBe(2);
+    const acc = facade.v2HistoryPage({ kind: 'acceptance', from: '2026-08-16', to: '2026-08-20' });
     expect(acc.total).toBe(1);
     const accRow = acc.rows[0] as Extract<typeof acc.rows[number], { kind: 'acceptance' }>;
-    expect(accRow.id).toBe(projectId); // v2Delete acceptance 使用 projectId
-    expect(accRow.acceptanceReportDate).toBe('2026-08-15');
-    expect(facade.v2HistoryPage({ kind: 'acceptance', from: '2026-08-16' }).total).toBe(0);
+    expect(accRow).toMatchObject({
+      id: secondProjectId,
+      projectId: secondProjectId,
+      customerName: '验收客户乙',
+      ecc: 'ECC-ACCEPT-002',
+      acceptanceReportDate: '2026-08-20',
+      businessDate: '2026-08-20',
+    });
 
     // ship_to_request：无项目上下文
     const created = facade.createShipToRequest({ customerName: '历史 ShipTo 客户', newSiteAddress: '新址' });

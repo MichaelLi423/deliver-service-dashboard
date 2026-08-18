@@ -4465,7 +4465,7 @@ function InvoiceMutationForm({
 type HistoryKind = WorkbenchV2HistoryKind | WorkbenchV2IndependentKind;
 const HISTORY_KINDS: Array<[HistoryKind, string]> = [
   ["batch", "物流费用"], ["instrument", "搬迁仪器"], ["activity", "到访记录"], ["service_order", "开单记录"],
-  ["invoice", "掉票记录"], ["damage", "损坏维修"], ["acceptance", "验收记录"], ["ship_to_request", "Account ID 申请"],
+  ["invoice", "掉票记录"], ["damage", "损坏维修"], ["acceptance", "验收报告"], ["ship_to_request", "Account ID 申请"],
   ["serial_address", "序列号地址更新"], ["qr_request", "二维码申请"],
 ];
 
