@@ -336,6 +336,29 @@ describe('8.8 确定性状态重建', () => {
     })).toMatchObject({ ok: true, status: 'pending_invoice', reason: 'auto_acceptance' });
   });
 
+  it('维修中（under_repair）不被任何导入事实覆盖（含已取消）', () => {
+    // 已取消事实：仍保持维修中
+    const cancelled = resolveImportedStatus({
+      entryAt: '2026-07-01', executionStarted: true,
+      actualInstallDoneAt: '2026-07-10', acceptanceReportDate: '2026-07-15', cancelledAt: '2026-07-20',
+    }, 'under_repair');
+    expect(cancelled).toMatchObject({ ok: true, status: 'under_repair', reason: 'unchanged' });
+
+    // 执行/验收/装机等前进事实：仍保持维修中
+    const advanced = resolveImportedStatus({
+      entryAt: '2026-07-01', executionStarted: true,
+      actualInstallDoneAt: '2026-07-10', acceptanceReportDate: '2026-07-15', cancelledAt: null,
+    }, 'under_repair');
+    expect(advanced).toMatchObject({ ok: true, status: 'under_repair', reason: 'unchanged' });
+
+    // 无任何事实：仍保持维修中
+    const plain = resolveImportedStatus({
+      entryAt: null, executionStarted: false,
+      actualInstallDoneAt: null, acceptanceReportDate: null, cancelledAt: null,
+    }, 'under_repair');
+    expect(plain).toMatchObject({ ok: true, status: 'under_repair', reason: 'unchanged' });
+  });
+
   it('导入状态真实变化与项目写入同事务记录最小转换审计', () => {
     const dir = makeTempDir();
     try {

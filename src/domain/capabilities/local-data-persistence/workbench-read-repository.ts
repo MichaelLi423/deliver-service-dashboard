@@ -55,6 +55,7 @@ const STAGE_STATUSES: ProjectStatus[] = [
   'pending_entry',
   'pending_execution',
   'executing',
+  'under_repair',
   'pending_acceptance',
   'pending_invoice',
   'completed',

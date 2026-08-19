@@ -5,6 +5,7 @@ import {
   type TransitionContext,
 } from '../../src/domain/capabilities/relocation-project-lifecycle/lifecycle';
 import type { ProjectStatusOrCancelled } from '../../src/domain/capabilities/relocation-project-lifecycle/states';
+import { isLegalStatus } from '../../src/domain/capabilities/relocation-project-lifecycle/states';
 import { expectReason, expectRejected, expectStatus } from '../helpers/state-assert';
 
 function ctx(overrides: Partial<TransitionContext> = {}): TransitionContext {
@@ -284,6 +285,93 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
     expectStatus(result, 'executing');
     expectReason(result, 'execution_started');
   });
+
+  it('维修中（under_repair）为合法主状态：仅由人工选择进入/离开', () => {
+    // 合法状态枚举包含维修中
+    expect(isLegalStatus('under_repair')).toBe(true);
+
+    // 人工进入：执行中 → 维修中
+    const enter = resolveStatus(
+      ctx({ currentStatus: 'executing', requestedStatus: 'under_repair' }),
+    );
+    expectStatus(enter, 'under_repair');
+    expectReason(enter, 'manual');
+
+    // 人工离开：维修中 → 执行中
+    const leave = resolveStatus(
+      ctx({ currentStatus: 'under_repair', requestedStatus: 'executing' }),
+    );
+    expectStatus(leave, 'executing');
+    expectReason(leave, 'manual');
+  });
+
+  it('维修中不参与自动触发：验收报告事实不自动推进出维修中（仅人工离开）', () => {
+    const result = resolveStatus(
+      ctx({
+        currentStatus: 'under_repair',
+        requestedStatus: 'under_repair',
+        acceptanceReportDate: '2026-07-25',
+      }),
+    );
+    expectStatus(result, 'under_repair');
+    expectReason(result, 'unchanged');
+  });
+
+  it('维修中不参与自动触发：计划上门到期/实际装机完成/金额闭环均不自动进入或离开维修中', () => {
+    // 到期自动推进仅作用于待进单/待执行，维修中不因到期推进
+    const due = resolveStatus(
+      ctx({
+        currentStatus: 'under_repair',
+        requestedStatus: 'under_repair',
+        today: '2026-08-10',
+        planVisitAt: '2026-08-01',
+      }),
+    );
+    expectStatus(due, 'under_repair');
+    expectReason(due, 'unchanged');
+
+    // 实际装机完成自动触发仅作用于待进单/待执行/执行中，维修中不自动进入待验收
+    const install = resolveStatus(
+      ctx({
+        currentStatus: 'under_repair',
+        requestedStatus: 'under_repair',
+        actualInstallDoneAt: '2026-07-20',
+      }),
+    );
+    expectStatus(install, 'under_repair');
+    expectReason(install, 'unchanged');
+
+    // 金额闭环仅在待掉票/已完成之间重算，维修中不自动进入已完成
+    const closure = resolveStatus(
+      ctx({
+        currentStatus: 'under_repair',
+        requestedStatus: 'under_repair',
+        amounts: { confirmedAmountCents: 100n, finalConfirmableAmountCents: 800000n },
+      }),
+    );
+    expectStatus(closure, 'under_repair');
+    expectReason(closure, 'unchanged');
+  });
+
+  it('维修中不因执行事实触发（execution_started）自动离开，仅人工选择可离开', () => {
+    // 首次上门活动/批次开始运输的执行事实触发：维修中保持
+    const factTriggered = resolveStatus(
+      ctx({
+        currentStatus: 'under_repair',
+        requestedStatus: 'executing',
+        executionStarted: true,
+      }),
+    );
+    expectStatus(factTriggered, 'under_repair');
+    expectReason(factTriggered, 'unchanged');
+
+    // 负责人人工选择离开：维修中 → 执行中（无执行事实时走人工路径）
+    const manual = resolveStatus(
+      ctx({ currentStatus: 'under_repair', requestedStatus: 'executing' }),
+    );
+    expectStatus(manual, 'executing');
+    expectReason(manual, 'manual');
+  });
 });
 
 describe('计划上门日期到期自动推进（tasks 3.1 / design D5 转换表）', () => {
@@ -539,5 +627,18 @@ describe('删除执行/验收事实后的状态重算（resolveStatusAfterFactDe
     );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.errors.join('；')).toContain('已完成');
+  });
+
+  it('维修中删除执行/验收事实后保持不变（仅人工离开）', () => {
+    const result = resolveStatusAfterFactDeletion(
+      base({
+        currentStatus: 'under_repair',
+        acceptanceReportDate: '2026-08-01',
+        actualInstallDoneAt: '2026-07-20',
+        executionStarted: true,
+      }),
+    );
+    expectStatus(result, 'under_repair');
+    expectReason(result, 'unchanged');
   });
 });

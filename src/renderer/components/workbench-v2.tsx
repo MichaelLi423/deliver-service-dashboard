@@ -79,6 +79,7 @@ const STATUS_LABEL: Record<ProjectStatus, string> = {
   pending_entry: "待进单",
   pending_execution: "待执行",
   executing: "执行中",
+  under_repair: "维修中",
   pending_acceptance: "待验收",
   pending_invoice: "待掉票",
   completed: "已完成",
@@ -88,6 +89,7 @@ const STAGES: AdjustableProjectStatus[] = [
   "pending_entry",
   "pending_execution",
   "executing",
+  "under_repair",
   "pending_acceptance",
   "pending_invoice",
   "completed",
@@ -1130,7 +1132,7 @@ export function WorkbenchV2({
                 setFilters((old) => ({ ...old, status: "", repair: "open" }));
               }}
             >
-              <span>维修中</span>
+              <span>未关闭维修事项</span>
               <strong>{String(overview?.metrics.openRepairProjects ?? 0)}</strong>
               <small>独立事项筛选</small>
             </button>
@@ -1837,7 +1839,7 @@ function ProjectContext({
         </div>
       </div>
       <div className="context-section">
-        <h3>状态与辨识</h3>
+        <h3>项目状态</h3>
         <div className="tag-row">
           <StatusBadge status={project.status} />
           <span

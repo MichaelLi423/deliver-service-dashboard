@@ -808,6 +808,19 @@ export function resolveImportedStatus(
   facts: StateRebuildFacts,
   currentStatus?: ProjectStatusOrCancelled,
 ): TransitionResult {
+  // 维修中为人工维护状态：任何导入事实（含已取消）均不得覆盖，保持维修中。
+  if (currentStatus === 'under_repair') {
+    return resolveStatus({
+      currentStatus: 'under_repair',
+      requestedStatus: 'under_repair',
+      actualInstallDoneAt: facts.actualInstallDoneAt,
+      acceptanceReportDate: facts.acceptanceReportDate,
+      executionStarted: facts.executionStarted,
+      formallyEntered: facts.entryAt !== null,
+      amounts: { confirmedAmountCents: 0n, finalConfirmableAmountCents: null },
+      cancel: { hasAnyInvoiceHistory: false },
+    });
+  }
   const baseline: ProjectStatusOrCancelled = facts.entryAt === null ? 'pending_entry' : 'pending_execution';
   // requestedStatus 始终由本次导入后的完整事实推导；currentStatus 仅供 lifecycle
   // 应用终态与自动触发约束，绝不能反过来吞掉新增取消/进单事实。
@@ -838,10 +851,11 @@ function statusRank(status: ProjectStatusOrCancelled): number {
     case 'pending_entry': return 0;
     case 'pending_execution': return 1;
     case 'executing': return 2;
-    case 'pending_acceptance': return 3;
-    case 'pending_invoice': return 4;
-    case 'completed': return 5;
-    case 'cancelled': return 6;
+    case 'under_repair': return 3; // 维修中为人工维护状态，导入事实不覆盖
+    case 'pending_acceptance': return 4;
+    case 'pending_invoice': return 5;
+    case 'completed': return 6;
+    case 'cancelled': return 7;
   }
 }
 

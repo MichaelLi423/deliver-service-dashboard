@@ -339,15 +339,17 @@ export type ProjectStatus =
   | 'pending_entry'
   | 'pending_execution'
   | 'executing'
+  | 'under_repair'
   | 'pending_acceptance'
   | 'pending_invoice'
   | 'completed'
   | 'cancelled';
 
 /**
- * 人工主状态调整可选的六种非终止状态。
+ * 人工主状态调整可选的七种非终止状态。
  * 取消（cancelled）只能通过 cancelProject 专用命令（须提供取消时间与原因），
  * adjustStatus 拒绝 cancelled。
+ * 维修中（under_repair）仅由人工选择进入/离开，不参与自动触发。
  */
 export type AdjustableProjectStatus = Exclude<ProjectStatus, 'cancelled'>;
 

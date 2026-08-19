@@ -79,6 +79,10 @@ import {
   OPTIONAL_LOGISTICS_FEE_MIGRATION_VERSION,
 } from './schema-v18';
 import {
+  applyUnderRepairStatusMigration,
+  UNDER_REPAIR_STATUS_MIGRATION_VERSION,
+} from './schema-v19';
+import {
   buildFinancialIntegrityHint,
   hasAnyFinancialIntegrityIssue,
   readFinancialIntegrityCounts,
@@ -211,6 +215,14 @@ export const OPTIONAL_LOGISTICS_FEE_MIGRATION: Migration = {
   up: (db) => applyOptionalLogisticsFeeMigration(db),
 };
 
+/** v19 迁移：新增项目主状态「维修中」（重建 projects 与状态转换审计表放宽 status CHECK）。 */
+export const UNDER_REPAIR_STATUS_MIGRATION: Migration = {
+  version: UNDER_REPAIR_STATUS_MIGRATION_VERSION,
+  name: 'under-repair-project-status',
+  disableForeignKeys: true,
+  up: (db) => applyUnderRepairStatusMigration(db),
+};
+
 /** 当前迁移序列（后续 schema 升级追加新 Migration，不修改已发布迁移）。 */
 export const MIGRATIONS: readonly Migration[] = [
   INITIAL_MIGRATION,
@@ -231,6 +243,7 @@ export const MIGRATIONS: readonly Migration[] = [
   TEMPORARY_INSTRUMENT_FIELDS_MIGRATION,
   PROJECT_TAG_MIGRATION,
   OPTIONAL_LOGISTICS_FEE_MIGRATION,
+  UNDER_REPAIR_STATUS_MIGRATION,
 ];
 
 export interface BootstrapOptions {

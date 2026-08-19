@@ -16,7 +16,7 @@ import {
  *
  * 自动触发（优先于人工选择）：
  * - 标记验收报告并填写报告形成日期 → 自动置为待掉票（不要求当前状态已待验收，
- *   只要有效验收报告事实即生效；已取消拒绝）
+ *   只要有效验收报告事实即生效；已取消拒绝；维修中除外——维修中仅由人工离开）
  * - 录入实际装机完成时间 → 自动置为待验收（TBD-07）
  * - 计划上门日期到期自动推进（today >= planVisitAt，tasks 3.1 / design D5 转换表）：
  *   仅待进单/待执行 → 执行中；执行中幂等不写、待验收/待掉票不倒退、
@@ -25,6 +25,10 @@ import {
  * - 待掉票/已完成之间按掉票事实自动重算（已确认语义：任意成功登记一笔掉票
  *   （累计有效 > 0）即视为闭环完成，撤销最后有效掉票后回到待掉票；
  *   无 0 金额闭环：最终可确认金额为空或 0 时不产生闭环判定）
+ *
+ * 维修中（under_repair）：旁路主状态，仅由负责人人工选择进入/离开。
+ * 不新增任何自动转换；既有自动触发（计划上门到期/实际装机完成/验收报告/
+ * 金额闭环）均不把项目自动推进出维修中（验收报告触发显式排除维修中）。
  *
  * 约束校验：
  * - 目标状态必须为合法状态之一
@@ -161,11 +165,13 @@ export function resolveStatus(context: TransitionContext): TransitionResult {
   // 自动触发 1：标记验收报告并填写报告形成日期 → 待掉票（不要求客户确认）。
   // 只要存在有效验收报告事实即自动置为待掉票，不要求当前状态已处于待验收
   // （已取消在上方拒绝；带未进单先执行标签的待进单项目由上方标签规则保持待进单；
-  // 待掉票/已完成之间的金额闭环重算优先于本触发，TBD-11）。
+  // 待掉票/已完成之间的金额闭环重算优先于本触发，TBD-11；
+  // 维修中仅由人工离开，验收报告事实不自动推进出维修中）。
   if (
     context.acceptanceReportDate !== null &&
     currentStatus !== 'pending_invoice' &&
-    currentStatus !== 'completed'
+    currentStatus !== 'completed' &&
+    currentStatus !== 'under_repair'
   ) {
     return ok('pending_invoice', 'auto_acceptance');
   }
@@ -216,6 +222,10 @@ export function resolveStatus(context: TransitionContext): TransitionResult {
 
   // 首次上门活动开始或首个搬迁批次开始运输 → 执行中（TBD-08 下为人工触发的
   // 合法流转，理由标注 execution_started；仅完成排期/工程师/运输公司安排不计）。
+  // 维修中仅由人工选择离开：执行事实触发（execution_started）不自动推进出维修中。
+  if (currentStatus === 'under_repair' && requestedStatus === 'executing' && context.executionStarted === true) {
+    return ok('under_repair', 'unchanged');
+  }
   if (requestedStatus === 'executing' && context.executionStarted === true) {
     return ok('executing', 'execution_started');
   }
@@ -267,6 +277,10 @@ export function resolveStatusAfterFactDeletion(context: TransitionContext): Tran
   // 财务闭环完成态：只能经掉票撤销路径回退，删除执行/验收事实的反向重算不可靠。
   if (currentStatus === 'completed') {
     return reject(currentStatus, ['项目已通过金额闭环进入已完成，删除执行/验收事实后无法可靠重算主状态']);
+  }
+  // 维修中仅由人工选择离开：删除执行/验收事实的重算不自动推进出维修中。
+  if (currentStatus === 'under_repair') {
+    return ok('under_repair', 'unchanged');
   }
 
   const baseline = deletionBaseline(context);

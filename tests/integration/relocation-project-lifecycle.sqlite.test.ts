@@ -237,6 +237,46 @@ describe('relocation-project-lifecycle SQLite 集成（2.9）', () => {
       cleanupTempDir(dir);
     }
   });
+
+  it('维修中（under_repair）人工调整经 lifecycle 合法保存并持久化，关闭重开保留', () => {
+    const dir = makeTempDir();
+    try {
+      const { db, projects, contracts, service } = openService(dir);
+      const { projectId } = prepareEnterableProject(db, contracts, service);
+      service.formalEntry(projectId, { ecc: 'ECC-REPAIR-1' });
+      service.adjustStatus(projectId, 'executing');
+
+      // 人工进入维修中：经 lifecycle 校验通过并落库
+      const enter = service.adjustStatus(projectId, 'under_repair');
+      expect(enter.ok).toBe(true);
+      if (enter.ok) {
+        expect(enter.status).toBe('under_repair');
+        expect(enter.reason).toBe('manual');
+      }
+      expect(projects.findById(projectId)!.status).toBe('under_repair');
+      expect(
+        db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)?.status,
+      ).toBe('under_repair');
+
+      // 人工离开维修中：回到执行中
+      const leave = service.adjustStatus(projectId, 'executing');
+      expect(leave.ok).toBe(true);
+      if (leave.ok) {
+        expect(leave.status).toBe('executing');
+        expect(leave.reason).toBe('manual');
+      }
+      expect(projects.findById(projectId)!.status).toBe('executing');
+
+      // 再次进入维修中并关闭重开：状态保留
+      service.adjustStatus(projectId, 'under_repair');
+      closeDatabase(db);
+      const reopened = openService(dir);
+      expect(reopened.projects.findById(projectId)!.status).toBe('under_repair');
+      closeDatabase(reopened.db);
+    } finally {
+      cleanupTempDir(dir);
+    }
+  });
 });
 
 describe('计划上门日期到期自动推进（tasks 3.2 / 3.4 集成）', () => {

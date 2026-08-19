@@ -1,15 +1,19 @@
 /**
  * 项目主状态（tasks 1.8 / design D4）。
  *
- * 主状态依次为：待进单、待执行、执行中、待验收、待掉票、已完成；
+ * 主状态依次为：待进单、待执行、执行中、维修中、待验收、待掉票、已完成；
  * 终止项目标记为已取消。状态转换/校验入口由本能力（relocation-project-lifecycle）唯一拥有，
  * 其他模块（todos / reporting / interface / financial）只消费校验结果，不维护状态副本。
+ *
+ * 维修中（under_repair）为人工维护的旁路主状态：仅由负责人人工选择进入/离开，
+ * 不参与任何自动触发（计划上门到期/实际装机完成/验收报告/金额闭环均不自动进入或离开）。
  */
 
 export const PROJECT_STATUSES = [
   'pending_entry', // 待进单
   'pending_execution', // 待执行
   'executing', // 执行中
+  'under_repair', // 维修中（仅人工进入/离开）
   'pending_acceptance', // 待验收
   'pending_invoice', // 待掉票
   'completed', // 已完成
@@ -39,6 +43,7 @@ export const PROJECT_STATUS_LABELS: Record<ProjectStatusOrCancelled, string> = {
   pending_entry: '待进单',
   pending_execution: '待执行',
   executing: '执行中',
+  under_repair: '维修中',
   pending_acceptance: '待验收',
   pending_invoice: '待掉票',
   completed: '已完成',

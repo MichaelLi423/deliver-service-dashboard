@@ -53,6 +53,7 @@ const overview: WorkbenchV2OverviewDto = {
     { status: 'pending_entry', count: 20_000, averageDays: 3 },
     { status: 'pending_execution', count: 20_000, averageDays: 4 },
     { status: 'executing', count: 20_000, averageDays: 5 },
+    { status: 'under_repair', count: 3_000, averageDays: 1 },
     { status: 'pending_acceptance', count: 15_000, averageDays: 2 },
     { status: 'pending_invoice', count: 15_000, averageDays: 2 },
     { status: 'completed', count: 10_000, averageDays: 1 },
@@ -295,6 +296,15 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(screen.getByLabelText('人工调整主状态')).toHaveValue('pending_entry'));
   });
 
+  it('当前上下文标题为「项目状态」，人工调整下拉包含维修中选项', async () => {
+    render(<App />);
+    const context = await screen.findByRole('complementary', { name: '当前上下文' });
+    expect(within(context).getByRole('heading', { name: '项目状态' })).toBeInTheDocument();
+    const status = within(context).getByLabelText('人工调整主状态');
+    expect(within(status).getByRole('option', { name: '维修中' })).toBeInTheDocument();
+    expect(within(status).getByRole('option', { name: '执行中' })).toBeInTheDocument();
+  });
+
   it('编辑项目无任何变化时不发送空更新并给出正常反馈', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     const detail = await screen.findByRole('region', { name: '客户 1' }); fireEvent.click(within(detail).getByRole('button', { name: '编辑项目资料' }));
@@ -421,13 +431,23 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, status: 'executing', reminder: 'overdue', region: 'East', query: 'ECC-9' })));
   });
 
-  it('维修中作为独立筛选发送 repair open，不占用生命周期状态', async () => {
+  it('未关闭维修事项作为独立筛选发送 repair open，不占用生命周期状态', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    const repair = await screen.findByRole('button', { name: /维修中.*7.*独立事项筛选/ });
+    const repair = await screen.findByRole('button', { name: /未关闭维修事项.*7.*独立事项筛选/ });
     fireEvent.click(repair);
     await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, status: null, repair: 'open' })));
     expect(repair).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '全部项目' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('点击维修中主状态阶段发送 status=under_repair，与未关闭维修事项筛选互斥', async () => {
+    const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    const stage = await screen.findByRole('button', { name: /维修中.*3000.*平均 1 天/ });
+    fireEvent.click(stage);
+    await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, status: 'under_repair' })));
+    expect(stage).toHaveAttribute('aria-pressed', 'true');
+    // 主状态阶段与独立事项筛选互斥：点击主状态阶段后未关闭维修事项筛选不激活
+    expect(screen.getByRole('button', { name: /未关闭维修事项.*7.*独立事项筛选/ })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('项目分页使用 cursor 栈，旧页响应不能覆盖新筛选结果', async () => {

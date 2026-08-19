@@ -22,6 +22,15 @@ export interface Migration {
   name: string;
   /** 迁移内容（DDL/DML）。 */
   up: (db: DatabaseSync) => void;
+  /**
+   * 重建父表迁移（如 v19 重建 projects）：SQLite 的 PRAGMA foreign_keys 与
+   * legacy_alter_table 在事务内是 no-op，而重建被其他表外键引用的父表必须
+   * 在事务外关闭外键并开启 legacy_alter_table（使 RENAME 不改写子表外键指向）。
+   * 置为 true 时运行器在事务前设置 foreign_keys=OFF、legacy_alter_table=ON，
+   * 迁移与版本号写入在同一事务内完成，提交/回滚后恢复原始 pragma 值。
+   * 其余迁移不设置本字段，行为完全不变。
+   */
+  disableForeignKeys?: boolean;
 }
 
 export interface MigrationRunnerOptions {
@@ -69,6 +78,12 @@ const stamp = (date: Date): string => {
   )}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 };
 
+/** 读取布尔型 PRAGMA 当前值（foreign_keys / legacy_alter_table 等，返回 0 或 1）。 */
+function readPragma(db: DatabaseSync, name: string): number {
+  const row = db.prepare(`PRAGMA ${name}`).get() as Record<string, number>;
+  return row[name];
+}
+
 /**
  * 执行待应用迁移。
  * 失败时整体回滚本次迁移事务、保持原库，并抛出 MigrationError（携带恢复信息）。
@@ -106,6 +121,19 @@ export function runMigrations(db: DatabaseSync, options: MigrationRunnerOptions)
     }
     preMigrationBackups.push(backupFile);
 
+    // 重建父表迁移需在事务外切换 pragma（事务内为 no-op）；记录原始值以便恢复。
+    const fkOff = migration.disableForeignKeys === true;
+    const savedPragmas = fkOff
+      ? {
+          foreignKeys: readPragma(db, 'foreign_keys'),
+          legacyAlterTable: readPragma(db, 'legacy_alter_table'),
+        }
+      : null;
+    if (fkOff) {
+      db.exec('PRAGMA foreign_keys = OFF;');
+      db.exec('PRAGMA legacy_alter_table = ON;');
+    }
+
     // 迁移在事务内执行；失败整体回滚，保留原库与迁移前备份。
     try {
       db.exec('BEGIN');
@@ -126,6 +154,11 @@ export function runMigrations(db: DatabaseSync, options: MigrationRunnerOptions)
         preMigrationBackup: backupFile,
       };
       throw new MigrationError(failure);
+    } finally {
+      if (fkOff && savedPragmas) {
+        db.exec(`PRAGMA foreign_keys = ${savedPragmas.foreignKeys};`);
+        db.exec(`PRAGMA legacy_alter_table = ${savedPragmas.legacyAlterTable};`);
+      }
     }
   }
 
