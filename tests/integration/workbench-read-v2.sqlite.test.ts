@@ -8,6 +8,7 @@ import {
   WorkbenchReadRepository,
 } from '../../src/domain/capabilities/local-data-persistence/workbench-read-repository';
 import { classifyReminder } from '../../src/domain/capabilities/workbench-todos';
+import { SystemClock } from '../../src/domain/core/time';
 import { WorkbenchFacade } from '../../src/main/workbench-facade';
 import type {
   WorkbenchProjectRow,
@@ -1520,6 +1521,95 @@ describe('工作台 v2 mutation（Oracle #10：复用写逻辑，无 snapshot）
       facadeFrom(ctx).v2Mutate({ op: 'no_such_op' as never }),
     ).toThrow(/未知的 v2 mutation/);
     expect(readBusinessRevision(db)).toBe(before);
+    closeDatabase(db);
+  });
+});
+
+describe('人工 adjust_status 主状态转换审计', () => {
+  interface AuditRow {
+    id: string;
+    project_id: string;
+    from_status: string;
+    to_status: string;
+    reason: string;
+    effective_business_date: string;
+    source: string;
+    actor_id: string | null;
+    actor_username_snapshot: string | null;
+    created_at: string;
+  }
+
+  const auditRows = (db: DatabaseSync, projectId: string): AuditRow[] =>
+    db
+      .prepare('SELECT * FROM project_status_transition_audit WHERE project_id = ? ORDER BY created_at, id')
+      .all(projectId) as unknown as AuditRow[];
+
+  it('真实状态变化：写入一条字段完整的 source=user 审计，项目状态同步更新', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    const before = db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId) as { status: string };
+    expect(before.status).toBe('pending_execution');
+
+    facade.v2Mutate({ op: 'adjust_status', projectId, status: 'executing' });
+
+    const rows = auditRows(db, projectId);
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row.project_id).toBe(projectId);
+    expect(row.from_status).toBe('pending_execution');
+    expect(row.to_status).toBe('executing');
+    expect(row.reason).toBe('manual');
+    expect(row.effective_business_date).toBe(new SystemClock().today());
+    expect(row.source).toBe('user');
+    expect(row.actor_id).toBe('acc-1');
+    expect(row.actor_username_snapshot).toBe('负责人');
+    expect(row.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    expect(row.id).toBeTruthy();
+    // 项目状态已更新
+    expect(db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)).toMatchObject({ status: 'executing' });
+    closeDatabase(db);
+  });
+
+  it('相同状态不新增审计（避免重复）', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    facade.v2Mutate({ op: 'adjust_status', projectId, status: 'executing' });
+    expect(auditRows(db, projectId)).toHaveLength(1);
+
+    // 再次调整到同一状态：不新增审计
+    facade.v2Mutate({ op: 'adjust_status', projectId, status: 'executing' });
+    expect(auditRows(db, projectId)).toHaveLength(1);
+    closeDatabase(db);
+  });
+
+  it('adjust_status 请求 cancelled 拒绝：不新增审计且状态不变', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    expect(() =>
+      facade.v2Mutate({ op: 'adjust_status', projectId, status: 'cancelled' as never }),
+    ).toThrow(/cancelProject/);
+    expect(auditRows(db, projectId)).toHaveLength(0);
+    expect(db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)).toMatchObject({ status: 'pending_execution' });
+    closeDatabase(db);
+  });
+
+  it('审计插入失败使项目状态更新整体回滚', () => {
+    const ctx = makeFacade();
+    const { db, facade, projectId } = ctx;
+    // 用 BEFORE INSERT RAISE(ABORT) 触发器强制审计插入失败
+    db.exec(`
+      CREATE TRIGGER trg_fail_audit BEFORE INSERT ON project_status_transition_audit
+      BEGIN
+        SELECT RAISE(ABORT, 'forced audit failure');
+      END;
+    `);
+    expect(() =>
+      facade.v2Mutate({ op: 'adjust_status', projectId, status: 'executing' }),
+    ).toThrow(/forced audit failure/);
+    // 项目状态更新已随审计失败回滚
+    expect(db.prepare('SELECT status FROM projects WHERE id = ?').get(projectId)).toMatchObject({ status: 'pending_execution' });
+    expect(auditRows(db, projectId)).toHaveLength(0);
+    db.exec('DROP TRIGGER trg_fail_audit');
     closeDatabase(db);
   });
 });

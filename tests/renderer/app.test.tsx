@@ -431,9 +431,12 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, status: 'executing', reminder: 'overdue', region: 'East', query: 'ECC-9' })));
   });
 
-  it('未关闭维修事项作为独立筛选发送 repair open，不占用生命周期状态', async () => {
+  it('未关闭维修事项作为独立筛选移到当前上下文的事项关注区，点击发送 repair open', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    const repair = await screen.findByRole('button', { name: /未关闭维修事项.*7.*独立事项筛选/ });
+    const context = await screen.findByRole('complementary', { name: '当前上下文' });
+    expect(within(context).getByText('事项关注')).toBeInTheDocument();
+    const repair = within(context).getByRole('button', { name: /未关闭维修事项.*7.*个项目/ });
+    expect(repair).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(repair);
     await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, status: null, repair: 'open' })));
     expect(repair).toHaveAttribute('aria-pressed', 'true');
@@ -446,8 +449,22 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.click(stage);
     await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: null, status: 'under_repair' })));
     expect(stage).toHaveAttribute('aria-pressed', 'true');
-    // 主状态阶段与独立事项筛选互斥：点击主状态阶段后未关闭维修事项筛选不激活
-    expect(screen.getByRole('button', { name: /未关闭维修事项.*7.*独立事项筛选/ })).toHaveAttribute('aria-pressed', 'false');
+    // 主状态阶段与独立事项筛选互斥：生命周期阶段行不再包含未关闭维修事项按钮
+    expect(screen.queryByRole('button', { name: /未关闭维修事项.*独立事项筛选/ })).not.toBeInTheDocument();
+    const context = screen.getByRole('complementary', { name: '当前上下文' });
+    expect(within(context).getByRole('button', { name: /未关闭维修事项.*7.*个项目/ })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('项目列表仅在未关闭维修事项大于 0 时显示对应标签，且不影响主状态 badge', async () => {
+    const rowWithRepair = { ...project(2), nonBlocking: { ...project(2).nonBlocking, repairs: 3 } };
+    const api = mockApi({ v2ProjectPage: vi.fn().mockResolvedValue(page([project(1), rowWithRepair], null, 2)) });
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
+    const grid = await screen.findByRole('grid', { name: '项目队列' });
+    const rowWith = within(grid).getByRole('row', { name: /^客户 2 / });
+    expect(within(rowWith).getByText('未关闭维修事项 3 条')).toBeInTheDocument();
+    expect(within(rowWith).getByText('待进单')).toBeInTheDocument();
+    const rowWithout = within(grid).getByRole('row', { name: /^客户 1 / });
+    expect(within(rowWithout).queryByText(/未关闭维修事项/)).not.toBeInTheDocument();
   });
 
   it('项目分页使用 cursor 栈，旧页响应不能覆盖新筛选结果', async () => {

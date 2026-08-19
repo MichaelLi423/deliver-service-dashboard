@@ -1123,19 +1123,6 @@ export function WorkbenchV2({
                 <small>平均 {item.averageDays} 天</small>
               </button>
             ))}
-            <button
-              className={`stage repair-stage ${filters.repair === "open" ? "active" : ""}`}
-              aria-pressed={filters.repair === "open"}
-              onClick={() => {
-                selectionPin.current = "";
-                setDraftFilters((old) => ({ ...old, status: "", repair: "open" }));
-                setFilters((old) => ({ ...old, status: "", repair: "open" }));
-              }}
-            >
-              <span>未关闭维修事项</span>
-              <strong>{String(overview?.metrics.openRepairProjects ?? 0)}</strong>
-              <small>独立事项筛选</small>
-            </button>
           </div>
         </section>
         <section
@@ -1165,6 +1152,8 @@ export function WorkbenchV2({
             project={selected}
             detail={detail}
             loading={loading.detail}
+            repairOpen={filters.repair === "open"}
+            openRepairProjects={overview?.metrics.openRepairProjects ?? 0}
             onQuick={() => setLayer({ kind: "quick" })}
             onReminder={() => setLayer({ kind: "reminder" })}
             onCancel={() => setLayer({ kind: "cancel" })}
@@ -1172,6 +1161,12 @@ export function WorkbenchV2({
               { op: "adjust_status", projectId: selectedId, status },
               "项目主状态已通过生命周期校验并更新",
             )}
+            onRepairFilter={() => {
+              selectionPin.current = "";
+              const nextRepair = filters.repair === "open" ? "" : "open";
+              setDraftFilters((old) => ({ ...old, status: "", repair: nextRepair }));
+              setFilters((old) => ({ ...old, status: "", repair: nextRepair }));
+            }}
           />
           <ProjectDetails
             project={selected}
@@ -1373,6 +1368,9 @@ export function WorkbenchV2({
                       {!project.formallyEntered && <em>未进单</em>}
                       {project.preEntryExecution && (
                         <em className="warning">未进单先执行</em>
+                      )}
+                      {project.nonBlocking.repairs > 0 && (
+                        <span className="tag warning">未关闭维修事项 {project.nonBlocking.repairs} 条</span>
                       )}
                       <GroupedTags groups={project.groupedTags} compact />
                     </td>
@@ -1793,18 +1791,24 @@ function ProjectContext({
   project,
   detail,
   loading,
+  repairOpen,
+  openRepairProjects,
   onQuick,
   onReminder,
   onCancel,
   onStatus,
+  onRepairFilter,
 }: {
   project: WorkbenchProjectRow | null;
   detail: WorkbenchV2ProjectDetailDto | null;
   loading: boolean;
+  repairOpen: boolean;
+  openRepairProjects: number;
   onQuick: () => void;
   onReminder: () => void;
   onCancel: () => void;
   onStatus: (status: AdjustableProjectStatus) => void;
+  onRepairFilter: () => void;
 }): JSX.Element {
   const [draftStatus, setDraftStatus] = useState<AdjustableProjectStatus>(
     project?.status === "cancelled" ? "completed" : project?.status ?? "pending_entry",
@@ -1856,6 +1860,16 @@ function ProjectContext({
           {project.nonBlocking.repairs > 0 && (
             <span className="tag warning">损坏/维修 {project.nonBlocking.repairs}</span>
           )}
+        </div>
+        <div className="concern-row">
+          <span className="concern-label">事项关注</span>
+          <button
+            className={`text-action concern-filter ${repairOpen ? "active" : ""}`}
+            aria-pressed={repairOpen}
+            onClick={onRepairFilter}
+          >
+            未关闭维修事项 {openRepairProjects} 个项目
+          </button>
         </div>
         <GroupedTags groups={detail?.groupedTags ?? project.groupedTags} />
         {project.status !== "cancelled" && (

@@ -1227,8 +1227,43 @@ export class WorkbenchFacade {
     if (status === 'cancelled') {
       throw new ValidationError('CANCEL_VIA_COMMAND', '取消项目请使用 cancelProject 命令（须填写取消时间与原因）');
     }
-    const result = this.projectService().adjustStatus(projectId, status);
-    if (!result.ok) throw new Error(result.errors.join('；'));
+    // 人工主状态调整：同一事务内先读 before，经 lifecycle 唯一入口落库，仅真实状态
+    // 变化时追加一条 source=user 的状态转换审计；审计插入失败使项目状态更新整体回滚。
+    this.transaction(() => {
+      const before = this.projects.findById(projectId);
+      if (!before) {
+        throw new ValidationError('PROJECT_NOT_FOUND', `项目不存在: ${projectId}`);
+      }
+      const result = this.projectService().adjustStatus(projectId, status);
+      if (!result.ok) throw new Error(result.errors.join('；'));
+      // 相同状态（含自动触发不推进）不写审计，避免重复。
+      if (before.status === result.status) return;
+      this.writeManualStatusAudit(projectId, before.status, result.status, result.reason);
+    });
+  }
+
+  /** 人工主状态调整的真实转换审计（source=user；与项目状态更新同事务原子）。 */
+  private writeManualStatusAudit(projectId: string, fromStatus: string, toStatus: string, reason: string): void {
+    const actor = this.actor();
+    this.db
+      .prepare(
+        `INSERT INTO project_status_transition_audit (
+           id, project_id, from_status, to_status, reason,
+           effective_business_date, source, actor_id, actor_username_snapshot, created_at
+         ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        randomUUID(),
+        projectId,
+        fromStatus,
+        toStatus,
+        reason,
+        new SystemClock().today(),
+        'user',
+        actor.accountId,
+        actor.username,
+        new SystemClock().nowIso(),
+      );
   }
 
   private writeCancelProject(projectId: string, time: string, reason: string): void {
