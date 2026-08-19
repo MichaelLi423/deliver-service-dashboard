@@ -22,9 +22,9 @@ import {
  *   仅待进单/待执行 → 执行中；执行中幂等不写、待验收/待掉票不倒退、
  *   已完成/已取消终态不变；未到期不推进、逾期（漏跑）补推进；
  *   带"未进单先执行"标签的待进单项目到期同样自动进入执行中
- * - 待掉票/已完成之间按掉票事实自动重算（已确认语义：任意成功登记一笔掉票
- *   （累计有效 > 0）即视为闭环完成，撤销最后有效掉票后回到待掉票；
- *   无 0 金额闭环：最终可确认金额为空或 0 时不产生闭环判定）
+ * - 待掉票/执行中/已完成之间按掉票事实自动重算（已确认语义：任意成功登记一笔掉票
+ *   （累计有效 > 0）即视为闭环完成；执行中仅在有有效掉票时进入已完成，撤销最后
+ *   有效掉票后回到待掉票；无 0 金额闭环：最终可确认金额为空或 0 时不产生闭环判定）
  *
  * 维修中（under_repair）：旁路主状态，仅由负责人人工选择进入/离开。
  * 不新增任何自动转换；既有自动触发（计划上门到期/实际装机完成/验收报告/
@@ -186,11 +186,18 @@ export function resolveStatus(context: TransitionContext): TransitionResult {
     return ok('pending_acceptance', 'auto_install_done');
   }
 
-  // 自动触发 3：待掉票/已完成之间按金额闭环自动重算（TBD-11），优先于人工值。
-  if (currentStatus === 'pending_invoice' || currentStatus === 'completed') {
+  // 自动触发 3：待掉票/执行中/已完成之间按金额闭环自动重算（TBD-11），优先于人工值。
+  // 执行中项目仅在有有效掉票时进入已完成，无掉票时不回退到待掉票。
+  if (currentStatus === 'pending_invoice' || currentStatus === 'completed' || currentStatus === 'executing') {
     const target = closureTarget(context.amounts);
-    if (target !== null && target !== currentStatus) {
-      return ok(target, 'auto_amount_closure');
+    if (target !== null) {
+      if (currentStatus === 'executing') {
+        if (target === 'completed') {
+          return ok('completed', 'auto_amount_closure');
+        }
+      } else if (target !== currentStatus) {
+        return ok(target, 'auto_amount_closure');
+      }
     }
   }
 

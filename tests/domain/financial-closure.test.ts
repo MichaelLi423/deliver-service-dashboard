@@ -56,6 +56,21 @@ function preparePendingInvoice(ctx: ReturnType<typeof setup>, amount = '10000'):
   return projectId;
 }
 
+/** 构造已正式进单且处于执行中的项目（final 默认取合同金额，无验收事实）。 */
+function prepareExecuting(ctx: ReturnType<typeof setup>, amount = '10000'): string {
+  const projectId = ctx.projectService.createPendingProject().id;
+  const contract = ctx.projectService.attachContract(projectId);
+  ctx.contracts.save(contract);
+  ctx.financial.setContractUsdTaxAmount(projectId, Money.parse(amount).cents);
+  ctx.projectService.linkCustomer(projectId, 'customer-1');
+  ctx.projectService.confirmScope(projectId);
+  eccSeq += 1;
+  ctx.projectService.formalEntry(projectId, { ecc: `ECC-EXEC-${eccSeq}` });
+  ctx.projectService.adjustStatus(projectId, 'executing');
+  expect(ctx.projects.findById(projectId)!.status).toBe('executing');
+  return projectId;
+}
+
 describe('合同 USD 含税金额手工录入与直接覆盖（5.1 / TBD-20）', () => {
   it('手工录入合同含税金额：保存手工值，不根据净值税率自动计算或改写', () => {
     const ctx = setup();
@@ -323,6 +338,15 @@ describe('掉票撤销终态而非删除（5.9 / TBD-19）', () => {
     const correction = ctx.financial.recordInvoice(projectId, { amountCents: 400000n, invoicedAt: '2026-08-05' }, ACTOR);
     expect(correction.amountCents).toBe(400000n);
     expect(ctx.financial.sumActiveAmounts(projectId)).toBe(400000n);
+  });
+});
+
+describe('执行中项目掉票后自动已完成（回归场景）', () => {
+  it('正式进单后处于执行中、final>0、无验收事实，登记一笔有效掉票后应变为已完成', () => {
+    const ctx = setup();
+    const projectId = prepareExecuting(ctx, '10000');
+    ctx.financial.recordInvoice(projectId, { amountCents: 100000n, invoicedAt: '2026-08-01' }, ACTOR);
+    expect(ctx.projects.findById(projectId)!.status).toBe('completed');
   });
 });
 

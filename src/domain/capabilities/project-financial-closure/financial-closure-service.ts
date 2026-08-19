@@ -247,8 +247,8 @@ export class FinancialClosureService {
   // ---- 内部辅助 ----
 
   private recomputeClosure(project: Project): void {
-    // 仅待掉票/已完成之间按金额闭环重算；其他状态金额修改不改变主状态（5.10）。
-    if (project.status === 'pending_invoice' || project.status === 'completed') {
+    // 待掉票/执行中/已完成之间按金额闭环重算；其他状态金额修改不改变主状态（5.10 / 回归：执行中掉票自动已完成）。
+    if (project.status === 'pending_invoice' || project.status === 'executing' || project.status === 'completed') {
       this.lifecycle.reevaluateStatus(project.id);
     }
   }

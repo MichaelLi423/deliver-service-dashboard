@@ -174,16 +174,50 @@ describe('集中状态校验入口（tasks 1.8 / 2.2 / D4）', () => {
     expectReason(noClosure, 'unchanged');
   });
 
-  it('项目未处于待掉票/已完成时金额修改不改变主状态', () => {
+  it('金额闭环自动触发延伸至执行中：执行中项目存在有效掉票时进入已完成', () => {
     const result = resolveStatus(
       ctx({
         currentStatus: 'executing',
         requestedStatus: 'executing',
-        amounts: { confirmedAmountCents: 500000n, finalConfirmableAmountCents: 800000n },
+        amounts: { confirmedAmountCents: 100n, finalConfirmableAmountCents: 800000n },
+      }),
+    );
+    expectStatus(result, 'completed');
+    expectReason(result, 'auto_amount_closure');
+  });
+
+  it('执行中项目无有效掉票时不因金额闭环回退到待掉票', () => {
+    const result = resolveStatus(
+      ctx({
+        currentStatus: 'executing',
+        requestedStatus: 'executing',
+        amounts: { confirmedAmountCents: 0n, finalConfirmableAmountCents: 800000n },
       }),
     );
     expectStatus(result, 'executing');
     expectReason(result, 'unchanged');
+  });
+
+  it('非待掉票/已完成/执行中状态金额修改不改变主状态', () => {
+    const pendingExecution = resolveStatus(
+      ctx({
+        currentStatus: 'pending_execution',
+        requestedStatus: 'pending_execution',
+        amounts: { confirmedAmountCents: 500000n, finalConfirmableAmountCents: 800000n },
+      }),
+    );
+    expectStatus(pendingExecution, 'pending_execution');
+    expectReason(pendingExecution, 'unchanged');
+
+    const underRepair = resolveStatus(
+      ctx({
+        currentStatus: 'under_repair',
+        requestedStatus: 'under_repair',
+        amounts: { confirmedAmountCents: 500000n, finalConfirmableAmountCents: 800000n },
+      }),
+    );
+    expectStatus(underRepair, 'under_repair');
+    expectReason(underRepair, 'unchanged');
   });
 
   it('取消约束：存在任何掉票历史（含已撤销）禁止取消', () => {
