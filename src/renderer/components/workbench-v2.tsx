@@ -1900,13 +1900,11 @@ function ProjectContext({
         </strong>
         <p>{project.reminderNote || "暂无提醒备注"}</p>
       </div>
-      <div className="context-section context-money" aria-label="金额闭环">
-        <h3>金额闭环</h3>
-        <dl>
-          <div><dt>最终可确认</dt><dd>{money(project.finalAmount)}</dd></div>
-          <div><dt>累计掉票</dt><dd>{money(project.invoicedAmount)}</dd></div>
-          <div><dt>待掉票</dt><dd>{money(decimalOf(centsOf(project.finalAmount) > centsOf(project.invoicedAmount) ? centsOf(project.finalAmount) - centsOf(project.invoicedAmount) : 0n))}</dd></div>
-        </dl>
+      <div className="context-section" aria-label="项目备注">
+        <h3>项目备注</h3>
+        <p className={`context-note ${detail?.detail?.projectNote ? "" : "is-empty"}`}>
+          {detail?.detail?.projectNote || "暂无备注"}
+        </p>
       </div>
       <div className="context-section">
         <h3>执行联系</h3>

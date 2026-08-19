@@ -601,11 +601,11 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(within(screen.getByRole('grid', { name: '项目队列' })).getByRole('row', { name: /^客户 1 / })).toHaveClass('project-status-executing');
   });
 
-  it('上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目', async () => {
+  it('上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目', async () => {
     const row = { ...project(1), preEntryExecution: true, reminderNote: '先联系现场', nonBlocking: { pendingShipTo: 2, qrUnmarked: 1, repairs: 3 } };
     const api = mockApi({
       v2ProjectPage: vi.fn().mockResolvedValue(page([row], null, 1)),
-      v2ProjectDetail: vi.fn().mockResolvedValue({ businessRevision: 1, project: row, detail: { managerApprovalReason: null, managerApprovalMissing: null, oldSiteContact: null, newSiteContact: null, oldSiteAddress: null, newSiteAddress: null, contractStartDate: null, contractEndDate: null, planVisitAt: null, planTransportAt: null, siteConfirmed: false, plannedInstallDoneAt: null, actualInstallDoneAt: null, acceptanceReport: false, acceptanceReportDate: null, cancelledAt: null, cancelReason: null, temporaryInstrumentCount: null, createdAt: '', customerId: 'c1', contractId: 'ct1' } }),
+      v2ProjectDetail: vi.fn().mockResolvedValue({ businessRevision: 1, project: row, detail: { managerApprovalReason: null, managerApprovalMissing: null, managerApproved: null, projectNote: '客户要求周末作业', temporaryStorageAddress: null, isTemporaryStorage: null, oldSiteContact: null, newSiteContact: null, oldSiteAddress: null, newSiteAddress: null, contractStartDate: null, contractEndDate: null, planVisitAt: null, planTransportAt: null, siteConfirmed: false, plannedInstallAt: null, plannedInstallDoneAt: null, actualInstallDoneAt: null, acceptanceReport: false, acceptanceReportDate: null, cancelledAt: null, cancelReason: null, temporaryInstrumentCount: null, temporaryInstrumentName: null, temporaryInstrumentModel: null, temporaryHasUps: null, createdAt: '', customerId: 'c1', contractId: 'ct1' } }),
     });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     const context = await screen.findByRole('complementary', { name: '当前上下文' });
@@ -616,10 +616,18 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(context).toHaveTextContent('损坏/维修 3');
     expect(context).toHaveTextContent('2026-08-08');
     expect(context).not.toHaveTextContent('09:00');
-    expect(within(context).getByLabelText('金额闭环')).toHaveTextContent('待掉票USD 60,000.00');
+    await waitFor(() => expect(within(context).getByLabelText('项目备注')).toHaveTextContent('客户要求周末作业'));
     fireEvent.click(within(screen.getByRole('region', { name: /待办提醒/ })).getByRole('button', { name: /客户 1/ }));
     await waitFor(() => expect(api.v2ProjectPage).toHaveBeenLastCalledWith(expect.objectContaining({ reminder: 'any', query: 'ECC-000001' })));
     expect(screen.getByRole('region', { name: /项目队列/ })).toHaveFocus();
+  });
+
+  it('项目备注为空时上下文卡片显示暂无备注', async () => {
+    const api = mockApi();
+    Object.defineProperty(window, 'workbench', { value: api, configurable: true });
+    render(<App />);
+    const context = await screen.findByRole('complementary', { name: '当前上下文' });
+    expect(within(context).getByLabelText('项目备注')).toHaveTextContent('暂无备注');
   });
 
   it('新建项目未修改时可直接关闭，修改后 Escape 先确认是否放弃', async () => {
