@@ -260,6 +260,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' }); fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '标签客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
     for (const name of ['搬迁', 'PM', '重点跟进']) { const checkbox = within(dialog).getByRole('checkbox', { name }); checkbox.focus(); expect(checkbox).toHaveFocus(); fireEvent.click(checkbox); }
+    fireEvent.click(within(dialog).getByRole('radio', { name: /保存为待进单/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: '保存为待进单' }));
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'create_project', payload: expect.objectContaining({ tagIds: ['tag-move', 'tag-pm', 'tag-custom'] }) })));
   });
@@ -655,11 +656,12 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(customer).toHaveFocus());
     expect(within(dialog).getByText(/旧址、新址和暂定范围均可后补/)).toBeInTheDocument();
     expect(within(dialog).getByRole('radiogroup', { name: '保存意图' })).toBeInTheDocument();
-    expect(within(dialog).queryByLabelText(/^ECC/)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('radio', { name: /正式进单/ })).toBeChecked();
+    expect(within(dialog).getByLabelText(/^ECC/)).toBeInTheDocument();
     const entryAt = within(dialog).getByLabelText(/^进单日期/);
-    expect(entryAt).toBeDisabled();
-    expect(entryAt).toHaveAccessibleDescription(/仅正式进单时可填写.*切换为正式进单后启用/);
-    expect(within(dialog).queryByRole('spinbutton', { name: /合同 USD 含税金额/ })).not.toBeInTheDocument();
+    expect(entryAt).not.toBeDisabled();
+    expect(entryAt).toHaveAccessibleDescription(/可留空.*当天日期/);
+    expect(within(dialog).getByRole('spinbutton', { name: /合同 USD 含税金额/ })).toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/最终可确认金额/)).not.toBeInTheDocument();
     fireEvent.change(customer, { target: { value: '尚未保存的客户' } });
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -672,11 +674,15 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(screen.queryByRole('dialog', { name: '新建搬迁项目' })).not.toBeInTheDocument();
   });
 
-  it('新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签', async () => {
+  it('新建搬迁项目默认正式进单，保存意图及选项按要求排序', async () => {
     render(<App />); await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
-    for (const name of ['项目与进单', '搬迁范围（均可后补）', '执行准备', '保存意图']) expect(within(dialog).getByRole('group', { name })).toBeInTheDocument();
+    const groups = ['保存意图', '项目与进单', '搬迁范围（均可后补）', '执行准备'].map((name) => within(dialog).getByRole('group', { name }));
+    for (let index = 0; index < groups.length - 1; index += 1) expect(groups[index]!.compareDocumentPosition(groups[index + 1]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const intentOptions = within(within(dialog).getByRole('radiogroup', { name: '保存意图' })).getAllByRole('radio');
+    expect(intentOptions.map((option) => option.getAttribute('value'))).toEqual(['formal', 'draft', 'pre_entry_execution']);
+    expect(intentOptions[0]).toBeChecked();
     const scope = within(dialog).getByRole('group', { name: '搬迁范围（均可后补）' });
     expect(within(scope).getByLabelText(/暂定仪器名称/)).toBeInTheDocument();
     expect(within(scope).getByLabelText(/暂定仪器数量/)).toBeInTheDocument();
@@ -696,7 +702,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     const summary = within(dialog).getByLabelText('保存摘要');
     expect(summary).toHaveTextContent('客户名称未填写');
-    expect(summary).toHaveTextContent('保存意图保存为待进单');
+    expect(summary).toHaveTextContent('保存意图正式进单');
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '摘要客户' } });
     fireEvent.change(within(dialog).getByLabelText(/暂定仪器数量/), { target: { value: '2' } });
     expect(summary).toHaveTextContent('摘要客户');
@@ -717,8 +723,6 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '意图切换客户' } });
     fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
     const entryAt = within(dialog).getByLabelText(/^进单日期/);
-    expect(entryAt).toBeDisabled();
-    fireEvent.click(within(dialog).getByRole('radio', { name: /正式进单/ }));
     expect(entryAt).not.toBeDisabled();
     expect(entryAt).toHaveAccessibleDescription(/可留空.*当天日期/);
     fireEvent.change(entryAt, { target: { value: '2026-08-09' } });
@@ -790,6 +794,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'South' } });
     fireEvent.change(within(dialog).getByLabelText(/暂定仪器名称/), { target: { value: '   ' } });
     fireEvent.change(within(dialog).getByLabelText(/暂定型号/), { target: { value: '' } });
+    fireEvent.click(within(dialog).getByRole('radio', { name: /保存为待进单/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: '保存为待进单' }));
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({
       op: 'create_project',
@@ -803,6 +808,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '待进单客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
+    fireEvent.click(within(dialog).getByRole('radio', { name: /保存为待进单/ }));
     expect(within(dialog).queryByRole('textbox', { name: /^ECC/ })).not.toBeInTheDocument();
     expect(within(dialog).getByLabelText(/^进单日期/)).toBeDisabled();
     expect(within(dialog).queryByRole('spinbutton', { name: /合同 USD 含税金额/ })).not.toBeInTheDocument();
@@ -822,7 +828,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
   it('新建契约拒绝只展示稳定中文，不暴露技术错误码', async () => {
     const api = mockApi({ v2Mutate: vi.fn().mockRejectedValue(new Error('WIZARD_CONTRACT_AMOUNT_ONLY_FORMAL: invalid payload')) });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />); await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
-    const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' }); fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '错误客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } }); fireEvent.click(within(dialog).getByRole('button', { name: '保存为待进单' }));
+    const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' }); fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '错误客户' } }); fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } }); fireEvent.click(within(dialog).getByRole('radio', { name: /保存为待进单/ })); fireEvent.click(within(dialog).getByRole('button', { name: '保存为待进单' }));
     const alert = await within(dialog).findByRole('alert'); expect(alert).toHaveTextContent('合同金额仅可在正式进单时提交'); expect(alert).not.toHaveTextContent('WIZARD_');
   });
 

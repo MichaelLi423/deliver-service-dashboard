@@ -1470,15 +1470,17 @@ export function WorkbenchV2({
           title={layerTitle(layer)}
           description={layerDescription(layer, selected)}
           className={layer.kind === "edit-project-tags" ? "project-tag-modal" : undefined}
-          initialFocusSelector={layer.kind === "edit-project-tags"
-            ? tagCatalogError
-              ? "[data-tag-picker-retry]"
-              : !tagCatalogLoading && !tagCatalog?.groups.length
-                ? "[data-tag-edit-cancel]"
-                : !tagCatalogLoading
-                  ? 'input[type="checkbox"]:not([disabled])'
-                  : undefined
-            : undefined}
+          initialFocusSelector={layer.kind === "new"
+            ? '[name="customerName"]'
+            : layer.kind === "edit-project-tags"
+              ? tagCatalogError
+                ? "[data-tag-picker-retry]"
+                : !tagCatalogLoading && !tagCatalog?.groups.length
+                  ? "[data-tag-edit-cancel]"
+                  : !tagCatalogLoading
+                    ? 'input[type="checkbox"]:not([disabled])'
+                    : undefined
+              : undefined}
           side={layer.kind === "independent" || layer.kind === "report" || layer.kind === "history" || layer.kind === "reminder-all" || layer.kind === "tags"}
           protectDirty={layerRequiresDirtyProtection(layer)}
           controlledDirty={layer.kind === "edit-project-tags" ? tagEditGuard.dirty : undefined}
@@ -4185,7 +4187,7 @@ function ProjectEditForm({
 }
 
 function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, onRetryCatalog, onSave }: TagCatalogProps & { onSave: (payload: ProjectWizardPayload) => Promise<void> }): JSX.Element {
-  const [intent, setIntent] = useState<ProjectWizardPayload["intent"]>("draft");
+  const [intent, setIntent] = useState<ProjectWizardPayload["intent"]>("formal");
   const [region, setRegion] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -4252,13 +4254,19 @@ function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, on
     } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); }
   }
   const intents: Array<[ProjectWizardPayload["intent"], string, string]> = [
+    ["formal", "正式进单", "明确使用 ECC 和进单日期完成进单"],
     ["draft", "保存为待进单", "先建项目，资料稍后补齐"],
     ["pre_entry_execution", "未进单先执行", "记录是否批复，项目仍保持待进单"],
-    ["formal", "正式进单", "明确使用 ECC 和进单日期完成进单"],
   ];
   return <form className="project-create-form" onSubmit={(event) => void submit(event)} onChange={updateSummary}>
     <p className="notice">先明确保存意图。旧址、新址和暂定范围均可后补，不影响建立项目。</p>
     <div className="create-form-sections">
+      <fieldset className="edit-form-section"><legend>保存意图</legend><div className="form-grid">
+        <div className="intent-choices full" role="radiogroup" aria-label="保存意图">{intents.map(([value,label,copy]) => <label key={value} className={intent === value ? "selected" : ""}><input type="radio" name="projectIntent" value={value} checked={intent === value} onChange={() => { setIntent(value); setError(""); }} /><strong>{label}</strong><span>{copy}</span></label>)}</div>
+        {intent === "pre_entry_execution" && <div className="approval-fields full" role="group" aria-label="未进单先执行批复"><Select name="managerApproved" label="是否批复" required defaultValue="" options={[["", "请选择"], ["true", "是"], ["false", "否"]]} help="只记录是否批复，不收集原因或缺失资料。" /></div>}
+        <div className="summary-grid full" aria-label="保存摘要">{summaryItems.map(([label, value]) => <div key={label}><span>{label}</span><strong>{summaryText(value)}</strong></div>)}</div>
+        <div className="form-footer full"><span>{intent === "draft" ? "项目将保持待进单" : intent === "formal" ? "将按正式进单意图校验" : "将标记为提前执行"}</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : intent === "draft" ? "保存为待进单" : intent === "formal" ? "正式进单" : "确认提前执行"}</button></div>
+      </div></fieldset>
       <fieldset className="edit-form-section"><legend>项目与进单</legend><div className="form-grid">
         <Field name="customerName" label="客户名称" required autoFocus /><ProjectRegionSelect value={region} onChange={setRegion} />
         <Field name="oldSiteContact" label="旧址联系人" optional /><Field name="newSiteContact" label="新址联系人" optional />
@@ -4282,12 +4290,6 @@ function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, on
         <label className="confirm-check full"><input name="siteConfirmed" type="checkbox" />场地已确认</label>
       </div></fieldset>
       <GroupedTagPicker catalog={catalog} loading={catalogLoading} error={catalogError} selected={selectedTagIds} onChange={setSelectedTagIds} onRetry={() => void onRetryCatalog()} />
-      <fieldset className="edit-form-section"><legend>保存意图</legend><div className="form-grid">
-        <div className="intent-choices full" role="radiogroup" aria-label="保存意图">{intents.map(([value,label,copy]) => <label key={value} className={intent === value ? "selected" : ""}><input type="radio" name="projectIntent" value={value} checked={intent === value} onChange={() => { setIntent(value); setError(""); }} /><strong>{label}</strong><span>{copy}</span></label>)}</div>
-        {intent === "pre_entry_execution" && <div className="approval-fields full" role="group" aria-label="未进单先执行批复"><Select name="managerApproved" label="是否批复" required defaultValue="" options={[["", "请选择"], ["true", "是"], ["false", "否"]]} help="只记录是否批复，不收集原因或缺失资料。" /></div>}
-        <div className="summary-grid full" aria-label="保存摘要">{summaryItems.map(([label, value]) => <div key={label}><span>{label}</span><strong>{summaryText(value)}</strong></div>)}</div>
-        <div className="form-footer full"><span>{intent === "draft" ? "项目将保持待进单" : intent === "formal" ? "将按正式进单意图校验" : "将标记为提前执行"}</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : intent === "draft" ? "保存为待进单" : intent === "formal" ? "正式进单" : "确认提前执行"}</button></div>
-      </div></fieldset>
     </div>
     {error && <div className="inline-error" role="alert">{error}</div>}
   </form>;
