@@ -654,7 +654,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     const customer = within(dialog).getByRole('textbox', { name: /客户名称.*必填/ });
     await waitFor(() => expect(customer).toHaveFocus());
-    expect(within(dialog).getByText(/旧址、新址和暂定范围均可后补/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/旧址、新址和设备范围均可后补/)).toBeInTheDocument();
     expect(within(dialog).getByRole('radiogroup', { name: '保存意图' })).toBeInTheDocument();
     expect(within(dialog).getByRole('radio', { name: /正式进单/ })).toBeChecked();
     expect(within(dialog).getByLabelText(/^ECC/)).toBeInTheDocument();
@@ -684,11 +684,14 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(intentOptions.map((option) => option.getAttribute('value'))).toEqual(['formal', 'draft', 'pre_entry_execution']);
     expect(intentOptions[0]).toBeChecked();
     const scope = within(dialog).getByRole('group', { name: '搬迁范围（均可后补）' });
-    expect(within(scope).getByLabelText(/暂定仪器名称/)).toBeInTheDocument();
-    expect(within(scope).getByLabelText(/暂定仪器数量/)).toBeInTheDocument();
-    expect(within(scope).getByLabelText(/暂定型号/)).toBeInTheDocument();
+    expect(within(scope).queryByLabelText(/暂定仪器名称/)).not.toBeInTheDocument();
+    expect(within(scope).queryByLabelText(/暂定仪器数量/)).not.toBeInTheDocument();
+    expect(within(scope).queryByLabelText(/暂定型号/)).not.toBeInTheDocument();
     expect(within(scope).getByRole('combobox', { name: /^UPS/ })).toHaveValue('');
-    expect(within(scope).getByText('暂定范围不会生成仪器记录，可后补。')).toBeInTheDocument();
+    expect(within(scope).getByText('UPS 信息仅作为项目范围记录，不会生成仪器记录，可后补。')).toBeInTheDocument();
+    const save = within(dialog).getByRole('button', { name: '正式进单' });
+    expect(save.closest('.layer-head')).not.toBeNull();
+    expect(save).toHaveAttribute('form', 'project-create-form');
     expect(within(dialog).getByLabelText(/^计划装机日期/)).toBeInTheDocument();
     expect(dialog).not.toHaveTextContent('计划装机完成日期');
     expect(within(dialog).getByLabelText(/实际装机完成日期/)).toBeInTheDocument();
@@ -704,9 +707,10 @@ describe('Oracle #10 bounded workbench renderer', () => {
     expect(summary).toHaveTextContent('客户名称未填写');
     expect(summary).toHaveTextContent('保存意图正式进单');
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '摘要客户' } });
-    fireEvent.change(within(dialog).getByLabelText(/暂定仪器数量/), { target: { value: '2' } });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: /^UPS/ }), { target: { value: 'true' } });
     expect(summary).toHaveTextContent('摘要客户');
-    expect(summary).toHaveTextContent('2 台');
+    expect(summary).toHaveTextContent('UPS是');
+    expect(summary).not.toHaveTextContent('暂定仪器');
     fireEvent.click(within(dialog).getByRole('radio', { name: /正式进单/ }));
     fireEvent.change(within(dialog).getByLabelText(/合同 USD 含税金额/), { target: { value: '0' } });
     const warning = within(dialog).getByRole('status');
@@ -750,7 +754,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'create_project', payload: expect.objectContaining({ entryAt: undefined }) })));
   });
 
-  it('新建项目由明确意图提交正式进单且不夹带服务单等已移除字段', async () => {
+  it('新建项目由顶部主操作提交正式进单，保留 UPS 且不夹带已移除仪器范围字段', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     await screen.findByRole('heading', { name: /项目队列/ });
     fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
@@ -762,9 +766,6 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.change(within(dialog).getByLabelText(/新址联系人/), { target: { value: '新址李工' } });
     fireEvent.change(within(dialog).getByLabelText(/旧址地址/), { target: { value: '旧址 A' } });
     fireEvent.change(within(dialog).getByLabelText(/新址地址/), { target: { value: '新址 B' } });
-    fireEvent.change(within(dialog).getByLabelText(/暂定仪器名称/), { target: { value: '  质谱仪  ' } });
-    fireEvent.change(within(dialog).getByLabelText(/暂定仪器数量/), { target: { value: '12' } });
-    fireEvent.change(within(dialog).getByLabelText(/暂定型号/), { target: { value: '  MS-12  ' } });
     fireEvent.change(within(dialog).getByRole('combobox', { name: /^UPS/ }), { target: { value: 'true' } });
 
     expect(within(dialog).queryByLabelText(/服务单号|工程师|开单备注|缺失资料|最终可确认金额/)).not.toBeInTheDocument();
@@ -779,27 +780,31 @@ describe('Oracle #10 bounded workbench renderer', () => {
       op: 'create_project',
       payload: expect.objectContaining({
         intent: 'formal', customerName: '向导客户', entryAt: '2026-08-09',
-        oldSiteContact: '旧址王工', newSiteContact: '新址李工', instrumentCount: 12, contractStartDate: null, contractEndDate: null, ecc: 'ECC-WIZ-001',
-        temporaryInstrumentName: '质谱仪', temporaryInstrumentModel: 'MS-12', temporaryHasUps: true,
+        oldSiteContact: '旧址王工', newSiteContact: '新址李工', contractStartDate: null, contractEndDate: null, ecc: 'ECC-WIZ-001',
+        temporaryHasUps: true,
       }),
     })));
+    const payload = vi.mocked(api.v2Mutate!).mock.calls.at(-1)![0].payload as unknown as Record<string, unknown>;
+    for (const key of ['instrumentCount', 'temporaryInstrumentName', 'temporaryInstrumentCount', 'temporaryInstrumentModel']) expect(key in payload).toBe(false);
     expect(api.v2Mutate).not.toHaveBeenCalledWith(expect.objectContaining({ op: 'submit_action', action: expect.objectContaining({ type: 'instrument' }) }));
   });
 
-  it('待进单通过公共建档 payload 显式提交暂定范围未填写三态且不登记仪器', async () => {
+  it('待进单通过顶部主操作提交 UPS 未填写三态，不提交已移除字段且不登记仪器', async () => {
     const api = mockApi(); Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
     await screen.findByRole('heading', { name: /项目队列/ }); fireEvent.click(screen.getByRole('button', { name: '新建搬迁项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建搬迁项目' });
     fireEvent.change(within(dialog).getByLabelText(/客户名称/), { target: { value: '待进单范围客户' } });
     fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'South' } });
-    fireEvent.change(within(dialog).getByLabelText(/暂定仪器名称/), { target: { value: '   ' } });
-    fireEvent.change(within(dialog).getByLabelText(/暂定型号/), { target: { value: '' } });
     fireEvent.click(within(dialog).getByRole('radio', { name: /保存为待进单/ }));
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存为待进单' }));
+    const save = within(dialog).getByRole('button', { name: '保存为待进单' });
+    expect(save.closest('.layer-head')).not.toBeNull();
+    fireEvent.click(save);
     await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({
       op: 'create_project',
-      payload: expect.objectContaining({ intent: 'draft', temporaryInstrumentName: null, temporaryInstrumentModel: null, temporaryHasUps: null }),
+      payload: expect.objectContaining({ intent: 'draft', temporaryHasUps: null }),
     })));
+    const payload = vi.mocked(api.v2Mutate!).mock.calls.at(-1)![0].payload as unknown as Record<string, unknown>;
+    for (const key of ['instrumentCount', 'temporaryInstrumentName', 'temporaryInstrumentCount', 'temporaryInstrumentModel']) expect(key in payload).toBe(false);
     expect(api.v2Mutate).not.toHaveBeenCalledWith(expect.objectContaining({ op: 'submit_action', action: expect.objectContaining({ type: 'instrument' }) }));
   });
 
@@ -816,13 +821,11 @@ describe('Oracle #10 bounded workbench renderer', () => {
     const approval = within(dialog).getByRole('combobox', { name: /是否批复/ });
     expect(approval).toBeRequired();
     expect(within(dialog).queryByLabelText(/批复说明|缺失资料/)).not.toBeInTheDocument();
-    fireEvent.change(within(dialog).getByLabelText(/暂定仪器名称/), { target: { value: '液相色谱' } });
-    fireEvent.change(within(dialog).getByLabelText(/暂定型号/), { target: { value: 'LC-8' } });
     fireEvent.change(within(dialog).getByRole('combobox', { name: /^UPS/ }), { target: { value: 'false' } });
-    fireEvent.change(approval, { target: { value: 'false' } }); fireEvent.click(within(dialog).getByRole('button', { name: '确认提前执行' }));
-    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'create_project', payload: expect.objectContaining({ intent: 'pre_entry_execution', managerApproved: false, temporaryInstrumentName: '液相色谱', temporaryInstrumentModel: 'LC-8', temporaryHasUps: false }) })));
+    fireEvent.change(approval, { target: { value: 'false' } }); fireEvent.click(within(dialog).getByRole('button', { name: '未进单先执行' }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith(expect.objectContaining({ op: 'create_project', payload: expect.objectContaining({ intent: 'pre_entry_execution', managerApproved: false, temporaryHasUps: false }) })));
     const payload = vi.mocked(api.v2Mutate!).mock.calls.at(-1)![0].payload as unknown as Record<string, unknown>;
-    for (const key of ['ecc', 'entryAt', 'contractAmount', 'finalAmount', 'serviceOrderNo', 'engineers', 'serviceOrderNote', 'missingItems']) expect(key in payload).toBe(false);
+    for (const key of ['ecc', 'entryAt', 'contractAmount', 'finalAmount', 'serviceOrderNo', 'engineers', 'serviceOrderNote', 'missingItems', 'instrumentCount', 'temporaryInstrumentName', 'temporaryInstrumentCount', 'temporaryInstrumentModel']) expect(key in payload).toBe(false);
   });
 
   it('新建契约拒绝只展示稳定中文，不暴露技术错误码', async () => {
@@ -1007,7 +1010,9 @@ describe('Oracle #10 bounded workbench renderer', () => {
     let resolveMutation!: (value: Awaited<ReturnType<NonNullable<WorkbenchApi['v2Mutate']>>>) => void;
     const api = mockApi({ v2Mutate: vi.fn().mockImplementation(() => new Promise((resolve) => { resolveMutation = resolve; })) });
     Object.defineProperty(window, 'workbench', { value: api, configurable: true }); render(<App />);
-    const dialog = await openQuickAction('物流费用登记'); const save = within(dialog).getByRole('button', { name: '保存记录' }); const form = save.closest('form')!;
+    const dialog = await openQuickAction('物流费用登记'); const save = within(dialog).getByRole('button', { name: '保存记录' }); const form = document.getElementById(save.getAttribute('form')!) as HTMLFormElement;
+    expect(save.closest('.layer-head')).not.toBeNull();
+    expect(form).toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText(/运输日期/), { target: { value: '2026-08-18' } });
     fireEvent.change(within(dialog).getByLabelText(/费用登记日期/), { target: { value: '2026-08-09' } });
     fireEvent.change(within(dialog).getByLabelText(/合同预算价/), { target: { value: '100' } });
@@ -1407,10 +1412,10 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(api.v2ProjectDetail).toHaveBeenCalledTimes(2));
   });
 
-  it('编辑项目资料打开已有 temporaryInstrumentCount 时显式回显值，并支持补录、调整及清空', async () => {
+  it('编辑项目资料忽略旧暂定仪器三字段，回显并保存 UPS 与其他项目资料', async () => {
     const row = { ...project(1), customerName: '基线客户' };
     const loaded = detailOf(row);
-    loaded.detail = { ...loaded.detail!, temporaryInstrumentName: '质谱仪', temporaryInstrumentCount: 12, temporaryInstrumentModel: null, temporaryHasUps: null };
+    loaded.detail = { ...loaded.detail!, temporaryInstrumentName: '质谱仪', temporaryInstrumentCount: 12, temporaryInstrumentModel: 'MS-12', temporaryHasUps: true };
     let detailReads = 0;
     const api = mockApi({
       v2ProjectPage: vi.fn().mockResolvedValue(page([row], null, 1)),
@@ -1424,7 +1429,7 @@ describe('Oracle #10 bounded workbench renderer', () => {
     render(<App />);
     await screen.findByRole('region', { name: '基线客户' });
 
-    // 项目标量/detail 读模型已携带 temporaryInstrumentCount；列表标量行不携带。
+    // 底层读模型仍可携带旧字段，但新界面不再展示或回写它们。
     expect(loaded.detail!.temporaryInstrumentCount).toBe(12);
     expect(row).not.toHaveProperty('temporaryInstrumentCount');
 
@@ -1432,18 +1437,15 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(editProject).not.toBeDisabled());
     fireEvent.click(editProject);
     const dialog = screen.getByRole('dialog', { name: '编辑项目资料' });
-    for (const name of ['基本信息', '地点与联系人', '暂定范围', '执行准备']) expect(within(dialog).getByRole('group', { name })).toBeInTheDocument();
-    expect(within(dialog).getByLabelText(/暂定仪器名称/)).toHaveValue('质谱仪');
-    expect(within(dialog).getByLabelText(/暂定仪器数量/)).toHaveValue(12);
-    expect(within(dialog).getByLabelText(/暂定型号/)).toHaveValue('');
-    expect(within(dialog).getByRole('combobox', { name: /^UPS/ })).toHaveValue('');
+    for (const name of ['基本信息', '地点与联系人', '设备范围', '执行准备']) expect(within(dialog).getByRole('group', { name })).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/暂定仪器名称/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/暂定仪器数量/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/暂定型号/)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: /^UPS/ })).toHaveValue('true');
     expect(within(dialog).getByLabelText(/项目备注/)).toHaveValue('');
     expect(within(dialog).getByLabelText(/暂存地址/)).toHaveValue('');
     expect(within(dialog).getByLabelText(/是否暂存/)).toHaveValue('');
     expect(within(dialog).getByLabelText(/^计划装机日期/)).toHaveValue('');
-    fireEvent.change(within(dialog).getByLabelText(/暂定仪器名称/), { target: { value: '  液相色谱  ' } });
-    fireEvent.change(within(dialog).getByLabelText(/暂定仪器数量/), { target: { value: '18' } });
-    fireEvent.change(within(dialog).getByLabelText(/暂定型号/), { target: { value: '  LC-2  ' } });
     fireEvent.change(within(dialog).getByRole('combobox', { name: /^UPS/ }), { target: { value: 'false' } });
     fireEvent.change(within(dialog).getByLabelText(/项目备注/), { target: { value: '需避开周末' } });
     fireEvent.change(within(dialog).getByLabelText(/暂存地址/), { target: { value: '中转仓 A' } });
@@ -1452,38 +1454,38 @@ describe('Oracle #10 bounded workbench renderer', () => {
 
     // 保存复用既有 v2Mutate update_project 刷新路径：关闭弹层并重新读取详情回显项目数据。
     fireEvent.click(within(dialog).getByRole('button', { name: '保存项目资料' }));
-    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: expect.objectContaining({ projectId: 'p-1', temporaryInstrumentName: '液相色谱', temporaryInstrumentCount: 18, temporaryInstrumentModel: 'LC-2', temporaryHasUps: false, projectNote: '需避开周末', temporaryStorageAddress: '中转仓 A', isTemporaryStorage: true, plannedInstallAt: '2026-09-03' }) }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenCalledWith({ op: 'update_project', payload: expect.objectContaining({ projectId: 'p-1', temporaryHasUps: false, projectNote: '需避开周末', temporaryStorageAddress: '中转仓 A', isTemporaryStorage: true, plannedInstallAt: '2026-09-03' }) }));
+    const firstPayload = vi.mocked(api.v2Mutate!).mock.calls.at(-1)![0].payload as unknown as Record<string, unknown>;
+    for (const key of ['temporaryInstrumentName', 'temporaryInstrumentCount', 'temporaryInstrumentModel']) expect(key in firstPayload).toBe(false);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目资料' })).not.toBeInTheDocument());
     await waitFor(() => expect(vi.mocked(api.v2ProjectDetail!).mock.calls.length).toBeGreaterThan(1));
     const overviewRegion = screen.getByRole('region', { name: '基线客户' });
-    expect(overviewRegion).toHaveTextContent('液相色谱');
-    expect(overviewRegion).toHaveTextContent('18 台');
-    expect(overviewRegion).toHaveTextContent('LC-2');
+    expect(overviewRegion).not.toHaveTextContent('质谱仪');
+    expect(overviewRegion).not.toHaveTextContent('12 台');
+    expect(overviewRegion).not.toHaveTextContent('MS-12');
     expect(overviewRegion).toHaveTextContent('UPS否');
 
     fireEvent.click(screen.getByRole('button', { name: '编辑项目资料' }));
     const reopened = screen.getByRole('dialog', { name: '编辑项目资料' });
-    expect(within(reopened).getByLabelText(/暂定仪器名称/)).toHaveValue('液相色谱');
-    expect(within(reopened).getByLabelText(/暂定仪器数量/)).toHaveValue(18);
-    expect(within(reopened).getByLabelText(/暂定型号/)).toHaveValue('LC-2');
+    expect(within(reopened).queryByLabelText(/暂定仪器名称/)).not.toBeInTheDocument();
+    expect(within(reopened).queryByLabelText(/暂定仪器数量/)).not.toBeInTheDocument();
+    expect(within(reopened).queryByLabelText(/暂定型号/)).not.toBeInTheDocument();
     expect(within(reopened).getByRole('combobox', { name: /^UPS/ })).toHaveValue('false');
-    fireEvent.change(within(reopened).getByLabelText(/暂定仪器名称/), { target: { value: '' } });
-    fireEvent.change(within(reopened).getByLabelText(/暂定仪器数量/), { target: { value: '' } });
-    fireEvent.change(within(reopened).getByLabelText(/暂定型号/), { target: { value: '' } });
     fireEvent.change(within(reopened).getByRole('combobox', { name: /^UPS/ }), { target: { value: '' } });
     fireEvent.click(within(reopened).getByRole('button', { name: '保存项目资料' }));
-    await waitFor(() => expect(api.v2Mutate).toHaveBeenLastCalledWith({ op: 'update_project', payload: expect.objectContaining({ temporaryInstrumentName: null, temporaryInstrumentCount: null, temporaryInstrumentModel: null, temporaryHasUps: null }) }));
+    await waitFor(() => expect(api.v2Mutate).toHaveBeenLastCalledWith({ op: 'update_project', payload: expect.objectContaining({ temporaryHasUps: null }) }));
+    const lastPayload = vi.mocked(api.v2Mutate!).mock.calls.at(-1)![0].payload as unknown as Record<string, unknown>;
+    for (const key of ['temporaryInstrumentName', 'temporaryInstrumentCount', 'temporaryInstrumentModel']) expect(key in lastPayload).toBe(false);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑项目资料' })).not.toBeInTheDocument());
-    await waitFor(() => expect(overviewRegion).toHaveTextContent('暂定仪器名称待补'));
-    expect(overviewRegion).toHaveTextContent('UPS未填写');
+    await waitFor(() => expect(overviewRegion).toHaveTextContent('UPS未填写'));
     expect(api.v2Mutate).not.toHaveBeenCalledWith(expect.objectContaining({ op: 'submit_action', action: expect.objectContaining({ type: 'instrument' }) }));
   });
 
-  it('项目 detail 未就绪时禁用编辑资料，加载完成后可打开并回显字段', async () => {
+  it('项目 detail 未就绪时禁用编辑资料，加载完成后可打开且只回显保留字段', async () => {
     let resolveDetail!: (value: WorkbenchV2ProjectDetailDto) => void;
     const row = { ...project(1), customerName: '延迟详情客户' };
     const loaded = detailOf(row);
-    loaded.detail = { ...loaded.detail!, temporaryInstrumentName: '延迟质谱仪', temporaryInstrumentCount: 6 };
+    loaded.detail = { ...loaded.detail!, temporaryInstrumentName: '延迟质谱仪', temporaryInstrumentCount: 6, temporaryInstrumentModel: '旧型号', temporaryHasUps: true };
     const api = mockApi({
       v2ProjectPage: vi.fn().mockResolvedValue(page([row], null, 1)),
       v2ProjectDetail: vi.fn().mockImplementation(() => new Promise<WorkbenchV2ProjectDetailDto>((resolve) => { resolveDetail = resolve; })),
@@ -1501,8 +1503,11 @@ describe('Oracle #10 bounded workbench renderer', () => {
     await waitFor(() => expect(edit).not.toBeDisabled());
     fireEvent.click(edit);
     const dialog = screen.getByRole('dialog', { name: '编辑项目资料' });
-    expect(within(dialog).getByLabelText(/暂定仪器名称/)).toHaveValue('延迟质谱仪');
-    expect(within(dialog).getByLabelText(/暂定仪器数量/)).toHaveValue(6);
+    expect(within(dialog).queryByLabelText(/暂定仪器名称/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/暂定仪器数量/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/暂定型号/)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: /^UPS/ })).toHaveValue('true');
+    expect(within(dialog).getByLabelText(/客户名称/)).toHaveValue('延迟详情客户');
   });
 
   it('编辑资料打开后无关 section 刷新不会清空未保存输入', async () => {
@@ -1651,7 +1656,6 @@ describe('Oracle #10 bounded workbench renderer', () => {
     fireEvent.change(within(dialog).getByLabelText(/区域/), { target: { value: 'East' } });
     fireEvent.change(within(dialog).getByLabelText(/旧址地址/), { target: { value: '旧址 A' } });
     fireEvent.change(within(dialog).getByLabelText(/新址地址/), { target: { value: '新址 B' } });
-    fireEvent.change(within(dialog).getByLabelText(/仪器数量/), { target: { value: '1' } });
     fireEvent.click(within(dialog).getByRole('radio', { name: /正式进单/ }));
     fireEvent.change(within(dialog).getByLabelText(/^ECC/), { target: { value: 'ECC-NEW-001' } });
     fireEvent.click(within(dialog).getByRole('button', { name: '正式进单' }));

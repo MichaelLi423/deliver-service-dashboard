@@ -1,5 +1,7 @@
 import {
+  createContext,
   useEffect,
+  useContext,
   useRef,
   useState,
   type FormEvent,
@@ -58,6 +60,12 @@ import {
 const PAGE_SIZE = 50;
 const PROJECT_PAGE_SIZE = 20;
 const ZERO_CONTRACT_AMOUNT_GUIDANCE = "合同金额为 0 仍可正式进单；最终可确认金额可暂空，请在首次登记掉票前补录。";
+const LayerHeaderActionsContext = createContext<HTMLElement | null>(null);
+
+function LayerHeaderAction({ children }: { children: ReactNode }): ReactNode {
+  const target = useContext(LayerHeaderActionsContext);
+  return target ? createPortal(children, target) : null;
+}
 const QR_REQUEST_TYPES = [
   { code: "A", label: "A" },
   { code: "B", label: "B" },
@@ -2089,7 +2097,7 @@ function ProjectDetails({
               {[
                 ["基础资料", [["客户名称", project.customerName], ["ECC / 临时编号", project.ecc || project.tempNo], ["所属区域", `${project.region || "待补"}${project.regionNeedsAdjustment ? "（待调整）" : ""}`], ["主状态", STATUS_LABEL[project.status]], ["进单日期", project.entryAt ? businessDate(project.entryAt) : "待进单"], ["项目备注", detail?.detail?.projectNote || "无"]]],
                 ["搬迁安排", [["旧址地址", detail?.detail?.oldSiteAddress || "待补"], ["新址地址", detail?.detail?.newSiteAddress || "待补"], ["计划上门日期", detail?.detail?.planVisitAt || "待补"], ["计划运输日期", detail?.detail?.planTransportAt || "待补"], ["场地确认", detail?.detail?.siteConfirmed ? "是" : "否"], ["是否暂存", detail?.detail?.isTemporaryStorage === null || detail?.detail?.isTemporaryStorage === undefined ? "未填写" : detail.detail.isTemporaryStorage ? "是" : "否"], ["暂存地址", detail?.detail?.temporaryStorageAddress || "待补"], ["计划装机日期", detail?.detail?.plannedInstallAt || "待补"], ["实际装机完成日期", detail?.detail?.actualInstallDoneAt || "待补"]]],
-                ["设备与合同", [["暂定仪器名称", detail?.detail?.temporaryInstrumentName || "待补"], ["暂定仪器数量", detail?.detail?.temporaryInstrumentCount === null || detail?.detail?.temporaryInstrumentCount === undefined ? "待补" : `${detail.detail.temporaryInstrumentCount} 台`], ["暂定型号", detail?.detail?.temporaryInstrumentModel || "待补"], ["UPS", detail?.detail?.temporaryHasUps === null || detail?.detail?.temporaryHasUps === undefined ? "未填写" : detail.detail.temporaryHasUps ? "是" : "否"], ["合同开始日期", detail?.detail?.contractStartDate || "待补"], ["合同截止日期", detail?.detail?.contractEndDate || "待补"]]],
+                ["设备与合同", [["UPS", detail?.detail?.temporaryHasUps === null || detail?.detail?.temporaryHasUps === undefined ? "未填写" : detail.detail.temporaryHasUps ? "是" : "否"], ["合同开始日期", detail?.detail?.contractStartDate || "待补"], ["合同截止日期", detail?.detail?.contractEndDate || "待补"]]],
               ].map(([group, fields]) => <section className="overview-group" aria-labelledby={`profile-${group}`} key={group as string}><h3 id={`profile-${group}`}>{group as string}</h3><dl>{(fields as string[][]).map(([label, value]) => <div key={label}><dt>{label}</dt><dd className={["待补", "未填写", "待进单"].includes(value!) ? "is-missing" : undefined}>{value}</dd></div>)}</dl></section>)}
             </div>
             <section className="overview-records" aria-labelledby="profile-records-title"><h3 id="profile-records-title">关联登记事实</h3><dl>{recordFacts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></section>
@@ -2429,7 +2437,8 @@ function InstrumentEditForm({
     try { await onSave({ model: model || null, ups, qrRequested, batchId: batchId || null }); }
     catch (cause) { setError(messageOf(cause)); setBusy(false); }
   }
-  return <form className="record-edit-form" aria-busy={busy} onSubmit={(event) => void submit(event)}>
+  return <form id="instrument-edit-form" className="record-edit-form" aria-busy={busy} onSubmit={(event) => void submit(event)}>
+    <LayerHeaderAction><button form="instrument-edit-form" className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存修改"}</button></LayerHeaderAction>
     <div className="readonly-record" aria-label="只读仪器识别信息">
       <div><span>仪器名称</span><strong>{instrument.name}</strong></div>
       <div><span>序列号</span><strong>{instrument.serialNo || "未登记"}</strong></div>
@@ -2442,7 +2451,7 @@ function InstrumentEditForm({
       <label className="confirm-check"><input type="checkbox" checked={qrRequested} onChange={(event) => setQrRequested(event.target.checked)} />二维码已申请</label>
     </div>
     {error && <div className="inline-error" role="alert">{error}</div>}
-    <div className="form-footer"><span>仅更新型号、UPS、二维码标记和所属批次</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存修改"}</button></div>
+    <div className="form-footer"><span>仅更新型号、UPS、二维码标记和所属批次</span></div>
   </form>;
 }
 
@@ -2461,11 +2470,12 @@ function ServiceOrderNoteForm({
     try { await onSave(next.trim() || null); }
     catch (cause) { setError(messageOf(cause)); setBusy(false); }
   }
-  return <form className="record-edit-form" aria-busy={busy} onSubmit={(event) => { event.preventDefault(); void save(note); }}>
+  return <form id="service-order-note-form" className="record-edit-form" aria-busy={busy} onSubmit={(event) => { event.preventDefault(); void save(note); }}>
+    <LayerHeaderAction><button form="service-order-note-form" className="button primary" disabled={busy}>{busy ? "正在保存…" : order.note ? "保存修改" : "补充备注"}</button></LayerHeaderAction>
     <div className="readonly-record compact"><div><span>服务单号</span><strong>{order.serviceOrderNo || "待补"}</strong></div><div><span>工程师</span><strong>{order.engineer}</strong></div></div>
     <TextArea name="serviceOrderNote" label="备注" value={note} onChange={(event) => setNote(event.target.value)} help="可修改、后补；清空后保存会移除现有备注。" autoFocus />
     {error && <div className="inline-error" role="alert">{error}</div>}
-    <div className="form-footer"><button className="button" type="button" disabled={busy || !order.note} onClick={() => { setNote(""); void save(""); }}>清空备注</button><button className="button primary" disabled={busy}>{busy ? "正在保存…" : order.note ? "保存修改" : "补充备注"}</button></div>
+    <div className="form-footer"><button className="button" type="button" disabled={busy || !order.note} onClick={() => { setNote(""); void save(""); }}>清空备注</button></div>
   </form>;
 }
 
@@ -2631,7 +2641,8 @@ function InstrumentRecordForm({
         <button type="button" role="tab" aria-selected={mode === "bulk"} onClick={() => setMode("bulk")}>Excel 批量导入</button>
       </div>
       {mode === "single" ? (
-        <form onSubmit={(event) => void submitSingle(event)}>
+        <form id="instrument-record-form" onSubmit={(event) => void submitSingle(event)}>
+          <LayerHeaderAction><button form="instrument-record-form" className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存记录"}</button></LayerHeaderAction>
           <div className="form-grid">
             <Field name="name" label="仪器名称" required autoFocus />
             <Field name="manufacturer" label="仪器产商" optional />
@@ -2641,10 +2652,11 @@ function InstrumentRecordForm({
             <Select name="ups" label="UPS" required options={[["false", "否"], ["true", "是"]]} />
           </div>
           {error && <div className="inline-error" role="alert">{error}</div>}
-          <div className="form-footer"><span>保存一台仪器</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存记录"}</button></div>
+          <div className="form-footer"><span>保存一台仪器</span></div>
         </form>
       ) : (
         <section className="bulk-import" aria-label="Excel 批量导入">
+          <LayerHeaderAction><button type="button" className="button primary" disabled={busy || !rows.length || errors.length > 0} onClick={() => void submitBulk()}>{busy ? "正在导入…" : `确认导入 ${rows.length} 行`}</button></LayerHeaderAction>
           <p className="notice">首行只识别：仪器名称、仪器产商、仪器型号、序列号、服务级别。顺序不限，仅仪器名称必填。</p>
           <label className="file-picker">
             <span>选择 .xlsx 文件</span>
@@ -2653,7 +2665,7 @@ function InstrumentRecordForm({
           {fileName && <div className="import-summary" role="status"><strong>{fileName}</strong><span>有效行数：{rows.length}</span></div>}
           {errors.length > 0 && <div className="import-errors" role="alert"><strong>请修正文件后重新选择</strong><ul>{errors.map((item) => <li key={item}>{item}</li>)}</ul></div>}
           {error && <div className="inline-error" role="alert">{error}</div>}
-          <div className="form-footer"><span>确认后整批提交，不逐行保存。</span><button type="button" className="button primary" disabled={busy || !rows.length || errors.length > 0} onClick={() => void submitBulk()}>{busy ? "正在导入…" : `确认导入 ${rows.length} 行`}</button></div>
+          <div className="form-footer"><span>确认后整批提交，不逐行保存。</span></div>
         </section>
       )}
     </div>
@@ -2758,6 +2770,7 @@ function ActionFormV2({
   }
   return (
     <form
+      id="action-record-form"
       onSubmit={(event) => void submit(event)}
       onChange={(event) => {
         if (type !== "batch") return;
@@ -2771,6 +2784,7 @@ function ActionFormV2({
         }
       }}
     >
+      <LayerHeaderAction><button form="action-record-form" className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存记录"}</button></LayerHeaderAction>
       <p className="notice">
         {ACTIONS.find((action) => action.type === type)?.help}
         。选项按当前项目分页读取，不加载全量记录。
@@ -2798,9 +2812,6 @@ function ActionFormV2({
       {warning && <div className="inline-warning" role="status">{warning}</div>}
       <div className="form-footer">
         <span>保存后仅刷新受影响的项目和当前详情</span>
-        <button className="button primary" disabled={busy}>
-          {busy ? "正在保存…" : "保存记录"}
-        </button>
       </div>
     </form>
   );
@@ -2845,7 +2856,8 @@ function BatchEditForm({
   }
 
   return (
-    <form className="project-edit-form" onSubmit={(event) => void submit(event)}>
+    <form id="batch-edit-form" className="project-edit-form" onSubmit={(event) => void submit(event)}>
+      <LayerHeaderAction><button form="batch-edit-form" className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存批次修改"}</button></LayerHeaderAction>
       <p className="notice">
         可补充、修改或清空本条物流费用信息。修改费用登记日期会影响报表归属月份。
       </p>
@@ -2905,9 +2917,6 @@ function BatchEditForm({
       {error && <div className="inline-error" role="alert">{error}</div>}
       <div className="form-footer">
         <span>保存后刷新当前项目的物流费用记录。</span>
-        <button className="button primary" disabled={busy}>
-          {busy ? "正在保存…" : "保存批次修改"}
-        </button>
       </div>
     </form>
   );
@@ -2924,7 +2933,7 @@ function DamageUpdateForm({
   const [error, setError] = useState("");
   const [issueStatus, setIssueStatus] = useState(damage.issueStatus);
   return (
-    <form onSubmit={(event) => {
+    <form id="damage-update-form" onSubmit={(event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       setBusy(true);
@@ -2933,6 +2942,7 @@ function DamageUpdateForm({
         .catch((cause) => setError(messageOf(cause)))
         .finally(() => setBusy(false));
     }}>
+      <LayerHeaderAction><button form="damage-update-form" className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存维修状态"}</button></LayerHeaderAction>
       <p className="notice">{damage.instrumentName || "仪器名称待补"} · {damage.serialNo || "无序列号"}</p>
       <div className="form-grid">
         <Select name="issueStatus" label="维修状态" value={issueStatus} onChange={(event) => setIssueStatus(event.target.value)} required autoFocus options={[
@@ -2946,7 +2956,7 @@ function DamageUpdateForm({
         )}
       </div>
       {error && <div className="inline-error" role="alert">{error}</div>}
-      <div className="form-footer"><span>更新当前损坏事项</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存维修状态"}</button></div>
+      <div className="form-footer"><span>更新当前损坏事项</span></div>
     </form>
   );
 }
@@ -3527,9 +3537,11 @@ function IndependentModuleV2({
       className={`module-layout v2-independent ${kind === "qr_request" ? "qr-request-module" : ""}`}
     >
       <form
+        id="independent-record-form"
         className={kind === "qr_request" ? "qr-request-form" : undefined}
         onSubmit={(event) => void submit(event)}
       >
+        <LayerHeaderAction><button form="independent-record-form" className="button primary" disabled={busy}>{busy ? "正在保存…" : kind === "qr_request" ? "保存申请" : "保存记录"}</button></LayerHeaderAction>
         <div className="form-grid">
           {kind === "serial_address" ? (
             <>
@@ -3645,16 +3657,6 @@ function IndependentModuleV2({
               ? "每条记录按去重后的选中类型计工作量"
               : "保存后仅刷新当前独立模块"}
           </span>
-          <button
-            className="button primary"
-            disabled={busy}
-          >
-            {busy
-              ? "正在保存…"
-              : kind === "qr_request"
-                ? "保存申请"
-                : "保存记录"}
-          </button>
         </div>
       </form>
       <section className="module-list">
@@ -3906,7 +3908,8 @@ function ProjectTagEditForm({
   }
 
   return (
-    <form ref={formRef} className="project-tag-edit" aria-busy={busy} onSubmit={(event) => void submit(event)}>
+    <form id="project-tag-edit-form" ref={formRef} className="project-tag-edit" aria-busy={busy} onSubmit={(event) => void submit(event)}>
+      <LayerHeaderAction><button form="project-tag-edit-form" className="button primary" disabled={!dirty || unavailable || busy}>{busy ? "正在保存…" : "保存标签"}</button></LayerHeaderAction>
       <div className="project-tag-edit-scroll">
         <GroupedTagPicker
           catalog={catalog}
@@ -3934,9 +3937,6 @@ function ProjectTagEditForm({
             onClick={(event) => onCancel(event.currentTarget)}
           >
             取消
-          </button>
-          <button className="button primary" disabled={!dirty || unavailable || busy}>
-            {busy ? "正在保存…" : "保存标签"}
           </button>
         </div>
       </footer>
@@ -4055,7 +4055,6 @@ function ProjectEditForm({
       if (current !== initial) patch[key] = current;
     }
     if (mode === "project") {
-      const temporaryInstrumentCountText = nullable(data, "temporaryInstrumentCount");
       addIfChanged("customerName", String(data.get("customerName") ?? "").trim(), project.customerName.trim());
       addIfChanged("region", String(data.get("region") ?? "").trim(), project.region ?? "");
       addIfChanged("contractStartDate", nullable(data, "contractStartDate"), detail?.contractStartDate ?? null);
@@ -4071,9 +4070,6 @@ function ProjectEditForm({
       addIfChanged("projectNote", nullable(data, "projectNote"), detail?.projectNote ?? null);
       addIfChanged("temporaryStorageAddress", nullable(data, "temporaryStorageAddress"), detail?.temporaryStorageAddress ?? null);
       addIfChanged("isTemporaryStorage", data.get("isTemporaryStorage") === "" ? null : data.get("isTemporaryStorage") === "true", detail?.isTemporaryStorage ?? null);
-      addIfChanged("temporaryInstrumentCount", temporaryInstrumentCountText === null ? null : Number(temporaryInstrumentCountText), detail?.temporaryInstrumentCount ?? null);
-      addIfChanged("temporaryInstrumentName", nullable(data, "temporaryInstrumentName"), detail?.temporaryInstrumentName ?? null);
-      addIfChanged("temporaryInstrumentModel", nullable(data, "temporaryInstrumentModel"), detail?.temporaryInstrumentModel ?? null);
       addIfChanged("temporaryHasUps", data.get("temporaryHasUps") === "" ? null : data.get("temporaryHasUps") === "true", detail?.temporaryHasUps ?? null);
     } else {
       addIfChanged("ecc", nullable(data, "ecc"), project.ecc);
@@ -4096,7 +4092,8 @@ function ProjectEditForm({
   }
   if (mode === "entry") {
     return (
-      <form className="project-edit-form" onSubmit={(event) => void submit(event)} onChange={() => setNotice("")}>
+      <form id="entry-correction-form" className="project-edit-form" onSubmit={(event) => void submit(event)} onChange={() => setNotice("")}>
+        <LayerHeaderAction><button form="entry-correction-form" className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存更正"}</button></LayerHeaderAction>
         <p className="notice">
           仅用于更正已经正式进单项目的识别与金额资料。合同金额是当前合同值；进单金额快照保留正式进单当时的口径，不会因本次更正自动改写。
         </p>
@@ -4120,18 +4117,19 @@ function ProjectEditForm({
         {notice && <p className="notice" role="status">{notice}</p>}
         <div className="form-footer">
           <span>不会修改仪器、序列号或服务单资料。</span>
-          <button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存更正"}</button>
         </div>
       </form>
     );
   }
   return (
     <form
+      id="project-edit-form"
       className="project-edit-form"
       onSubmit={(event) => void submit(event)}
       onChange={() => setNotice("")}
     >
-      <p className="notice">维护项目级资料；暂定范围不会生成仪器记录，可后补。逐台仪器、序列号和服务单请在各自业务入口维护。</p>
+      <LayerHeaderAction><button form="project-edit-form" className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存项目资料"}</button></LayerHeaderAction>
+      <p className="notice">维护项目级资料；逐台仪器、序列号和服务单请在各自业务入口维护。</p>
       <div className="edit-form-sections">
         <fieldset className="edit-form-section">
           <legend>基本信息</legend>
@@ -4153,11 +4151,8 @@ function ProjectEditForm({
           </div>
         </fieldset>
         <fieldset className="edit-form-section">
-          <legend>暂定范围</legend>
+          <legend>设备范围</legend>
           <div className="form-grid">
-            <Field name="temporaryInstrumentName" label="暂定仪器名称" defaultValue={detail?.temporaryInstrumentName ?? ""} optional />
-            <Field name="temporaryInstrumentCount" label="暂定仪器数量" type="number" min="0" step="1" defaultValue={detail?.temporaryInstrumentCount ?? ""} optional />
-            <Field name="temporaryInstrumentModel" label="暂定型号" defaultValue={detail?.temporaryInstrumentModel ?? ""} optional />
             <Select name="temporaryHasUps" label="UPS" defaultValue={detail?.temporaryHasUps === null || detail?.temporaryHasUps === undefined ? "" : String(detail.temporaryHasUps)} options={[["", "未填写"], ["true", "是"], ["false", "否"]]} help="仅记录项目暂定范围，不代表逐台仪器事实。" />
           </div>
         </fieldset>
@@ -4180,7 +4175,6 @@ function ProjectEditForm({
       {notice && <p className="notice" role="status">{notice}</p>}
       <div className="form-footer">
         <span>保存后刷新当前项目资料。</span>
-        <button className="button primary" disabled={busy}>{busy ? "正在保存…" : "保存项目资料"}</button>
       </div>
     </form>
   );
@@ -4194,7 +4188,7 @@ function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, on
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [summary, setSummary] = useState({
     customerName: "", oldSiteAddress: "", newSiteAddress: "",
-    temporaryInstrumentName: "", instrumentCount: "", temporaryInstrumentModel: "", temporaryHasUps: "",
+    temporaryHasUps: "",
     planVisitAt: "", planTransportAt: "", contractAmount: "",
   });
   const summaryText = (value: string): string => value.trim() || "未填写";
@@ -4208,9 +4202,6 @@ function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, on
     ["所属区域", region],
     ["旧址地址", summary.oldSiteAddress],
     ["新址地址", summary.newSiteAddress],
-    ["暂定仪器名称", summary.temporaryInstrumentName],
-    ["暂定仪器数量", summary.instrumentCount ? `${summary.instrumentCount} 台` : ""],
-    ["暂定型号", summary.temporaryInstrumentModel],
     ["UPS", summary.temporaryHasUps === "true" ? "是" : summary.temporaryHasUps === "false" ? "否" : ""],
     ["计划上门日期", summary.planVisitAt],
     ["计划运输日期", summary.planTransportAt],
@@ -4222,7 +4213,7 @@ function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, on
     const text = (name: string): string => String(data.get(name) ?? "");
     setSummary({
       customerName: text("customerName"), oldSiteAddress: text("oldSiteAddress"), newSiteAddress: text("newSiteAddress"),
-      temporaryInstrumentName: text("temporaryInstrumentName"), instrumentCount: text("instrumentCount"), temporaryInstrumentModel: text("temporaryInstrumentModel"), temporaryHasUps: text("temporaryHasUps"),
+      temporaryHasUps: text("temporaryHasUps"),
       planVisitAt: text("planVisitAt"), planTransportAt: text("planTransportAt"), contractAmount: text("contractAmount"),
     });
   };
@@ -4239,9 +4230,6 @@ function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, on
         ...(intent === "formal" ? { ecc: value("ecc"), entryAt: value("entryAt") || undefined, contractAmount: value("contractAmount") } : {}),
         oldSiteAddress: value("oldSiteAddress") || null,
         newSiteAddress: value("newSiteAddress") || null, oldSiteContact: value("oldSiteContact"), newSiteContact: value("newSiteContact"),
-        instrumentCount: value("instrumentCount") ? Number(value("instrumentCount")) : null,
-        temporaryInstrumentName: value("temporaryInstrumentName") || null,
-        temporaryInstrumentModel: value("temporaryInstrumentModel") || null,
         temporaryHasUps: value("temporaryHasUps") === "" ? null : value("temporaryHasUps") === "true",
         projectNote: value("projectNote") || null,
         temporaryStorageAddress: value("temporaryStorageAddress") || null,
@@ -4258,14 +4246,15 @@ function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, on
     ["draft", "保存为待进单", "先建项目，资料稍后补齐"],
     ["pre_entry_execution", "未进单先执行", "记录是否批复，项目仍保持待进单"],
   ];
-  return <form className="project-create-form" onSubmit={(event) => void submit(event)} onChange={updateSummary}>
-    <p className="notice">先明确保存意图。旧址、新址和暂定范围均可后补，不影响建立项目。</p>
+  return <form id="project-create-form" className="project-create-form" onSubmit={(event) => void submit(event)} onChange={updateSummary}>
+    <LayerHeaderAction><button form="project-create-form" className="button primary" disabled={busy}>{busy ? "正在保存…" : intentLabel[intent]}</button></LayerHeaderAction>
+    <p className="notice">先明确保存意图。旧址、新址和设备范围均可后补，不影响建立项目。</p>
     <div className="create-form-sections">
       <fieldset className="edit-form-section"><legend>保存意图</legend><div className="form-grid">
         <div className="intent-choices full" role="radiogroup" aria-label="保存意图">{intents.map(([value,label,copy]) => <label key={value} className={intent === value ? "selected" : ""}><input type="radio" name="projectIntent" value={value} checked={intent === value} onChange={() => { setIntent(value); setError(""); }} /><strong>{label}</strong><span>{copy}</span></label>)}</div>
         {intent === "pre_entry_execution" && <div className="approval-fields full" role="group" aria-label="未进单先执行批复"><Select name="managerApproved" label="是否批复" required defaultValue="" options={[["", "请选择"], ["true", "是"], ["false", "否"]]} help="只记录是否批复，不收集原因或缺失资料。" /></div>}
         <div className="summary-grid full" aria-label="保存摘要">{summaryItems.map(([label, value]) => <div key={label}><span>{label}</span><strong>{summaryText(value)}</strong></div>)}</div>
-        <div className="form-footer full"><span>{intent === "draft" ? "项目将保持待进单" : intent === "formal" ? "将按正式进单意图校验" : "将标记为提前执行"}</span><button className="button primary" disabled={busy}>{busy ? "正在保存…" : intent === "draft" ? "保存为待进单" : intent === "formal" ? "正式进单" : "确认提前执行"}</button></div>
+        <div className="form-footer full"><span>{intent === "draft" ? "项目将保持待进单" : intent === "formal" ? "将按正式进单意图校验" : "将标记为未进单先执行"}</span></div>
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>项目与进单</legend><div className="form-grid">
         <Field name="customerName" label="客户名称" required autoFocus /><ProjectRegionSelect value={region} onChange={setRegion} />
@@ -4277,11 +4266,9 @@ function ProjectCreateSinglePageForm({ catalog, catalogLoading, catalogError, on
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>搬迁范围（均可后补）</legend><div className="form-grid">
         <Field name="oldSiteAddress" label="旧址地址" optional /><Field name="newSiteAddress" label="新址地址" optional />
-        <Field name="temporaryInstrumentName" label="暂定仪器名称" optional /><Field name="instrumentCount" label="暂定仪器数量" type="number" min="1" step="1" optional />
-        <Field name="temporaryInstrumentModel" label="暂定型号" optional />
         <Select name="temporaryHasUps" label="UPS" defaultValue="" options={[["", "未填写"], ["true", "是"], ["false", "否"]]} help="仅记录项目暂定范围，不代表逐台仪器事实。" />
         <Field name="temporaryStorageAddress" label="暂存地址" optional />
-        <p className="notice full">暂定范围不会生成仪器记录，可后补。</p>
+        <p className="notice full">UPS 信息仅作为项目范围记录，不会生成仪器记录，可后补。</p>
       </div></fieldset>
       <fieldset className="edit-form-section"><legend>执行准备</legend><div className="form-grid">
         <Field name="planVisitAt" label="计划上门日期" type="date" optional /><Field name="planTransportAt" label="计划运输日期" type="date" optional />
@@ -4307,6 +4294,7 @@ function ReminderFormV2({
   const [error, setError] = useState("");
   return (
     <form
+      id="reminder-edit-form"
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -4316,6 +4304,7 @@ function ReminderFormV2({
         ).catch((cause) => setError(messageOf(cause)));
       }}
     >
+      <LayerHeaderAction><button form="reminder-edit-form" className="button primary">保存当前提醒</button></LayerHeaderAction>
       <p className="notice">
         项目只保留一个当前提醒，可编辑或清除，不保存提醒完成历史。
       </p>
@@ -4347,7 +4336,6 @@ function ReminderFormV2({
         >
           清除提醒
         </button>
-        <button className="button primary">保存当前提醒</button>
       </div>
     </form>
   );
@@ -4362,6 +4350,7 @@ function CancelFormV2({
   const [error, setError] = useState("");
   return (
     <form
+      id="project-cancel-form"
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -4370,6 +4359,7 @@ function CancelFormV2({
         );
       }}
     >
+      <LayerHeaderAction><button form="project-cancel-form" className="button danger">确认取消项目</button></LayerHeaderAction>
       <p className="notice danger-notice">
         取消为终态不可恢复；存在任何掉票历史（含已撤销）的项目禁止取消。
       </p>
@@ -4395,7 +4385,6 @@ function CancelFormV2({
       )}
       <div className="form-footer">
         <span>{project.customerName}</span>
-        <button className="button danger">确认取消项目</button>
       </div>
     </form>
   );
@@ -4418,6 +4407,7 @@ function InvoiceMutationForm({
   const [error, setError] = useState("");
   return (
     <form
+      id={`invoice-${mode}-form`}
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -4428,6 +4418,11 @@ function InvoiceMutationForm({
         }).catch((cause) => setError(messageOf(cause)));
       }}
     >
+      <LayerHeaderAction>
+        <button form={`invoice-${mode}-form`} className={`button ${mode === "revoke" ? "danger" : "primary"}`}>
+          {mode === "edit" ? "保存修改" : "确认撤销掉票"}
+        </button>
+      </LayerHeaderAction>
       <p className={`notice ${mode === "revoke" ? "danger-notice" : ""}`}>
         {mode === "revoke"
           ? "撤销后为不可恢复终态，更正需新增有效掉票。"
@@ -4468,11 +4463,6 @@ function InvoiceMutationForm({
       )}
       <div className="form-footer">
         <span>{invoice.id}</span>
-        <button
-          className={`button ${mode === "revoke" ? "danger" : "primary"}`}
-        >
-          {mode === "edit" ? "保存修改" : "确认撤销掉票"}
-        </button>
       </div>
     </form>
   );
@@ -4822,6 +4812,7 @@ function Layer({
   const onCloseRef = useRef(onClose);
   const discardOpenRef = useRef(false);
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [headerActions, setHeaderActions] = useState<HTMLElement | null>(null);
   const opener = useRef<HTMLElement | null>(
     document.activeElement as HTMLElement,
   );
@@ -4939,20 +4930,25 @@ function Layer({
         }}
       >
         <header className="layer-head">
-          <div>
+          <div className="layer-heading">
             <h2 id="layer-title-v2">{title}</h2>
             <p>{description}</p>
           </div>
-          <button
-            className="icon-button"
-            disabled={busy}
-            onClick={(event) => requestClose(event.currentTarget)}
-            aria-label="关闭"
-          >
-            ×
-          </button>
+          <div className="layer-head-actions">
+            <div className="layer-header-actions" ref={setHeaderActions} />
+            <button
+              className="icon-button"
+              disabled={busy}
+              onClick={(event) => requestClose(event.currentTarget)}
+              aria-label="关闭"
+            >
+              ×
+            </button>
+          </div>
         </header>
-        <div className="layer-body">{children}</div>
+        <LayerHeaderActionsContext.Provider value={headerActions}>
+          <div className="layer-body">{children}</div>
+        </LayerHeaderActionsContext.Provider>
       </section>
       {discardOpen && (
         <div

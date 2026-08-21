@@ -101,7 +101,7 @@ export const scenarioMap = {
     '建档时填写可选项目备注': { evidence: [['tests/domain/relocation-fields.test.ts', '项目备注可空：建档后补充/修改/清空，不触发主状态流转']] },
     '建档后补充或修改项目备注': { evidence: [['tests/domain/relocation-fields.test.ts', '项目备注可空：建档后补充/修改/清空，不触发主状态流转']] },
     '计划上门日期到达自动进入执行中优先于人工状态值': { evidence: [['tests/domain/lifecycle.test.ts', '到期自动推进优先于人工目标值'], ['tests/integration/workbench-facade.sqlite.test.ts', '同次 create/supplement 先保存未进单先执行标签，再以到期计划上门日期经 lifecycle 推进并审计']] },
-    '建档移除字段不阻塞进单': { evidence: [['tests/renderer/app.test.tsx', '新建项目由明确意图提交正式进单且不夹带服务单等已移除字段']] },
+    '建档移除字段不阻塞进单': { evidence: [['tests/renderer/app.test.tsx', '新建项目由顶部主操作提交正式进单，保留 UPS 且不夹带已移除仪器范围字段']] },
     '计划上门日期到期后待进单自动进入执行中': { evidence: [['tests/domain/lifecycle.test.ts', '待进单带"未进单先执行"标签到期自动进入执行中'], ['tests/integration/workbench-facade.sqlite.test.ts', '同次 create/supplement 先保存未进单先执行标签，再以到期计划上门日期经 lifecycle 推进并审计']] },
     '已在执行中的项目正式进单不倒退': { evidence: [['tests/integration/relocation-project-lifecycle.sqlite.test.ts', '正式进单不倒退：已在执行中的项目进单后保持执行中，在原项目上完成']] },
     '计划上门日期到达待执行项目自动进入执行中': { evidence: [['tests/domain/lifecycle.test.ts', '到期：待执行 → 执行中']] },
@@ -366,7 +366,7 @@ export const scenarioMap = {
     '暂存信息不触发状态流转': { evidence: [['tests/domain/relocation-fields.test.ts', '暂存地址/是否暂存为手工维护执行事实：修改不影响主状态']] },
     '记录计划装机日期': { evidence: [['tests/main/workbench-v2-ipc.test.ts', 'update_project 经 IPC：0810 标量（备注/暂存/是否批复/暂定数量/计划装机日期）保存并经 detail 回显']] },
     '计划装机日期不触发状态流转': { evidence: [['tests/integration/new-batch-behaviors.sqlite.test.ts', '计划装机完成日期：可随新建/补齐/更新写入，且不触发生命周期']] },
-    '建档时填写暂定搬迁范围并持久化': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过'], ['tests/renderer/app.test.tsx', '待进单通过公共建档 payload 显式提交暂定范围未填写三态且不登记仪器']] },
+    '建档时填写暂定搬迁范围并持久化': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过'], ['tests/renderer/app.test.tsx', '待进单通过顶部主操作提交 UPS 未填写三态，不提交已移除字段且不登记仪器']] },
     '暂定搬迁范围允许留空后补': { evidence: [['tests/integration/create-project-ecc-rules.sqlite.test.ts', '编辑资料回显：update_project 填写/修改/清空范围字段，不建仪器、不改状态']] },
     'UPS 未填写区别于否': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过']] },
     '暂定搬迁范围不建仪器不改既有事实': { evidence: [['tests/domain/relocation-execution.test.ts', '项目暂定仪器范围（v16：只更新项目标量，不建仪器、不触发主状态）']] },
@@ -375,6 +375,10 @@ export const scenarioMap = {
     '编辑项目资料补录暂定数量并保存最新值': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
     '编辑项目资料调整暂定数量不改变既有仪器事实': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
     '调整暂定数量不触发状态流转': { evidence: [['tests/domain/relocation-execution.test.ts', '项目暂定仪器范围（v16：只更新项目标量，不建仪器、不触发主状态）']] },
+    '补齐进单核心资料查看并留空暂定数量': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
+    '补齐进单核心资料补录暂定数量并保存最新值': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
+    '补齐进单核心资料调整暂定数量不改变既有仪器事实': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
+    '建档时填写 UPS 并持久化': { evidence: [['tests/persistence/migration-v16.test.ts', '全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过'], ['tests/renderer/app.test.tsx', '待进单通过顶部主操作提交 UPS 未填写三态，不提交已移除字段且不登记仪器']] },
     '只记暂定数量不建仪器': {
       evidence: [
         ['tests/domain/relocation-execution.test.ts', '只记暂定数量不建仪器：保存数量信息且不创建任何仪器记录'],
@@ -481,7 +485,7 @@ export const scenarioMap = {
     },
     '费用登记日期必填默认当天': {
       evidence: [
-        ['tests/domain/relocation-execution.test.ts', '费用登记日期必填默认当天，归属月份按该日期计算'],
+        ['tests/domain/relocation-execution.test.ts', '修改金额不改申请（登记）时间与归属月份'],
       ],
     },
     '合同预算价必填且大于 0，物流成交价允许暂空或 0': {
@@ -525,7 +529,7 @@ export const scenarioMap = {
     '历史批次缺费用视为异常数据': {
       evidence: [
         ['tests/domain/operational-reporting.test.ts', '历史异常批次（已有物流成交价无费用记录）进入清单；底层筛选保留历史兼容（补录后纳入报表）'],
-        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 历史批次无 fee：编辑价格按需创建部分费用，仅批次字段不虚构费用'],
       ],
     },
   },
@@ -1152,7 +1156,7 @@ export const scenarioMap = {
     '历史批次缺费用视为异常数据': {
       evidence: [
         ['tests/domain/operational-reporting.test.ts', '历史异常批次（已有物流成交价无费用记录）进入清单；底层筛选保留历史兼容（补录后纳入报表）'],
-        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 历史批次无 fee：编辑价格按需创建部分费用，仅批次字段不虚构费用'],
       ],
     },
     '首次提交与后续状态更新不重复计数': {
@@ -1873,7 +1877,7 @@ export const scenarioMap = {
     '按客户名称或编号搜索': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.4：关键词覆盖客户/ECC/临时编号；区域仅五枚举（runtime 非枚举拒绝）；query+region AND']] },
     '区域筛选为固定枚举': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.4：关键词覆盖客户/ECC/临时编号；区域仅五枚举（runtime 非枚举拒绝）；query+region AND']] },
     '搜索与区域筛选组合': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.4：关键词覆盖客户/ECC/临时编号；区域仅五枚举（runtime 非枚举拒绝）；query+region AND']] },
-    '查看已有暂定仪器数量': { evidence: [['tests/renderer/app.test.tsx', '编辑项目资料打开已有 temporaryInstrumentCount 时显式回显值，并支持补录、调整及清空']] },
+    '查看已有暂定仪器数量': { evidence: [['tests/renderer/app.test.tsx', '编辑项目资料忽略旧暂定仪器三字段，回显并保存 UPS 与其他项目资料']] },
     '暂定仪器数量允许留空': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
     '补录或调整后回显最新值': { evidence: [['tests/domain/relocation-execution.test.ts', '编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）']] },
     '每页固定展示 20 个项目': { evidence: [['tests/integration/workbench-read-v2.sqlite.test.ts', '任务7.5：固定每页 20（renderer 任意 limit 忽略）、翻页无重复无遗漏、游标稳定、total 正确']] },
@@ -1943,22 +1947,22 @@ export const scenarioMap = {
     },
     '随选中项目更新上下文': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目'],
+        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目'],
       ],
     },
     '展示状态异常与当前项目提醒': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目'],
+        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目'],
       ],
     },
     '展示金额闭环': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目'],
+        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目'],
       ],
     },
     '展示非阻塞事项并标注不阻塞': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目'],
+        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目'],
       ],
     },
     '展示项目分类标签': {
@@ -1968,12 +1972,12 @@ export const scenarioMap = {
     },
     '点击项目选中并刷新上下文': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目'],
+        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目'],
       ],
     },
     '点击项目提醒联动所属项目': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目'],
+        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目'],
       ],
     },
     '点击阶段筛选并选中项目': {
@@ -1983,18 +1987,18 @@ export const scenarioMap = {
     },
     '单页分组呈现与对应字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签'],
-        ['tests/renderer/app.test.tsx', '新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目默认正式进单，保存意图及选项按要求排序'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目默认正式进单，保存意图及选项按要求排序'],
       ],
     },
     '搬迁范围分组字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目默认正式进单，保存意图及选项按要求排序'],
       ],
     },
     '执行准备分组字段': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目默认正式进单，保存意图及选项按要求排序'],
       ],
     },
     '保存为待进单': {
@@ -2005,7 +2009,7 @@ export const scenarioMap = {
     },
     '正式进单': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建项目由明确意图提交正式进单且不夹带服务单等已移除字段'],
+        ['tests/renderer/app.test.tsx', '新建项目由顶部主操作提交正式进单，保留 UPS 且不夹带已移除仪器范围字段'],
       ],
     },
     '未进单先执行': {
@@ -2089,20 +2093,20 @@ export const scenarioMap = {
     },
     '修改批次运输信息与两价': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '物流费用记录可预填编辑，并只提交约定字段且不修改费用登记日期'],
+        ['tests/renderer/app.test.tsx', '物流费用编辑回显全部五项，未改的 appliedAt 按原值提交并可清空其他字段'],
         ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt'],
       ],
     },
     '费用登记日期不可修改且归属月份不变': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '物流费用记录可预填编辑，并只提交约定字段且不修改费用登记日期'],
+        ['tests/renderer/app.test.tsx', '物流费用编辑回显全部五项，未改的 appliedAt 按原值提交并可清空其他字段'],
         ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt'],
       ],
     },
     '不提供独立物流费用补录入口': {
       evidence: [
         ['tests/renderer/app.test.tsx', '快速记录合并开单入口，八类动作均提供真实字段'],
-        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑'],
+        ['tests/integration/workbench-facade.sqlite.test.ts', 'batch_edit 历史批次无 fee：编辑价格按需创建部分费用，仅批次字段不虚构费用'],
       ],
       note: '快速记录菜单不出现独立「实际物流费用」动作；费用仅通过批次创建/批次编辑中的合同预算价、物流成交价维护（见「物流费用记录可预填编辑」测试）',
     },
@@ -2123,12 +2127,12 @@ export const scenarioMap = {
     },
     '项目提醒直达所属项目': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目'],
+        ['tests/renderer/app.test.tsx', '上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目'],
       ],
     },
     '必填与可选标识及帮助': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签'],
+        ['tests/renderer/app.test.tsx', '新建搬迁项目默认正式进单，保存意图及选项按要求排序'],
       ],
     },
     '校验失败就地提示': {
@@ -2217,7 +2221,7 @@ export const scenarioMap = {
     },
     '详情 tab 可切换展开': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '详情 tab 按需加载，项目总览不读取 section'],
+        ['tests/renderer/app.test.tsx', '详情默认打开搬迁仪器并按需切换 section，不再显示项目总览 tab'],
       ],
     },
     '扩展 tab 或独立导航模块提供新增能力': {
@@ -2232,7 +2236,7 @@ export const scenarioMap = {
     },
     '项目总览展示关键事实': {
       evidence: [
-        ['tests/renderer/app.test.tsx', '详情 tab 按需加载，项目总览不读取 section'],
+        ['tests/renderer/app.test.tsx', '详情默认打开搬迁仪器并按需切换 section，不再显示项目总览 tab'],
       ],
     },
     '费用与掉票 tab 展示金额与掉票记录': {

@@ -8,7 +8,7 @@
 
 ### Requirement: 暂定数量登记
 
-项目 SHALL 可记录暂定仪器数量；"编辑项目资料" SHALL 提供暂定仪器数量字段，允许负责人查看、留空、补录或调整暂定仪器数量，保存后系统 SHALL 读取并保存最新值；暂定仪器数量 SHALL 允许建档时留空并在建档后经"编辑项目资料"补充，SHALL NOT 因数量为空拒绝建档、正式进单或主状态流转；暂定数量 SHALL NOT 生成虚拟仪器记录，SHALL NOT 改变已存在的逐台仪器事实，SHALL NOT 触发项目主状态流转。暂定数量的取值校验 SHALL 遵循既有输入校验规则，本调整不引入新的格式约束。
+项目 SHALL 可记录暂定仪器数量（`instrumentCount`）；暂定仪器数量 SHALL 通过"补齐进单核心资料"采集，不再在"新增搬迁项目"或"编辑项目资料"中展示或采集；暂定仪器数量 SHALL 允许留空，SHALL NOT 因数量为空拒绝建档、正式进单或主状态流转；暂定数量 SHALL NOT 生成虚拟仪器记录，SHALL NOT 改变已存在的逐台仪器事实，SHALL NOT 触发项目主状态流转。暂定数量的取值校验 SHALL 遵循既有输入校验规则，本调整不引入新的格式约束。
 
 #### Scenario: 只记暂定数量不建仪器
 
@@ -20,35 +20,35 @@
 #### Scenario: 仪器数量允许建档后补充
 
 - **GIVEN** 项目建档时未填写暂定仪器数量
-- **WHEN** 负责人保存项目并在建档后经"编辑项目资料"补录暂定仪器数量
+- **WHEN** 负责人保存项目并在建档后经"补齐进单核心资料"补录暂定仪器数量
 - **THEN** 系统允许建档并保存补充的数量
 - **AND** 建档后补充数量不改变项目主状态
 
-#### Scenario: 编辑项目资料查看并留空暂定数量
+#### Scenario: 补齐进单核心资料查看并留空暂定数量
 
-- **GIVEN** 负责人打开项目的"编辑项目资料"
+- **GIVEN** 负责人打开项目的"补齐进单核心资料"
 - **WHEN** 暂定仪器数量为空，负责人查看数量字段并留空保存
 - **THEN** 系统允许留空保存
 - **AND** 数量留空不创建任何仪器记录，也不改变项目主状态
 
-#### Scenario: 编辑项目资料补录暂定数量并保存最新值
+#### Scenario: 补齐进单核心资料补录暂定数量并保存最新值
 
 - **GIVEN** 项目暂定仪器数量为空
-- **WHEN** 负责人在"编辑项目资料"中补录暂定仪器数量并保存
+- **WHEN** 负责人在"补齐进单核心资料"中补录暂定仪器数量并保存
 - **THEN** 系统保存该数量
 - **AND** 保存后读取暂定数量返回最新保存的值
 
-#### Scenario: 编辑项目资料调整暂定数量不改变既有仪器事实
+#### Scenario: 补齐进单核心资料调整暂定数量不改变既有仪器事实
 
 - **GIVEN** 项目已保存暂定仪器数量且已存在逐台仪器记录
-- **WHEN** 负责人在"编辑项目资料"中调整暂定仪器数量并保存
+- **WHEN** 负责人在"补齐进单核心资料"中调整暂定仪器数量并保存
 - **THEN** 系统保存调整后的最新值
 - **AND** 已存在的逐台仪器记录不被创建、删除或修改
 
 #### Scenario: 调整暂定数量不触发状态流转
 
 - **GIVEN** 项目处于待执行且已保存暂定仪器数量
-- **WHEN** 负责人在"编辑项目资料"中调整暂定仪器数量并保存
+- **WHEN** 负责人在"补齐进单核心资料"中调整暂定仪器数量并保存
 - **THEN** 项目主状态保持不变
 - **AND** 数量调整不触发主状态流转
 ### Requirement: 占位仪器与序列号唯一性
@@ -290,28 +290,28 @@
 
 ### Requirement: 项目暂定搬迁范围字段
 
-项目 SHALL 可记录**暂定搬迁范围标量**：**仪器名称**、**型号**（选填）与 **UPS 是否**；对应领域/DTO 字段 `temporaryInstrumentName`/`temporaryInstrumentModel`/`temporaryHasUps`，经追加迁移 v16 在 `projects` 增加可空列 `temporary_instrument_name`/`temporary_instrument_model`/`temporary_has_ups` 持久化（见 `local-data-persistence`）。本字段承载 workbench-interface 建档表单“搬迁范围”分组要求的仪器名称、型号（选填）、UPS 是/否；SHALL 允许建档时填写、留空，建档后经“编辑项目资料”后补或调整。UPS 取值 SHALL 区分 null（未填写，展示“未填写”）与 false（否），SHALL NOT 将 null 推断为“否”。暂定搬迁范围字段 SHALL NOT 创建任何 `instruments` 行，SHALL NOT 改变已存在的逐台仪器事实，SHALL NOT 触发项目主状态流转。
+项目 SHALL 可记录**暂定搬迁范围标量**：**UPS 是否**；对应领域/DTO 字段 `temporaryHasUps`，经追加迁移 v16 在 `projects` 增加可空列 `temporary_has_ups` 持久化（见 `local-data-persistence`）。`temporaryInstrumentName`/`temporaryInstrumentModel`（列 `temporary_instrument_name`/`temporary_instrument_model`）作为**底层历史兼容事实**保留，与 DB/IPC 历史兼容，不做迁移；UI 不再展示或采集暂定仪器名称与暂定型号，也不要求通过新增/编辑后补。UPS 是/否 SHALL 在"新增搬迁项目"的"搬迁范围"分组与"编辑项目资料"中展示并可维护；UPS 取值 SHALL 区分 null（未填写，展示"未填写"）与 false（否），SHALL NOT 将 null 推断为"否"。暂定搬迁范围字段 SHALL NOT 创建任何 `instruments` 行，SHALL NOT 改变已存在的逐台仪器事实，SHALL NOT 触发项目主状态流转。
 
-#### Scenario: 建档时填写暂定搬迁范围并持久化
-- **GIVEN** 负责人建档时填写仪器名称、型号与 UPS 是否
+#### Scenario: 建档时填写 UPS 并持久化
+- **GIVEN** 负责人建档时填写 UPS 是否
 - **WHEN** 保存项目并关闭重开应用
-- **THEN** 系统经 v16 列持久化保留三个字段的最新值
+- **THEN** 系统经 v16 列持久化保留 UPS 的最新值
 - **AND** 建档写入不创建任何仪器记录
 
 #### Scenario: 暂定搬迁范围允许留空后补
-- **GIVEN** 项目建档时未填写仪器名称、型号或 UPS 是否
-- **WHEN** 负责人保存项目并在建档后经“编辑项目资料”补录
+- **GIVEN** 项目建档时未填写 UPS 是否
+- **WHEN** 负责人保存项目并在建档后经"编辑项目资料"补录 UPS
 - **THEN** 系统允许建档并保存补充后的值
 - **AND** 后补不改变项目主状态
 
 #### Scenario: UPS 未填写区别于否
 - **GIVEN** 负责人未选择 UPS 是否
 - **WHEN** 保存并重新读取项目
-- **THEN** UPS 以未填写（null）呈现，展示“未填写”
-- **AND** 系统不将未填写推断为“否”
+- **THEN** UPS 以未填写（null）呈现，展示"未填写"
+- **AND** 系统不将未填写推断为"否"
 
 #### Scenario: 暂定搬迁范围不建仪器不改既有事实
 - **GIVEN** 项目已存在逐台仪器记录
-- **WHEN** 负责人在“编辑项目资料”中调整仪器名称、型号或 UPS 是否并保存
+- **WHEN** 负责人在"编辑项目资料"中调整 UPS 是否并保存
 - **THEN** 系统保存调整后的暂定范围值
 - **AND** 不创建、删除或修改任何逐台仪器记录，项目主状态保持不变

@@ -97,6 +97,36 @@ describe('workbench-interface 桌面布局静态约束', () => {
     expect(css).toContain('.project-tag-edit-footer{flex:0 0 auto;display:flex');
   });
 
+  it('Layer 表单主操作通过 form 关联固定在标题栏，正文保持独立滚动', () => {
+    expect(renderer).toContain('function LayerHeaderAction');
+    expect(renderer).toContain('<div className="layer-header-actions" ref={setHeaderActions} />');
+    expect(renderer).toContain('id="project-create-form"');
+    expect(renderer).toContain('form="project-create-form"');
+    expect(renderer).toContain('id="project-edit-form"');
+    expect(renderer).toContain('form="project-edit-form"');
+    expect(renderer).toContain('form="project-cancel-form" className="button danger"');
+    expect(css).toContain('.layer-head{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1fr) auto;flex:0 0 auto');
+    expect(css).toContain('.layer-body{min-height:0;overflow-y:auto;overscroll-behavior:contain');
+    expect(css).toContain('@media(max-width:520px){.layer-head{grid-template-columns:minmax(0,1fr)');
+  });
+
+  it('新增和编辑项目不再收集或展示暂定仪器三字段，同时保留 UPS 与后续正式仪器数量入口', () => {
+    expect(renderer).not.toContain('label="暂定仪器名称"');
+    expect(renderer).not.toContain('label="暂定仪器数量"');
+    expect(renderer).not.toContain('label="暂定型号"');
+    expect(renderer).not.toContain('["暂定仪器名称"');
+    expect(renderer).not.toContain('temporaryInstrumentName: value(');
+    expect(renderer).not.toContain('addIfChanged("temporaryInstrumentCount"');
+    expect(renderer).toContain('name="temporaryHasUps" label="UPS"');
+    expect(renderer).toContain('name="instrumentCount" label="仪器数量"');
+  });
+
+  it('新增项目标题栏按钮随 intent 显示现有中文意图并保持原生表单提交', () => {
+    expect(renderer).toContain('intentLabel[intent]');
+    expect(renderer).toContain('<button form="project-create-form" className="button primary" disabled={busy}>');
+    expect(renderer).toContain('pre_entry_execution: "未进单先执行"');
+  });
+
   it('760px 下详情和队列标签入口保留稳定类、完整文字按钮及 40px 最小高度', () => {
     expect(renderer).toContain('detail-tag-entry');
     expect(renderer).toContain('queue-entry-actions');

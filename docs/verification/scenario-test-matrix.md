@@ -229,7 +229,7 @@
 | 月度物流费用汇总与物流费用合同占比 | 物流成交价高于合同预算价提示计数 | ✅ | `tests/domain/operational-reporting.test.ts`「按运输公司与月份汇总，展示批次数、合同预算价/物流成交价合计与差异」<br>`tests/domain/relocation-execution.test.ts`「物流成交价大于合同预算价仅警告，仍允许保存且不自动创建项目提醒」 |  |
 | 月度物流费用汇总与物流费用合同占比 | 计算物流费用合同占比 | ✅ | `tests/domain/operational-reporting.test.ts`「物流成交价合同占比：RMB 按固定汇率折算 USD ÷ 最新合同金额，空/0 不可算」 |  |
 | 月度物流费用汇总与物流费用合同占比 | 报表导出仅展示合同预算价与物流成交价 | ✅ | `tests/integration/operational-reporting.sqlite.test.ts`「物流报表导出 section header 精确：仅月份/运输公司/批次数/合同预算价合计/物流成交价合计/两价差异/成交>预算批次数/已取消批次数，不含旧「实际费用」列」<br>`tests/integration/operational-reporting.sqlite.test.ts`「导出三种格式：magic header、内容与同次实时 report model 一致、PNG 含指标与筛选值」 |  |
-| 月度物流费用汇总与物流费用合同占比 | 历史批次缺费用视为异常数据 | ✅ | `tests/domain/operational-reporting.test.ts`「历史异常批次（已有物流成交价无费用记录）进入清单；底层筛选保留历史兼容（补录后纳入报表）」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑」 |  |
+| 月度物流费用汇总与物流费用合同占比 | 历史批次缺费用视为异常数据 | ✅ | `tests/domain/operational-reporting.test.ts`「历史异常批次（已有物流成交价无费用记录）进入清单；底层筛选保留历史兼容（补录后纳入报表）」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 历史批次无 fee：编辑价格按需创建部分费用，仅批次字段不虚构费用」 |  |
 | Ship-to 申请工作量 | 首次提交与后续状态更新不重复计数 | ✅ | `tests/domain/operational-reporting.test.ts`「Ship-to 首次提交计一次，后续状态更新不重复计数，待提交草稿不计」 |  |
 | Ship-to 申请工作量 | 按首次提交月份归属并取责任人 | ✅ | `tests/domain/operational-reporting.test.ts`「Ship-to 首次提交计一次，后续状态更新不重复计数，待提交草稿不计」 |  |
 | 二维码申请工作量 | 每条记录每个去重选中类型各计一次 | ✅ | `tests/domain/operational-reporting.test.ts`「二维码申请按去重类型计数，不同申请中的同类型分别计数」 |  |
@@ -324,9 +324,9 @@
 | --- | --- | --- | --- | --- |
 | 暂定数量登记 | 只记暂定数量不建仪器 | ✅ | `tests/domain/relocation-execution.test.ts`「只记暂定数量不建仪器：保存数量信息且不创建任何仪器记录」 |  |
 | 暂定数量登记 | 仪器数量允许建档后补充 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
-| 暂定数量登记 | 编辑项目资料查看并留空暂定数量 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
-| 暂定数量登记 | 编辑项目资料补录暂定数量并保存最新值 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
-| 暂定数量登记 | 编辑项目资料调整暂定数量不改变既有仪器事实 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
+| 暂定数量登记 | 补齐进单核心资料查看并留空暂定数量 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
+| 暂定数量登记 | 补齐进单核心资料补录暂定数量并保存最新值 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
+| 暂定数量登记 | 补齐进单核心资料调整暂定数量不改变既有仪器事实 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
 | 暂定数量登记 | 调整暂定数量不触发状态流转 | ✅ | `tests/domain/relocation-execution.test.ts`「项目暂定仪器范围（v16：只更新项目标量，不建仪器、不触发主状态）」 |  |
 | 占位仪器与序列号唯一性 | 建立无序列号占位仪器 | ✅ | `tests/domain/relocation-execution.test.ts`「建立无序列号占位仪器：序列号可空」 |  |
 | 占位仪器与序列号唯一性 | 合同/项目内序列号重复被拒 | ✅ | `tests/domain/relocation-execution.test.ts`「合同/项目内序列号重复被拒」<br>`tests/persistence/schema.test.ts`「非空序列号在同一项目内唯一、跨项目可重复（TBD-02）」 |  |
@@ -347,20 +347,20 @@
 | 拆装进度推导 | 已完成的拆机事实判定拆机完成 | ✅ | `tests/domain/relocation-execution.test.ts`「已完成的拆机事实判定拆机完成、装机未完成」 |  |
 | 拆装进度推导 | 装机工作事实完成后进度更新 | ✅ | `tests/domain/relocation-execution.test.ts`「装机工作事实完成后进度更新」 |  |
 | 批次与物流费用合并记录 | 每批次仅一笔合并记录 | ✅ | `tests/domain/relocation-execution.test.ts`「每批次仅一笔合并记录」<br>`tests/persistence/schema.test.ts`「每批次仅一笔实际物流费用记录」 |  |
-| 批次与物流费用合并记录 | 费用登记日期必填默认当天 | ✅ | `tests/domain/relocation-execution.test.ts`「费用登记日期必填默认当天，归属月份按该日期计算」 |  |
+| 批次与物流费用合并记录 | 费用登记日期必填默认当天 | ✅ | `tests/domain/relocation-execution.test.ts`「修改金额不改申请（登记）时间与归属月份」 |  |
 | 批次与物流费用合并记录 | 合同预算价必填且大于 0，物流成交价允许暂空或 0 | ✅ | `tests/domain/relocation-execution.test.ts`「合同预算价必填且大于 0；物流成交价允许 0（负数拒绝）」<br>`tests/domain/relocation-execution.test.ts`「合同预算价有值必须大于 0；物流成交价允许 0（仅拒绝负数），可清空为 null」<br>`tests/integration/new-batch-behaviors.sqlite.test.ts`「批量快速记录：物流成交价允许 0，预算价仍必须 > 0」 |  |
 | 批次与物流费用合并记录 | 运输公司可选 | ✅ | `tests/domain/relocation-execution.test.ts`「运输公司可选：未指定运输公司仍可保存，字段为空」<br>`tests/domain/relocation-execution.test.ts`「不同批次不同运输公司」<br>`tests/renderer/app.test.tsx`「开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈」 |  |
 | 批次与物流费用合并记录 | 物流成交价大于合同预算价仅警告 | ✅ | `tests/domain/relocation-execution.test.ts`「物流成交价大于合同预算价仅警告，仍允许保存且不自动创建项目提醒」 |  |
 | 批次与物流费用合并记录 | 物流成交价即最终实际物流费用 | ✅ | `tests/domain/relocation-execution.test.ts`「物流成交价即最终实际物流费用：无独立实际费用输入语义（写入路径成交价与实际费用同值）」<br>`tests/integration/workbench-facade.sqlite.test.ts`「快速记录搬迁批次：原子创建批次与唯一物流费用，两个价格口径正确映射」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt」 |  |
 | 批次与物流费用合并记录 | 从批次编辑修改运输信息与两价不改归属月份 | ✅ | `tests/domain/relocation-execution.test.ts`「修改金额不改申请（登记）时间与归属月份」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt」 |  |
 | 批次与物流费用合并记录 | 迁移缺费用登记日期 dry-run 报错 | ✅ | `tests/domain/historical-data-import.test.ts`「物流费用申请（登记）时间为目标必填字段，缺失时 dry-run 报错（TBD-14）」<br>`tests/domain/import-validation.test.ts`「物流费用申请（登记）时间为目标必填」 |  |
-| 批次与物流费用合并记录 | 历史批次缺费用视为异常数据 | ✅ | `tests/domain/operational-reporting.test.ts`「历史异常批次（已有物流成交价无费用记录）进入清单；底层筛选保留历史兼容（补录后纳入报表）」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑」 |  |
+| 批次与物流费用合并记录 | 历史批次缺费用视为异常数据 | ✅ | `tests/domain/operational-reporting.test.ts`「历史异常批次（已有物流成交价无费用记录）进入清单；底层筛选保留历史兼容（补录后纳入报表）」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 历史批次无 fee：编辑价格按需创建部分费用，仅批次字段不虚构费用」 |  |
 | 暂存地址与是否暂存 | 搬迁范围记录暂存地址 | ✅ | `tests/domain/relocation-fields.test.ts`「暂存地址/是否暂存为手工维护执行事实：修改不影响主状态」 |  |
 | 暂存地址与是否暂存 | 执行准备记录是否暂存 | ✅ | `tests/domain/relocation-fields.test.ts`「暂存地址/是否暂存为手工维护执行事实：修改不影响主状态」 |  |
 | 暂存地址与是否暂存 | 暂存信息不触发状态流转 | ✅ | `tests/domain/relocation-fields.test.ts`「暂存地址/是否暂存为手工维护执行事实：修改不影响主状态」 |  |
 | 计划装机日期 | 记录计划装机日期 | ✅ | `tests/main/workbench-v2-ipc.test.ts`「update_project 经 IPC：0810 标量（备注/暂存/是否批复/暂定数量/计划装机日期）保存并经 detail 回显」 |  |
 | 计划装机日期 | 计划装机日期不触发状态流转 | ✅ | `tests/integration/new-batch-behaviors.sqlite.test.ts`「计划装机完成日期：可随新建/补齐/更新写入，且不触发生命周期」 |  |
-| 项目暂定搬迁范围字段 | 建档时填写暂定搬迁范围并持久化 | ✅ | `tests/persistence/migration-v16.test.ts`「全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过」<br>`tests/renderer/app.test.tsx`「待进单通过公共建档 payload 显式提交暂定范围未填写三态且不登记仪器」 |  |
+| 项目暂定搬迁范围字段 | 建档时填写 UPS 并持久化 | ✅ | `tests/persistence/migration-v16.test.ts`「全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过」<br>`tests/renderer/app.test.tsx`「待进单通过顶部主操作提交 UPS 未填写三态，不提交已移除字段且不登记仪器」 |  |
 | 项目暂定搬迁范围字段 | 暂定搬迁范围允许留空后补 | ✅ | `tests/integration/create-project-ecc-rules.sqlite.test.ts`「编辑资料回显：update_project 填写/修改/清空范围字段，不建仪器、不改状态」 |  |
 | 项目暂定搬迁范围字段 | UPS 未填写区别于否 | ✅ | `tests/persistence/migration-v16.test.ts`「全新库引导到最新版本：迁移序列包含 v16、三列已建立、三态写入与 foreign_key_check 通过」 |  |
 | 项目暂定搬迁范围字段 | 暂定搬迁范围不建仪器不改既有事实 | ✅ | `tests/domain/relocation-execution.test.ts`「项目暂定仪器范围（v16：只更新项目标量，不建仪器、不触发主状态）」 |  |
@@ -395,7 +395,7 @@
 | 正式进单 | 待进单进单日期可空 | ✅ | `tests/domain/relocation-entry.test.ts`「待进单阶段进单时间可空」<br>`tests/renderer/app.test.tsx`「待进单保留可空进单日期，不渲染其余正式字段，未进单先执行只记录是否批复 boolean」 |  |
 | 正式进单 | 核心信息缺失拒绝进单 | ✅ | `tests/domain/relocation-entry.test.ts`「核心信息缺失拒绝进单并就地提示缺失项」 |  |
 | 正式进单 | 缺合同拒绝进单 | ✅ | `tests/domain/relocation-entry.test.ts`「缺合同拒绝进单并提示先补齐合同」 |  |
-| 正式进单 | 建档移除字段不阻塞进单 | ✅ | `tests/renderer/app.test.tsx`「新建项目由明确意图提交正式进单且不夹带服务单等已移除字段」 |  |
+| 正式进单 | 建档移除字段不阻塞进单 | ✅ | `tests/renderer/app.test.tsx`「新建项目由顶部主操作提交正式进单，保留 UPS 且不夹带已移除仪器范围字段」 |  |
 | 未进单先执行 | 批复后优先安排上门 | ✅ | `tests/domain/relocation-status.test.ts`「未进单先执行标签与主状态并存：记录「是否批复」boolean 事实，主状态保持待进单」<br>`tests/integration/critical-paths.sqlite.test.ts`「1. 未进单先执行全链路」 |  |
 | 未进单先执行 | 先执行后进单由负责人确定主状态 | ✅ | `tests/domain/relocation-status.test.ts`「先执行后进单：正式进单基线待执行（无自动触发时），主状态由负责人后续确定」<br>`tests/domain/lifecycle.test.ts`「标签清除后主状态由负责人人工确定，且明确自动触发仍生效」 |  |
 | 未进单先执行 | 先录入实际装机完成日期后进单自动待验收 | ✅ | `tests/domain/relocation-status.test.ts`「先录入实际装机完成时间后进单自动待验收（TBD-07）」<br>`tests/integration/relocation-project-lifecycle.sqlite.test.ts`「未进单先执行 → 正式进单在原项目上完成，自动触发待验收」 |  |
@@ -558,22 +558,22 @@
 | 项目标签编辑流程的可访问关闭与窄窗口可用性 | 干净草稿直接关闭且 busy 禁止关闭 | ✅ | `tests/renderer/app.test.tsx`「干净草稿四种关闭渠道直接关闭；提交中四渠道均不能关闭」 |  |
 | 项目标签编辑流程的可访问关闭与窄窗口可用性 | 内容在流程内部滚动 | ✅ | `tests/interface/layout.test.ts`「标签编辑弹窗固定头尾，仅中部选择区内部滚动并隔离滚动链」 |  |
 | 项目标签编辑流程的可访问关闭与窄窗口可用性 | 窄窗口下入口收纳但保持可用 | ✅ | `tests/interface/layout.test.ts`「760px 下详情和队列标签入口保留稳定类、完整文字按钮及 40px 最小高度」 |  |
-| 当前上下文 | 随选中项目更新上下文 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
-| 当前上下文 | 展示状态异常与当前项目提醒 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
+| 当前上下文 | 随选中项目更新上下文 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目」 |  |
+| 当前上下文 | 展示状态异常与当前项目提醒 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目」 |  |
 | 当前上下文 | 展示项目分类标签 | ✅ | `tests/renderer/app.test.tsx`「详情保持标签区域；无标签显示添加入口，已有标签显示编辑入口」 |  |
-| 当前上下文 | 展示金额闭环 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
-| 当前上下文 | 展示非阻塞事项并标注不阻塞 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
+| 当前上下文 | 展示金额闭环 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目」 |  |
+| 当前上下文 | 展示非阻塞事项并标注不阻塞 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目」 |  |
 | 当前上下文与项目详情位置交换 | 交换后的区域位置保持内容与联动 | ✅ | `tests/renderer/app.test.tsx`「最新布局：提醒、项目工作区与项目队列依次显示，队列选择共享工作区状态」 |  |
 | 当前上下文与项目详情位置交换 | 项目工作区不重复组件或状态 | ✅ | `tests/interface/layout.test.ts`「纵向主流程依次显示提醒、单一项目工作区与项目队列」 |  |
 | 当前上下文与项目详情位置交换 | 1440px 与 1024px 下布局可用 | ✅ | `e2e/workbench-v2-layout.spec.ts`「最新布局：提醒、全宽单一项目工作区、项目队列依次排列且详情不裁切」 |  |
-| 项目与提醒联动 | 点击项目选中并刷新上下文 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
-| 项目与提醒联动 | 点击项目提醒联动所属项目 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
+| 项目与提醒联动 | 点击项目选中并刷新上下文 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目」 |  |
+| 项目与提醒联动 | 点击项目提醒联动所属项目 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目」 |  |
 | 项目与提醒联动 | 点击阶段筛选并选中项目 | ✅ | `tests/renderer/app.test.tsx`「阶段、提醒、区域和查询筛选下推并重置到首页 cursor」 |  |
-| 单页分组录入创建搬迁项目 | 单页分组呈现与对应字段 | ✅ | `tests/renderer/app.test.tsx`「新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签」<br>`tests/renderer/app.test.tsx`「新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签」 |  |
-| 单页分组录入创建搬迁项目 | 搬迁范围分组字段 | ✅ | `tests/renderer/app.test.tsx`「新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签」 |  |
-| 单页分组录入创建搬迁项目 | 执行准备分组字段 | ✅ | `tests/renderer/app.test.tsx`「新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签」 |  |
+| 单页分组录入创建搬迁项目 | 单页分组呈现与对应字段 | ✅ | `tests/renderer/app.test.tsx`「新建搬迁项目默认正式进单，保存意图及选项按要求排序」<br>`tests/renderer/app.test.tsx`「新建搬迁项目默认正式进单，保存意图及选项按要求排序」 |  |
+| 单页分组录入创建搬迁项目 | 搬迁范围分组字段 | ✅ | `tests/renderer/app.test.tsx`「新建搬迁项目默认正式进单，保存意图及选项按要求排序」 |  |
+| 单页分组录入创建搬迁项目 | 执行准备分组字段 | ✅ | `tests/renderer/app.test.tsx`「新建搬迁项目默认正式进单，保存意图及选项按要求排序」 |  |
 | 单页分组录入创建搬迁项目 | 保存为待进单 | ✅ | `tests/integration/workbench-facade.sqlite.test.ts`「真实保存项目、项目提醒、十类动作中的核心记录及独立二维码申请」 | 单页分组录入「保存为待进单」（intent=draft）经 WorkbenchFacade（Electron 主进程入口）真实落库；正式进单/未进单先执行两个保存路径由 electron-smoke E2E 覆盖 |
-| 单页分组录入创建搬迁项目 | 正式进单 | ✅ | `tests/renderer/app.test.tsx`「新建项目由明确意图提交正式进单且不夹带服务单等已移除字段」 |  |
+| 单页分组录入创建搬迁项目 | 正式进单 | ✅ | `tests/renderer/app.test.tsx`「新建项目由顶部主操作提交正式进单，保留 UPS 且不夹带已移除仪器范围字段」 |  |
 | 单页分组录入创建搬迁项目 | 未进单先执行 | ✅ | `e2e/electron-smoke.spec.ts`「未进单先执行 → 实际装机完成自动待验收 → 验收进入待掉票（核心动作补充闭环）」 |  |
 | 单页分组录入创建搬迁项目 | 填写服务单号要求工程师并同次创建开单 | ✅ | `tests/renderer/app.test.tsx`「开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈」 | 单页录入中「服务单号必填工程师并同次保存」由领域测试 service-order-recording 3.10 覆盖，界面透传 |
 | 单页分组录入创建搬迁项目 | 可后补字段不无提示丢失且不自动生成提醒 | ✅ | `tests/renderer/app.test.tsx`「保存意图分组实时展示摘要，并在正式进单合同金额为零时提示」 |  |
@@ -589,14 +589,14 @@
 | 快速记录入口与动作表单 | 损坏/维修表单合同金额 0 就地反馈 | ✅ | `tests/renderer/app.test.tsx`「开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈」 |  |
 | 快速记录入口与动作表单 | 序列号地址更新与二维码申请独立模块入口 | ✅ | `tests/renderer/app.test.tsx`「独立导航打开序列号地址更新与二维码申请，二维码支持九类多选并实时预览去重计数」 |  |
 | 快速记录入口与动作表单 | 不用通用空表单 | ✅ | `tests/renderer/app.test.tsx`「快速记录合并开单入口，八类动作均提供真实字段」 |  |
-| 搬迁批次编辑 | 修改批次运输信息与两价 | ✅ | `tests/renderer/app.test.tsx`「物流费用记录可预填编辑，并只提交约定字段且不修改费用登记日期」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt」 |  |
-| 搬迁批次编辑 | 费用登记日期不可修改且归属月份不变 | ✅ | `tests/renderer/app.test.tsx`「物流费用记录可预填编辑，并只提交约定字段且不修改费用登记日期」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt」 |  |
-| 搬迁批次编辑 | 不提供独立物流费用补录入口 | ✅ | `tests/renderer/app.test.tsx`「快速记录合并开单入口，八类动作均提供真实字段」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 历史批次无 fee：编辑价格明确报错不虚构日期；仅批次字段仍可编辑」 | 快速记录菜单不出现独立「实际物流费用」动作；费用仅通过批次创建/批次编辑中的合同预算价、物流成交价维护（见「物流费用记录可预填编辑」测试） |
+| 搬迁批次编辑 | 修改批次运输信息与两价 | ✅ | `tests/renderer/app.test.tsx`「物流费用编辑回显全部五项，未改的 appliedAt 按原值提交并可清空其他字段」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt」 |  |
+| 搬迁批次编辑 | 费用登记日期不可修改且归属月份不变 | ✅ | `tests/renderer/app.test.tsx`「物流费用编辑回显全部五项，未改的 appliedAt 按原值提交并可清空其他字段」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 修改计划运输日期/运输公司/合同预算价/物流成交价，不改变 appliedAt」 |  |
+| 搬迁批次编辑 | 不提供独立物流费用补录入口 | ✅ | `tests/renderer/app.test.tsx`「快速记录合并开单入口，八类动作均提供真实字段」<br>`tests/integration/workbench-facade.sqlite.test.ts`「batch_edit 历史批次无 fee：编辑价格按需创建部分费用，仅批次字段不虚构费用」 | 快速记录菜单不出现独立「实际物流费用」动作；费用仅通过批次创建/批次编辑中的合同预算价、物流成交价维护（见「物流费用记录可预填编辑」测试） |
 | 就近录入与提醒直达 | 项目队列行内记录入口 | ✅ | `tests/renderer/app.test.tsx`「队列行、上下文和详情 Tab 都提供绑定当前项目的就近录入入口」 |  |
 | 就近录入与提醒直达 | 当前上下文就近入口 | ✅ | `tests/renderer/app.test.tsx`「队列行、上下文和详情 Tab 都提供绑定当前项目的就近录入入口」 |  |
 | 就近录入与提醒直达 | 详情 tab 就近入口 | ✅ | `tests/renderer/app.test.tsx`「队列行、上下文和详情 Tab 都提供绑定当前项目的就近录入入口」 |  |
-| 就近录入与提醒直达 | 项目提醒直达所属项目 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、金额闭环与非阻塞事项，提醒可直达对应项目」 |  |
-| 表单行为与提交反馈 | 必填与可选标识及帮助 | ✅ | `tests/renderer/app.test.tsx`「新建搬迁项目单页四分组包含执行日期且不再使用旧装机标签」 |  |
+| 就近录入与提醒直达 | 项目提醒直达所属项目 | ✅ | `tests/renderer/app.test.tsx`「上下文同时联动状态异常、提醒、项目备注与非阻塞事项，提醒可直达对应项目」 |  |
+| 表单行为与提交反馈 | 必填与可选标识及帮助 | ✅ | `tests/renderer/app.test.tsx`「新建搬迁项目默认正式进单，保存意图及选项按要求排序」 |  |
 | 表单行为与提交反馈 | 校验失败就地提示 | ✅ | `tests/renderer/app.test.tsx`「开单、合并批次、仪器与损坏维修表单给出对应字段约束和就地反馈」<br>`tests/integration/workbench-facade.sqlite.test.ts`「人工主状态必须经过 lifecycle 校验并将拒绝原因返回界面层」 |  |
 | 表单行为与提交反馈 | 主状态校验失败就地反馈 | ✅ | `tests/integration/workbench-facade.sqlite.test.ts`「人工主状态必须经过 lifecycle 校验并将拒绝原因返回界面层」 |  |
 | 表单行为与提交反馈 | 提交中禁用防止重复 | ✅ | `tests/renderer/app.test.tsx`「提交期间禁用并拦截重复保存，成功后显示 toast 且同步刷新失效数据」 |  |
@@ -613,10 +613,10 @@
 | 视觉可读性与层级 | 字号基线 | ✅ | `tests/interface/layout.test.ts`「正文、数据和控件使用统一的系统字体与 4px 间距基线」 |  |
 | 视觉可读性与层级 | 层级与对比 | ✅ | `tests/interface/layout.test.ts`「正文、数据和控件使用统一的系统字体与 4px 间距基线」 |  |
 | 视觉可读性与层级 | 多行文本行高可读 | ✅ | `tests/interface/layout.test.ts`「正文、数据和控件使用统一的系统字体与 4px 间距基线」 |  |
-| 详情 tab 按需展开与独立模块 | 详情 tab 可切换展开 | ✅ | `tests/renderer/app.test.tsx`「详情 tab 按需加载，项目总览不读取 section」 |  |
+| 详情 tab 按需展开与独立模块 | 详情 tab 可切换展开 | ✅ | `tests/renderer/app.test.tsx`「详情默认打开搬迁仪器并按需切换 section，不再显示项目总览 tab」 |  |
 | 详情 tab 按需展开与独立模块 | 扩展 tab 或独立导航模块提供新增能力 | ✅ | `tests/renderer/app.test.tsx`「独立导航打开序列号地址更新与二维码申请，二维码支持九类多选并实时预览去重计数」 |  |
 | 详情 tab 按需展开与独立模块 | 二维码申请模块表单多选类型 | ✅ | `tests/renderer/app.test.tsx`「独立导航打开序列号地址更新与二维码申请，二维码支持九类多选并实时预览去重计数」 |  |
-| 详情 tab 按需展开与独立模块 | 项目总览展示关键事实 | ✅ | `tests/renderer/app.test.tsx`「详情 tab 按需加载，项目总览不读取 section」 |  |
+| 详情 tab 按需展开与独立模块 | 项目总览展示关键事实 | ✅ | `tests/renderer/app.test.tsx`「详情默认打开搬迁仪器并按需切换 section，不再显示项目总览 tab」 |  |
 | 详情 tab 按需展开与独立模块 | 费用与掉票 tab 展示金额与掉票记录 | ✅ | `tests/renderer/app.test.tsx`「费用与掉票在列表前展示金额事实，并显示掉票最后修改时间」 |  |
 | 信息层级与主操作流保持 | 吞吐板块不复制项目看板 | ✅ | `tests/renderer/app.test.tsx`「任务入口、运营指标、提醒、吞吐、上下文与队列形成分区，并显示项目状态色」 |  |
 | 信息层级与主操作流保持 | 当前上下文不挤占主队列 | ✅ | `tests/interface/layout.test.ts`「纵向主流程依次显示提醒、单一项目工作区与项目队列」 |  |
@@ -641,9 +641,9 @@
 | 项目队列关键词搜索与固定区域筛选 | 按客户名称或编号搜索 | ✅ | `tests/integration/workbench-read-v2.sqlite.test.ts`「任务7.4：关键词覆盖客户/ECC/临时编号；区域仅五枚举（runtime 非枚举拒绝）；query+region AND」 |  |
 | 项目队列关键词搜索与固定区域筛选 | 区域筛选为固定枚举 | ✅ | `tests/integration/workbench-read-v2.sqlite.test.ts`「任务7.4：关键词覆盖客户/ECC/临时编号；区域仅五枚举（runtime 非枚举拒绝）；query+region AND」 |  |
 | 项目队列关键词搜索与固定区域筛选 | 搜索与区域筛选组合 | ✅ | `tests/integration/workbench-read-v2.sqlite.test.ts`「任务7.4：关键词覆盖客户/ECC/临时编号；区域仅五枚举（runtime 非枚举拒绝）；query+region AND」 |  |
-| 编辑项目资料维护暂定仪器数量 | 查看已有暂定仪器数量 | ✅ | `tests/renderer/app.test.tsx`「编辑项目资料打开已有 temporaryInstrumentCount 时显式回显值，并支持补录、调整及清空」 |  |
-| 编辑项目资料维护暂定仪器数量 | 暂定仪器数量允许留空 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
-| 编辑项目资料维护暂定仪器数量 | 补录或调整后回显最新值 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
+| 补齐进单核心资料维护暂定仪器数量 | 查看已有暂定仪器数量 | ✅ | `tests/renderer/app.test.tsx`「编辑项目资料忽略旧暂定仪器三字段，回显并保存 UPS 与其他项目资料」 |  |
+| 补齐进单核心资料维护暂定仪器数量 | 暂定仪器数量允许留空 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
+| 补齐进单核心资料维护暂定仪器数量 | 补录或调整后回显最新值 | ✅ | `tests/domain/relocation-execution.test.ts`「编辑项目资料维护暂定仪器数量（6.5：查看/留空/补录/调整）」 |  |
 | 高密度项目队列固定每页 20 个项目 | 每页固定展示 20 个项目 | ✅ | `tests/integration/workbench-read-v2.sqlite.test.ts`「任务7.5：固定每页 20（renderer 任意 limit 忽略）、翻页无重复无遗漏、游标稳定、total 正确」 |  |
 | 高密度项目队列固定每页 20 个项目 | 筛选或搜索后重算总数与分页 | ✅ | `tests/integration/workbench-read-v2.sqlite.test.ts`「任务7.5：过滤后 total 重算、cursor 与筛选状态绑定（筛选变化丢弃旧 cursor）、末页少于 20」 |  |
 | 高密度项目队列固定每页 20 个项目 | 翻页时页内顺序稳定 | ✅ | `tests/integration/workbench-read-v2.sqlite.test.ts`「任务7.5：固定每页 20（renderer 任意 limit 忽略）、翻页无重复无遗漏、游标稳定、total 正确」 |  |
